@@ -20,29 +20,19 @@
  *
  */
 
-#include "backends/graphics/opengl/extensions.h"
-#include "backends/graphics/opengl/opengl-sys.h"
+#include "sherlock/tattoo/tattoo_screen.h"
+#include "sherlock/tattoo/tattoo.h"
 
-#include "common/tokenizer.h"
+namespace Sherlock {
 
-namespace OpenGL {
+namespace Tattoo {
 
-bool g_extNPOTSupported = false;
-
-void initializeGLExtensions() {
-	const char *extString = (const char *)glGetString(GL_EXTENSIONS);
-
-	// Initialize default state.
-	g_extNPOTSupported = false;
-
-	Common::StringTokenizer tokenizer(extString, " ");
-	while (!tokenizer.empty()) {
-		Common::String token = tokenizer.nextToken();
-
-		if (token == "GL_ARB_texture_non_power_of_two") {
-			g_extNPOTSupported = true;
-		}
-	}
+TattooScreen::TattooScreen(SherlockEngine *vm) : Screen(vm) {
+	_backBuffer1.create(640, 480);
+	_backBuffer2.create(640, 480);
+	activateBackBuffer1();
 }
 
-} // End of namespace OpenGL
+} // End of namespace Tattoo
+
+} // End of namespace Sherlock

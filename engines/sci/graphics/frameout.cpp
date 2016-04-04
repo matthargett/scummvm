@@ -47,6 +47,7 @@
 #include "sci/graphics/paint32.h"
 #include "sci/graphics/palette32.h"
 #include "sci/graphics/picture.h"
+#include "sci/graphics/remap.h"
 #include "sci/graphics/text32.h"
 #include "sci/graphics/plane32.h"
 #include "sci/graphics/screen_item32.h"
@@ -54,8 +55,6 @@
 #include "sci/video/robot_decoder.h"
 
 namespace Sci {
-
-// TODO/FIXME: This is partially guesswork
 
 static int dissolveSequences[2][20] = {
 	/* SCI2.1early- */ { 3, 6, 12, 20, 48, 96, 184, 272, 576, 1280, 3232, 6912, 13568, 24576, 46080 },
@@ -81,7 +80,6 @@ GfxFrameout::GfxFrameout(SegManager *segMan, ResourceManager *resMan, GfxCoordAd
 	_showStyles(nullptr),
 	// TODO: Stop using _gfxScreen
 	_currentBuffer(screen->getDisplayWidth(), screen->getDisplayHeight(), nullptr),
-	_priorityMap(screen->getDisplayWidth(), screen->getDisplayHeight(), nullptr),
 	_remapOccurred(false),
 	_frameNowVisible(false),
 	_screenRect(screen->getDisplayWidth(), screen->getDisplayHeight()),
@@ -117,6 +115,22 @@ GfxFrameout::GfxFrameout(SegManager *segMan, ResourceManager *resMan, GfxCoordAd
 		_defaultUnknownC = unknownCDefaults[1];
 	}
 
+	switch (g_sci->getGameId()) {
+	case GID_GK2:
+	case GID_LIGHTHOUSE:
+	case GID_LSL7:
+	case GID_PHANTASMAGORIA2:
+	case GID_PQSWAT:
+	case GID_TORIN:
+	case GID_RAMA:
+		_currentBuffer.scriptWidth = 640;
+		_currentBuffer.scriptHeight = 480;
+		break;
+	default:
+		// default script width for other games is 320x200
+		break;
+	}
+
 	// TODO: Nothing in the renderer really uses this. Currently,
 	// the cursor renderer does, and kLocalToGlobal/kGlobalToLocal
 	// do, but in the real engine (1) the cursor is handled in
@@ -133,8 +147,9 @@ GfxFrameout::GfxFrameout(SegManager *segMan, ResourceManager *resMan, GfxCoordAd
 }
 
 GfxFrameout::~GfxFrameout() {
-	CelObj::deinit();
 	clear();
+	CelObj::deinit();
+	free(_currentBuffer.getPixels());
 }
 
 void GfxFrameout::run() {
@@ -245,16 +260,11 @@ void GfxFrameout::syncWithScripts(bool addElements) {
 void GfxFrameout::kernelAddScreenItem(const reg_t object) {
 	const reg_t planeObject = readSelector(_segMan, object, SELECTOR(plane));
 
-// TODO: Remove
-//	debug("Adding screen item %04x:%04x to plane %04x:%04x", PRINT_REG(object), PRINT_REG(planeObject));
-
 	_segMan->getObject(object)->setInfoSelectorFlag(kInfoFlagViewInserted);
 
 	Plane *plane = _planes.findByObject(planeObject);
 	if (plane == nullptr) {
-		warning("screen item %x:%x (%s)", object.getSegment(), object.getOffset(), g_sci->getEngineState()->_segMan->getObjectName(object));
-		warning("plane %x:%x (%s)", planeObject.getSegment(), planeObject.getOffset(), g_sci->getEngineState()->_segMan->getObjectName(planeObject));
-		error("Invalid plane selector passed to kAddScreenItem");
+		error("kAddScreenItem: Plane %04x:%04x not found for screen item %04x:%04x", PRINT_REG(planeObject), PRINT_REG(object));
 	}
 
 	ScreenItem *screenItem = plane->_screenItemList.findByObject(object);
@@ -272,21 +282,17 @@ void GfxFrameout::kernelUpdateScreenItem(const reg_t object) {
 		const reg_t planeObject = readSelector(_segMan, object, SELECTOR(plane));
 		Plane *plane = _planes.findByObject(planeObject);
 		if (plane == nullptr) {
-			warning("screen item %x:%x (%s)", object.getSegment(), object.getOffset(), g_sci->getEngineState()->_segMan->getObjectName(object));
-			warning("plane %x:%x (%s)", planeObject.getSegment(), planeObject.getOffset(), g_sci->getEngineState()->_segMan->getObjectName(planeObject));
-			error("Invalid plane selector passed to kUpdateScreenItem");
+			error("kUpdateScreenItem: Plane %04x:%04x not found for screen item %04x:%04x", PRINT_REG(planeObject), PRINT_REG(object));
 		}
 
 		ScreenItem *screenItem = plane->_screenItemList.findByObject(object);
 		if (screenItem == nullptr) {
-			warning("screen item %x:%x (%s)", object.getSegment(), object.getOffset(), g_sci->getEngineState()->_segMan->getObjectName(object));
-			warning("plane %x:%x (%s)", planeObject.getSegment(), planeObject.getOffset(), g_sci->getEngineState()->_segMan->getObjectName(planeObject));
-			error("Invalid screen item passed to kUpdateScreenItem");
+			error("kUpdateScreenItem: Screen item %04x:%04x not found in plane %04x:%04x", PRINT_REG(object), PRINT_REG(planeObject));
 		}
 
 		screenItem->update(object);
 	} else {
-		warning("TODO: Magnifier view not implemented yet!");
+		error("Magnifier view is not known to be used by any game. Please submit a bug report with details about the game you were playing and what you were doing that triggered this error. Thanks!");
 	}
 }
 
@@ -296,18 +302,11 @@ void GfxFrameout::kernelDeleteScreenItem(const reg_t object) {
 	const reg_t planeObject = readSelector(_segMan, object, SELECTOR(plane));
 	Plane *plane = _planes.findByObject(planeObject);
 	if (plane == nullptr) {
-	// TODO: Remove
-//		warning("Invalid plane selector %04x:%04x passed to kDeleteScreenItem (real engine ignores this)", PRINT_REG(object));
 		return;
 	}
 
-// TODO: Remove
-//	debug("Deleting screen item %04x:%04x from plane %04x:%04x", PRINT_REG(object), PRINT_REG(planeObject));
-
 	ScreenItem *screenItem = plane->_screenItemList.findByObject(object);
 	if (screenItem == nullptr) {
-// TODO: Remove
-//		warning("Invalid screen item %04x:%04x passed to kDeleteScreenItem (real engine ignores this)", PRINT_REG(object));
 		return;
 	}
 
@@ -338,8 +337,7 @@ void GfxFrameout::kernelAddPlane(const reg_t object) {
 void GfxFrameout::kernelUpdatePlane(const reg_t object) {
 	Plane *plane = _planes.findByObject(object);
 	if (plane == nullptr) {
-		warning("plane %x:%x (%s)", object.getSegment(), object.getOffset(), g_sci->getEngineState()->_segMan->getObjectName(object));
-		error("Invalid plane selector passed to kUpdatePlane");
+		error("kUpdatePlane: Plane %04x:%04x not found", PRINT_REG(object));
 	}
 
 	plane->update(object);
@@ -349,8 +347,7 @@ void GfxFrameout::kernelUpdatePlane(const reg_t object) {
 void GfxFrameout::kernelDeletePlane(const reg_t object) {
 	Plane *plane = _planes.findByObject(object);
 	if (plane == nullptr) {
-		warning("plane %x:%x (%s)", object.getSegment(), object.getOffset(), g_sci->getEngineState()->_segMan->getObjectName(object));
-		error("Invalid plane selector passed to kDeletePlane");
+		error("kDeletePlane: Plane %04x:%04x not found", PRINT_REG(object));
 	}
 
 	if (plane->_created) {
@@ -358,10 +355,50 @@ void GfxFrameout::kernelDeletePlane(const reg_t object) {
 		// just ends up doing this anyway so we skip the extra indirection
 		_planes.erase(plane);
 	} else {
-		// TODO: Remove
-//		debug("Deleting plane %04x:%04x", PRINT_REG(object));
 		plane->_created = 0;
 		plane->_deleted = g_sci->_gfxFrameout->getScreenCount();
+	}
+}
+
+void GfxFrameout::deletePlane(Plane &planeToFind) {
+	Plane *plane = _planes.findByObject(planeToFind._object);
+	if (plane == nullptr) {
+		error("deletePlane: Plane %04x:%04x not found", PRINT_REG(planeToFind._object));
+	}
+
+	if (plane->_created) {
+		_planes.erase(plane);
+	} else {
+		plane->_created = 0;
+		plane->_moved = 0;
+		plane->_deleted = getScreenCount();
+	}
+}
+
+void GfxFrameout::kernelMovePlaneItems(const reg_t object, const int16 deltaX, const int16 deltaY, const bool scrollPics) {
+	Plane *plane = _planes.findByObject(object);
+	if (plane == nullptr) {
+		error("kMovePlaneItems: Plane %04x:%04x not found", PRINT_REG(object));
+	}
+
+	plane->scrollScreenItems(deltaX, deltaY, scrollPics);
+
+	for (ScreenItemList::iterator it = plane->_screenItemList.begin(); it != plane->_screenItemList.end(); ++it) {
+		ScreenItem &screenItem = **it;
+
+		// If object is a number, the screen item from the
+		// engine, not a script, and should be ignored
+		if (screenItem._object.isNumber()) {
+			continue;
+		}
+
+		if (deltaX != 0) {
+			writeSelectorValue(_segMan, screenItem._object, SELECTOR(x), readSelectorValue(_segMan, screenItem._object, SELECTOR(x)) + deltaX);
+		}
+
+		if (deltaY != 0) {
+			writeSelectorValue(_segMan, screenItem._object, SELECTOR(y), readSelectorValue(_segMan, screenItem._object, SELECTOR(y)) + deltaY);
+		}
 	}
 }
 
@@ -401,8 +438,7 @@ void GfxFrameout::updatePlane(Plane &plane) {
 void GfxFrameout::kernelAddPicAt(const reg_t planeObject, const GuiResourceId pictureId, const int16 x, const int16 y, const bool mirrorX) {
 	Plane *plane = _planes.findByObject(planeObject);
 	if (plane == nullptr) {
-		warning("plane %x:%x (%s)", planeObject.getSegment(), planeObject.getOffset(), g_sci->getEngineState()->_segMan->getObjectName(planeObject));
-		error("Invalid plane selector passed to kAddPicAt");
+		error("kAddPicAt: Plane %04x:%04x not found", PRINT_REG(planeObject));
 	}
 	plane->addPic(pictureId, Common::Point(x, y), mirrorX);
 }
@@ -424,9 +460,8 @@ void GfxFrameout::frameOut(const bool shouldShowBits, const Common::Rect &rect) 
 	screenItemLists.resize(_planes.size());
 	eraseLists.resize(_planes.size());
 
-	// _numActiveRemaps was a global in SCI engine
-	if (/* TODO Remap::_numActiveRemaps > 0 */ false && _remapOccurred) {
-		// remapMarkRedraw();
+	if (g_sci->_gfxRemap32->getRemapCount() > 0 && _remapOccurred) {
+		remapMarkRedraw();
 	}
 
 	calcLists(screenItemLists, eraseLists, rect);
@@ -750,22 +785,12 @@ void GfxFrameout::drawEraseList(const RectList &eraseList, const Plane &plane) {
 }
 
 void GfxFrameout::drawScreenItemList(const DrawList &screenItemList) {
-	_hasRemappedScreenItem = false;
-	if (/* TODO: g_Remap_UnknownCounter2 */ false && !_priorityMap.isNull()) {
-		for (DrawList::const_iterator it = screenItemList.begin(); it != screenItemList.end(); ++it) {
-			if ((*it)->screenItem->getCelObj()._remap) {
-				_hasRemappedScreenItem = true;
-				break;
-			}
-		}
-	}
-
 	for (DrawList::const_iterator it = screenItemList.begin(); it != screenItemList.end(); ++it) {
 		DrawItem &drawItem = **it;
 		mergeToShowList(drawItem.rect, _showList, _overdrawThreshold);
 		ScreenItem &screenItem = *drawItem.screenItem;
 		// TODO: Remove
-//		debug("Drawing item %04x:%04x to %d %d %d %d", PRINT_REG(screenItem._object), drawItem.rect.left, drawItem.rect.top, drawItem.rect.right, drawItem.rect.bottom);
+//		debug("Drawing item %04x:%04x to %d %d %d %d", PRINT_REG(screenItem._object), PRINT_RECT(drawItem.rect));
 		CelObj &celObj = *screenItem._celObj;
 		celObj.draw(_currentBuffer, screenItem, drawItem.rect, screenItem._mirrorX ^ celObj._mirrorX);
 	}
@@ -804,9 +829,7 @@ void GfxFrameout::palMorphFrameOut(const int8 *styleRanges, const ShowStyleEntry
 	Palette sourcePalette(*_palette->getNextPalette());
 	alterVmap(sourcePalette, sourcePalette, -1, styleRanges);
 
-	// TODO: unsure if this is what this variable actually
-	// represents, but it is the correct variable number
-	int16 lastRoom = g_sci->getEngineState()->variables[VAR_GLOBAL][12].toSint16();
+	int16 prevRoom = g_sci->getEngineState()->variables[VAR_GLOBAL][12].toSint16();
 
 	Common::Rect rect(_screen->getDisplayWidth(), _screen->getDisplayHeight());
 	_showList.add(rect);
@@ -822,11 +845,9 @@ void GfxFrameout::palMorphFrameOut(const int8 *styleRanges, const ShowStyleEntry
 	screenItemLists.resize(_planes.size());
 	eraseLists.resize(_planes.size());
 
-	// TODO: Remap
-	// _numActiveRemaps was a global in SCI engine
-	// if (Remap::_numActiveRemaps > 0 && _remapOccurred) {
-		// _screen->remapMarkRedraw();
-	// }
+	if (g_sci->_gfxRemap32->getRemapCount() > 0 && _remapOccurred) {
+		remapMarkRedraw();
+	}
 
 	calcLists(screenItemLists, eraseLists, calcRect);
 	for (ScreenItemListList::iterator list = screenItemLists.begin(); list != screenItemLists.end(); ++list) {
@@ -849,7 +870,7 @@ void GfxFrameout::palMorphFrameOut(const int8 *styleRanges, const ShowStyleEntry
 
 	Palette nextPalette(*_palette->getNextPalette());
 
-	if (lastRoom < 1000) {
+	if (prevRoom < 1000) {
 		for (int i = 0; i < ARRAYSIZE(sourcePalette.colors); ++i) {
 			if (styleRanges[i] == -1 || styleRanges[i] == 0) {
 				sourcePalette.colors[i] = nextPalette.colors[i];
@@ -873,7 +894,7 @@ void GfxFrameout::palMorphFrameOut(const int8 *styleRanges, const ShowStyleEntry
 	if (showStyle && showStyle->type != kShowStyleUnknown) {
 // TODO: SCI2.1mid transition effects
 //		processEffects();
-		warning("Transition not implemented!");
+		warning("Transition %d not implemented!", showStyle->type);
 	} else {
 		showBits();
 	}
@@ -881,15 +902,12 @@ void GfxFrameout::palMorphFrameOut(const int8 *styleRanges, const ShowStyleEntry
 	_frameNowVisible = true;
 
 	for (PlaneList::iterator plane = _planes.begin(); plane != _planes.end(); ++plane) {
-// TODO:
-//		plane->updateRedrawAllCount();
+		(*plane)->_redrawAllCount = getScreenCount();
 	}
 
-	// TODO: Remap
-	// _numActiveRemaps was a global in SCI engine
-	// if (Remap::_numActiveRemaps > 0 && _remapOccurred) {
-	// _screen->remapMarkRedraw();
-	// }
+	if (g_sci->_gfxRemap32->getRemapCount() > 0 && _remapOccurred) {
+		remapMarkRedraw();
+	}
 
 	calcLists(screenItemLists, eraseLists, calcRect);
 	for (ScreenItemListList::iterator list = screenItemLists.begin(); list != screenItemLists.end(); ++list) {
@@ -1010,14 +1028,15 @@ void GfxFrameout::alterVmap(const Palette &palette1, const Palette &palette2, co
 	// NOTE: This is currBuffer->ptr in SCI engine
 	byte *pixels = (byte *)_currentBuffer.getPixels();
 
-	// TODO: Guessing that display width/height is the correct
-	// equivalent to screen width/height in SCI engine
 	for (int pixelIndex = 0, numPixels = _currentBuffer.screenWidth * _currentBuffer.screenHeight; pixelIndex < numPixels; ++pixelIndex) {
 		byte currentValue = pixels[pixelIndex];
 		int8 styleRangeValue = styleRanges[currentValue];
 		if (styleRangeValue == -1 && styleRangeValue == style) {
 			currentValue = pixels[pixelIndex] = clut[currentValue];
-			styleRangeValue = styleRanges[clut[currentValue]];
+			// NOTE: In original engine this assignment happens outside of the
+			// condition, but if the branch is not followed the value is just
+			// going to be the same as it was before
+			styleRangeValue = styleRanges[currentValue];
 		}
 
 		if (
@@ -1068,44 +1087,7 @@ inline ShowStyleEntry *GfxFrameout::deleteShowStyleInternal(ShowStyleEntry *cons
 		lastEntry->next = showStyle->next;
 	}
 
-	// NOTE: Differences from SCI2/2.1early engine:
-	// 1. Memory of ShowStyle-owned objects was freed before ShowStyle was
-	//    removed from the linked list, but since this operation is position
-	//    independent, it has been moved after removal from the list for
-	//    consistency with SCI2.1mid+
-	// 2. In SCI2, `screenItems` was a pointer to an array of pointers, so
-	//    extra deletes were performed here; we use an owned container object
-	//    instead, which is automatically freed when ShowStyle is freed
-#if 0
-	if (getSciVersion() < SCI_VERSION_2_1_MIDDLE) {
-		uint8 type = showStyle->type;
-
-		if (type >= 1 && type <= 10) {
-			ScreenItemList &styleItems = showStyle->screenItems;
-			for (ScreenItemList::iterator it = styleItems.begin(); it != styleItems.end(); ++it) {
-				if (active) {
-					// TODO: _screen->deleteScreenItem(showStyle->plane, *it->id);
-					_screenItems.remove(*it);
-				}
-				delete *it;
-			}
-		} else if (type == 11 || type == 12) {
-			if (!showStyle->bitmapMemId.isNull()) {
-				_segMan->freeHunkEntry(showStyle->bitmapMemId);
-			}
-			if (showStyle->bitmapScreenItem != nullptr) {
-				// TODO: _screen->deleteScreenItem(showStyle->plane, showStyle->bitmapScreenItem->id);
-				_screenItems.remove(showStyle->bitmapScreenItem);
-				delete showStyle->bitmapScreenItem;
-			}
-		}
-	} else {
-#endif
-		delete[] showStyle->fadeColorRanges;
-#if 0
-	}
-#endif
-
+	delete[] showStyle->fadeColorRanges;
 	delete showStyle;
 
 	// TODO: Verify that this is the correct entry to return
@@ -1117,11 +1099,20 @@ inline ShowStyleEntry *GfxFrameout::deleteShowStyleInternal(ShowStyleEntry *cons
 // and need to be fixed in future
 // TODO: SQ6 does not use 'priority' (exists since SCI2) or 'blackScreen' (exists since SCI3);
 // check to see if other versions use or if they are just always ignored
-void GfxFrameout::kernelSetShowStyle(const uint16 argc, const reg_t &planeObj, const ShowStyleType type, const int16 seconds, const int16 back, const int16 priority, const int16 animate, const int16 frameOutNow, const reg_t &pFadeArray, const int16 divisions, const int16 blackScreen) {
+void GfxFrameout::kernelSetShowStyle(const uint16 argc, const reg_t planeObj, const ShowStyleType type, const int16 seconds, const int16 back, const int16 priority, const int16 animate, const int16 frameOutNow, reg_t pFadeArray, int16 divisions, const int16 blackScreen) {
 
 	bool hasDivisions = false;
 	bool hasFadeArray = false;
-	if (getSciVersion() < SCI_VERSION_2_1_MIDDLE) {
+
+	// KQ7 2.0b uses a mismatched version of the Styler script (SCI2.1early script
+	// for SCI2.1mid engine), so the calls it makes to kSetShowStyle are wrong and
+	// put `divisions` where `pFadeArray` is supposed to be
+	if (getSciVersion() == SCI_VERSION_2_1_MIDDLE && g_sci->getGameId() == GID_KQ7) {
+		hasDivisions = argc > 7;
+		hasFadeArray = false;
+		divisions = argc > 7 ? pFadeArray.toSint16() : -1;
+		pFadeArray = NULL_REG;
+	} else if (getSciVersion() < SCI_VERSION_2_1_MIDDLE) {
 		hasDivisions = argc > 7;
 		hasFadeArray = false;
 	} else if (getSciVersion() < SCI_VERSION_3) {
@@ -1151,19 +1142,11 @@ void GfxFrameout::kernelSetShowStyle(const uint16 argc, const reg_t &planeObj, c
 		error("Plane %04x:%04x is not present in active planes list", PRINT_REG(planeObj));
 	}
 
-	// TODO: This is Plane.gameRect in SCI engine, not planeRect. Engine uses
-	// Plane::ConvGameRectToPlaneRect to convert from gameRect to planeRect.
-	// Also this never gets used by SQ6 so it is not clear what it does yet
-	//	Common::Rect gameRect = plane.planeRect;
-
 	bool createNewEntry = true;
 	ShowStyleEntry *entry = findShowStyleForPlane(planeObj);
 	if (entry != nullptr) {
+		// TODO: SCI2.1early has different criteria for show style reuse
 		bool useExisting = true;
-
-		if (getSciVersion() < SCI_VERSION_2_1_MIDDLE) {
-			useExisting = plane->_planeRect.width() == entry->width && plane->_planeRect.height() == entry->height;
-		}
 
 		if (useExisting) {
 			useExisting = entry->divisions == (hasDivisions ? divisions : _defaultDivisions[type]) && entry->unknownC == _defaultUnknownC[type];
@@ -1193,39 +1176,28 @@ void GfxFrameout::kernelSetShowStyle(const uint16 argc, const reg_t &planeObj, c
 			entry->divisions = hasDivisions ? divisions : _defaultDivisions[type];
 			entry->plane = planeObj;
 
-#if 0
-			if (getSciVersion() < SCI_VERSION_2_1_MIDDLE) {
-				entry->bitmapMemId = NULL_REG;
-				entry->screenItems.empty();
-				entry->width = plane->_planeRect.width();
-				entry->height = plane->_planeRect.height();
-			} else {
-#endif
-				entry->fadeColorRanges = nullptr;
-				if (hasFadeArray) {
-					// NOTE: SCI2.1mid engine does no check to verify that an array is
-					// successfully retrieved, and SegMan will cause a fatal error
-					// if we try to use a memory segment that is not an array
-					SciArray<reg_t> *table = _segMan->lookupArray(pFadeArray);
+			entry->fadeColorRanges = nullptr;
+			if (hasFadeArray) {
+				// NOTE: SCI2.1mid engine does no check to verify that an array is
+				// successfully retrieved, and SegMan will cause a fatal error
+				// if we try to use a memory segment that is not an array
+				SciArray<reg_t> *table = _segMan->lookupArray(pFadeArray);
 
-					uint32 rangeCount = table->getSize();
-					entry->fadeColorRangesCount = rangeCount;
+				uint32 rangeCount = table->getSize();
+				entry->fadeColorRangesCount = rangeCount;
 
-					// NOTE: SCI engine code always allocates memory even if the range
-					// table has no entries, but this does not really make sense, so
-					// we avoid the allocation call in this case
-					if (rangeCount > 0) {
-						entry->fadeColorRanges = new uint16[rangeCount];
-						for (size_t i = 0; i < rangeCount; ++i) {
-							entry->fadeColorRanges[i] = table->getValue(i).toUint16();
-						}
+				// NOTE: SCI engine code always allocates memory even if the range
+				// table has no entries, but this does not really make sense, so
+				// we avoid the allocation call in this case
+				if (rangeCount > 0) {
+					entry->fadeColorRanges = new uint16[rangeCount];
+					for (size_t i = 0; i < rangeCount; ++i) {
+						entry->fadeColorRanges[i] = table->getValue(i).toUint16();
 					}
-				} else {
-					entry->fadeColorRangesCount = 0;
 				}
-#if 0
+			} else {
+				entry->fadeColorRangesCount = 0;
 			}
-#endif
 		}
 
 		// NOTE: The original engine had no nullptr check and would just crash
@@ -1242,9 +1214,6 @@ void GfxFrameout::kernelSetShowStyle(const uint16 argc, const reg_t &planeObj, c
 		entry->delay = (seconds * 60 + entry->divisions - 1) / entry->divisions;
 
 		if (entry->delay == 0) {
-#if 0
-			if (getSciVersion() >= SCI_VERSION_2_1_MIDDLE && entry->fadeColorRanges != nullptr) {
-#endif
 			if (entry->fadeColorRanges != nullptr) {
 				delete[] entry->fadeColorRanges;
 			}
@@ -1258,234 +1227,12 @@ void GfxFrameout::kernelSetShowStyle(const uint16 argc, const reg_t &planeObj, c
 		}
 
 		if (createNewEntry) {
-			// TODO: Implement SCI3, which may or may not actually have
-			// the same transitions as SCI2/SCI2.1early, but implemented
-			// differently
-#if 0
-			if (getSciVersion() < SCI_VERSION_2_1_MIDDLE) {
-				switch (entry->type) {
-					case kShowStyleHShutterIn:
-					case kShowStyleHShutterOut:
-						prepareShowStyleWipe(entry, priority, 2, true);
-						break;
-
-					case kShowStyleVShutterIn:
-					case kShowStyleVShutterOut:
-						prepareShowStyleWipe(entry, priority, 2, false);
-						break;
-
-					case kShowStyleHWipe1:
-					case kShowStyleHWipe2:
-						prepareShowStyleWipe(entry, priority, 1, true);
-						break;
-
-					case kShowStyleVWipe1:
-					case kShowStyleVWipe2:
-						prepareShowStyleWipe(entry, priority, 1, false);
-						break;
-
-					case kShowStyleIrisIn:
-					case kShowStyleIrisOut:
-						prepareShowStyleIris(entry, priority);
-						break;
-
-					case kShowStyle11:
-					case kShowStyle12:
-						prepareShowStylePixels(entry, priority, plane->planeRect);
-						break;
-
-					default:
-						break;
-				}
-			}
-#endif
-
+			// TODO: Implement SCI2.1early and SCI3
 			entry->next = _showStyles;
 			_showStyles = entry;
 		}
 	}
 }
-
-#if 0
-void addFrameoutEntryInternal(ShowStyleEntry *const showStyle, const int16 priority, const CelInfo32 &celInfo, const Common::Rect &rect) {
-	ScreenItem *screenItem = new ScreenItem;
-	screenItem->plane = showStyle->plane;
-	screenItem->celInfo = celInfo;
-	screenItem->celRect = rect;
-	screenItem->isInList = true;
-	screenItem->priority = priority;
-	screenItem->visible = true;
-	showStyle->screenItems.push_back(screenItem);
-}
-
-void GfxFrameout::prepareShowStyleWipe(ShowStyleEntry *const showStyle, const int16 priority, const int16 edgeCount, const bool horizontal) {
-	assert(edgeCount == 1 || edgeCount == 2);
-
-	const int numScreenItems = showStyle->divisions * edgeCount;
-	const int extra = edgeCount > 1 ? 1 : 0;
-
-	showStyle->edgeCount = edgeCount;
-	showStyle->screenItems.reserve(numScreenItems);
-
-	CelInfo32 celInfo;
-	celInfo.bitmap = NULL_REG;
-	celInfo.type = kCelObjTypeView;
-	celInfo.color = showStyle->color;
-
-	for (int i = 0; i < numScreenItems; ++i) {
-		Common::Rect rect;
-
-		if (horizontal) {
-			rect.top = 0;
-			rect.bottom = showStyle->height - 1;
-			rect.left = (showStyle->width * i) / (showStyle->divisions * edgeCount);
-			rect.right = ((i + 1) * (showStyle->width + extra)) / (showStyle->divisions * edgeCount) - 1;
-		} else {
-			rect.left = 0;
-			rect.right = showStyle->width - 1;
-			rect.top = (showStyle->height * i) / (showStyle->divisions * edgeCount);
-			rect.bottom = ((i + 1) * (showStyle->height + extra)) / (showStyle->divisions * edgeCount) - 1;
-		}
-
-		addFrameoutEntryInternal(showStyle, priority, celInfo, rect);
-
-		if (edgeCount == 2) {
-			if (horizontal) {
-				int temp = rect.left;
-				rect.left = showStyle->width - rect.right - 1;
-				rect.right = showStyle->width - temp - 1;
-			} else {
-				int temp = rect.top;
-				rect.top = showStyle->height - rect.bottom - 1;
-				rect.bottom = showStyle->height - temp - 1;
-			}
-
-			addFrameoutEntryInternal(showStyle, priority, celInfo, rect);
-		}
-	}
-}
-
-void GfxFrameout::prepareShowStyleIris(ShowStyleEntry *const showStyle, const int16 priority) {
-	const int edgeCount = 4;
-	const int numScreenItems = showStyle->divisions * edgeCount;
-
-	showStyle->edgeCount = edgeCount;
-	showStyle->screenItems.reserve(numScreenItems);
-
-	CelInfo32 celInfo;
-	celInfo.bitmap = NULL_REG;
-	celInfo.type = kCelObjTypeView;
-	celInfo.color = showStyle->color;
-
-	for (int i = 0; i < numScreenItems; ++i) {
-		Common::Rect rect;
-
-		rect.right = showStyle->width - ((showStyle->width * i) / (showStyle->divisions * 2)) - 1;
-		rect.left = (showStyle->width * i) / (showStyle->divisions * 2);
-		rect.top = (showStyle->height * i) / (showStyle->divisions * 2);
-		rect.bottom = ((i + 1) * (showStyle->height + 1)) / (showStyle->divisions * 2) - 1;
-
-		addFrameoutEntryInternal(showStyle, priority, celInfo, rect);
-
-		{
-			int temp = rect.top;
-			rect.top = showStyle->height - rect.bottom - 1;
-			rect.bottom = showStyle->height - temp - 1;
-		}
-
-		addFrameoutEntryInternal(showStyle, priority, celInfo, rect);
-
-		rect.top = ((i + 1) * (showStyle->height + 1)) / (showStyle->divisions * 2);
-		rect.right = ((i + 1) * (showStyle->width + 1)) / (showStyle->divisions * 2) - 1;
-		rect.bottom = ((i + 1) * (showStyle->height + 1)) / (showStyle->divisions * 2) - 1;
-
-		addFrameoutEntryInternal(showStyle, priority, celInfo, rect);
-
-		{
-			int temp = rect.left;
-			rect.left = showStyle->width - rect.right - 1;
-			rect.right = showStyle->width - temp - 1;
-		}
-
-		addFrameoutEntryInternal(showStyle, priority, celInfo, rect);
-	}
-}
-
-void GfxFrameout::prepareShowStylePixels(ShowStyleEntry *const showStyle, const int16 priority, const Common::Rect planeGameRect) {
-	const int bitmapSize = showStyle->width * showStyle->height;
-
-	// TODO: Verify that memory type 0x200 (what GK1 engine uses)
-	// is Hunk type
-	reg_t bitmapMemId = _segMan->allocateHunkEntry("ShowStylePixels()", bitmapSize + sizeof(GfxBitmapHeader));
-	showStyle->bitmapMemId = bitmapMemId;
-
-	// TODO: SCI2 GK1 uses a Bitmap constructor function to
-	// do this work
-	byte *bitmap = _segMan->getHunkPointer(bitmapMemId);
-	GfxBitmapHeader *header = (GfxBitmapHeader *)bitmap;
-	byte *bitmapData = bitmap + sizeof(GfxBitmapHeader);
-
-	// TODO: These are defaults from the Bitmap constructor in
-	// GK1, not specific values set by this function.
-	// TODO: This probably should not even be using a struct at
-	// all since this information is machine endian dependent
-	// and will be reversed for Mac versions or when running
-	// ScummVM on big-endian systems. GK1 used packed structs
-	// everywhere so this probably worked better there too.
-	header->field_18 = 36;
-	header->field_1c = 36;
-	memset(header, 0, sizeof(GfxBitmapHeader));
-
-	header->width = showStyle->width;
-	header->height = showStyle->height;
-	header->field_8 = 250;
-	header->size = bitmapSize;
-
-	// TODO: Scaled dimensions in bitmap headers was not added
-	// until SCI2.1mid. It is not clear what the right thing to
-	// do here is.
-	if (getSciVersion() >= SCI_VERSION_2_1_MIDDLE) {
-		header->scaledWidth = _currentBuffer.scriptWidth;
-		header->scaledHeight = _currentBuffer.scriptHeight;
-	}
-
-	Common::Rect copyRect;
-	// TODO: planeGameRect is supposedly in script coordinates,
-	// which are usually 320x200. If bitsSaveDisplayScreen is
-	// in native resolution then seemingly this function will
-	// not work properly since we will be not copy enough bits,
-	// or from the correct location.
-	copyRect.left = planeGameRect.left;
-	copyRect.top = planeGameRect.top;
-	copyRect.right = planeGameRect.left + showStyle->width;
-	copyRect.bottom = planeGameRect.top + showStyle->height;
-	_screen->bitsSaveDisplayScreen(copyRect, bitmapData);
-
-	CelInfo32 celInfo;
-	celInfo.bitmap = bitmapMemId;
-	celInfo.type = kCelObjTypeMem;
-
-	ScreenItem *screenItem = new ScreenItem;
-
-	screenItem->position.x = 0;
-	screenItem->position.y = 0;
-
-	showStyle->bitmapScreenItem = screenItem;
-	screenItem->priority = priority;
-
-	// TODO: Have not seen/identified this particular flag yet in
-	// SCI2.1mid (SQ6) engine; maybe (1) a duplicate of `created`,
-	// or (2) does not exist any more, or (3) one of the other
-	// still-unidentified fields. Probably need to look at the
-	// GK1 source for its use in drawing algorithms to determine
-	// if/how this correlates to ScreenItem members in the
-	// SCI2.1mid engine.
-//	screenItem->isInList = true;
-
-	Plane *plane = _planes.findByObject(showStyle.plane);
-	plane->_screenItemList.add(screenItem);
-}
-#endif
 
 // NOTE: Different version of SCI engine support different show styles
 // SCI2 implements 0, 1/3/5/7/9, 2/4/6/8/10, 11, 12, 13, 14
@@ -1528,53 +1275,15 @@ void GfxFrameout::processShowStyles() {
 					case kShowStyleWipeLeft:
 					case kShowStyleWipeUp:
 					case kShowStyleIrisOut:
-#if 0
-						if (getSciVersion() >= SCI_VERSION_2_1_MIDDLE) {
-#endif
-							retval = processShowStyleMorph(showStyle);
-#if 0
-						} else {
-							retval = processShowStyleWipe(-1, showStyle);
-						}
-#endif
-						break;
 					case kShowStyleHShutterIn:
 					case kShowStyleVShutterIn:
 					case kShowStyleWipeRight:
 					case kShowStyleWipeDown:
 					case kShowStyleIrisIn:
-#if 0
-						if (getSciVersion() >= SCI_VERSION_2_1_MIDDLE) {
-#endif
-							retval = processShowStyleMorph(showStyle);
-#if 0
-						} else {
-							retval = processShowStyleWipe(1, showStyle);
-						}
-#endif
-						break;
 					case kShowStyle11:
-#if 0
-						if (getSciVersion() >= SCI_VERSION_2_1_MIDDLE) {
-#endif
-							retval = processShowStyleMorph(showStyle);
-#if 0
-						} else {
-							retval = processShowStyle11(showStyle);
-						}
-#endif
-						break;
 					case kShowStyle12:
 					case kShowStyleUnknown: {
-#if 0
-						if (getSciVersion() >= SCI_VERSION_2_1_MIDDLE) {
-#endif
-							retval = processShowStyleMorph(showStyle);
-#if 0
-						} else {
-							retval = processShowStyle12(showStyle);
-						}
-#endif
+						retval = processShowStyleMorph(showStyle);
 						break;
 					}
 					case kShowStyleFadeOut: {
@@ -1668,285 +1377,6 @@ bool GfxFrameout::processShowStyleFade(const int direction, ShowStyleEntry *cons
 	return false;
 }
 
-// TODO: Rect sizes are wrong, rects in SCI are inclusive of bottom/right but
-// in ScummVM are exclusive so extra ±1 operations here are wrong
-#if 0
-bool GfxFrameout::processShowStyleWipe(const ShowStyleEntry *const style) {
-	const int16 divisions = style->divisions;
-	Common::Rect rect(divisions, divisions);
-
-	const Plane *const plane = _visibleScreen->planeList->findByObject(style->plane);
-
-	const int16 planeLeft = plane->field_4C.left;
-	const int16 planeTop = plane->field_4C.top;
-	const int16 planeRight = plane->field_4C.right;
-	const int16 planeBottom = plane->field_4C.bottom;
-	const int16 planeWidth = planeRight - planeLeft + 1;
-	const int16 planeHeight = planeBottom - planeTop + 1;
-
-	const int16 divisionWidth = planeWidth / divisions - 1;
-	int16 shutterDivisionWidth = planeWidth / (2 * divisions);
-	if (shutterDivisionWidth >= 0) {
-		const int16 heightPerDivision = planeHeight / divisions;
-		int16 shutterMiddleX = divisions * shutterDivisionWidth;
-		for (int16 x = divisionWidth - shutterDivisionWidth; x <= divisionWidth; ++x) {
-			int16 divisionTop = 0;
-			for (int16 y = 0; y < heightPerDivision; ++y, divisionTop += divisions) {
-				rect.top = planeTop + divisionTop;
-				rect.bottom = rect.top + divisions - 1;
-				rect.left = planeLeft + shutterMiddleX;
-				rect.right = rect.left + divisions - 1;
-				//				_screen->rectList.clear();
-				//				_screen->rectList.add(rect);
-				//				showBits();
-			}
-			// number of divisions does not divide evenly into plane height,
-			// draw the remainder
-			if (planeHeight % divisions) {
-				rect.top = planeTop + divisionTop;
-				rect.bottom = rect.top + planeHeight % divisions - 1;
-				rect.left = planeLeft + shutterMiddleX;
-				rect.right = rect.left + divisions - 1;
-				//				_screen->rectList.clear();
-				//				_screen->rectList.add(rect);
-				//				showBits();
-			}
-
-			divisionTop = 0;
-			for (int16 y = 0; y < heightPerDivision; ++y, divisionTop += divisions) {
-				rect.top = planeTop + divisionTop;
-				rect.bottom = rect.top + divisions - 1;
-				rect.left = planeLeft + divisions * x;
-				rect.right = rect.left + divisions - 1;
-				//				_screen->rectList.clear();
-				//				_screen->rectList.add(rect);
-				//				showBits();
-			}
-			if (planeHeight % divisions) {
-				rect.top = planeTop + divisionTop;
-				rect.bottom = rect.top + planeHeight % divisions - 1;
-				rect.left = planeLeft + divisions * x;
-				rect.right = rect.left + divisions - 1;
-				//				_screen->rectList.clear();
-				//				_screen->rectList.add(rect);
-				//				showBits();
-			}
-
-			shutterMiddleX -= divisions;
-			--shutterDivisionWidth;
-		}
-	}
-
-	if (planeWidth % divisions) {
-		const int16 roundedPlaneWidth = divisions * divisionWidth;
-		int16 divisionTop = 0;
-		for (int16 y = 0; y < planeHeight / divisions; ++y, divisionTop += divisions) {
-			rect.top = planeTop + divisionTop;
-			rect.bottom = rect.top + divisions - 1;
-			rect.left = planeLeft + roundedPlaneWidth;
-			rect.right = rect.left + planeWidth % divisions + divisions - 1;
-			//			_screen->rectList.clear();
-			//			_screen->rectList.add(rect);
-			//			showBits();
-		}
-		if (planeHeight % divisions) {
-			rect.top = planeTop + divisionTop;
-			rect.bottom = rect.top + planeHeight % divisions - 1;
-			rect.left = planeLeft + roundedPlaneWidth;
-			rect.right = rect.left + planeWidth % divisions + divisions - 1;
-			//			_screen->rectList.clear();
-			//			_screen->rectList.add(rect);
-			//			showBits();
-		}
-	}
-
-	rect.right = planeRight;
-	rect.left = planeLeft;
-	rect.top = planeTop;
-	rect.bottom = planeBottom;
-	//	_screen->rectList.clear();
-	//	_screen->rectList.add(rect);
-	//	showBits();
-}
-#endif
-#if 0
-bool GfxFrameout::processShowStyleWipe(const int direction, ShowStyleEntry *const showStyle) {
-	if (showStyle->currentStep < showStyle->divisions) {
-		int index;
-		if (direction <= 0) {
-			index = showStyle->divisions - showStyle->currentStep - 1;
-		} else {
-			index = showStyle->currentStep;
-		}
-
-		index *= showStyle->edgeCount;
-
-		if (showStyle->edgeCount > 0) {
-			for (int i = 0; i < showStyle->edgeCount; ++i) {
-				if (showStyle->fadeUp) {
-					ScreenItem *screenItem = showStyle->screenItems[index + i];
-					if (screenItem != nullptr) {
-						// TODO: _screen->deleteScreenItem(screenItem);
-						_screenItems.remove(screenItem);
-
-						delete screenItem;
-						showStyle->screenItems[index + i] = nullptr;
-					}
-				} else {
-					ScreenItem *screenItem = showStyle->screenItems[index + i];
-					// TODO: _screen->addScreenItem(screenItem);
-					_screenItems.push_back(screenItem);
-				}
-			}
-
-			++showStyle->currentStep;
-			showStyle->nextTick += showStyle->delay;
-		}
-	}
-
-	if (showStyle->currentStep >= showStyle->divisions) {
-		if (showStyle->fadeUp) {
-			showStyle->processed = true;
-		}
-
-		return true;
-	}
-
-	return false;
-}
-
-void fillRect(byte *data, const Common::Rect &rect, const int16 color, const int16 stride) {
-
-}
-
-bool GfxFrameout::processShowStyle11(ShowStyleEntry *const showStyle) {
-	int divisions = showStyle->divisions * showStyle->divisions;
-
-	byte *bitmapData = _segMan->getHunkPointer(showStyle->bitmapMemId) + sizeof(GfxBitmapHeader);
-
-	int ebx;
-
-	if (showStyle->currentStep == 0) {
-		int ctr = 0;
-		int bloot = divisions;
-		do {
-			bloot >>= 1;
-			++ctr;
-		} while (bloot != 1);
-
-		showStyle->dissolveSeed = _dissolveSequenceSeeds[ctr];
-		ebx = 800;
-		showStyle->unknown3A = 800;
-		showStyle->dissolveInitial = 800;
-	} else {
-		int ebx = showStyle->unknown3A;
-		do {
-			int eax = ebx >> 1;
-			if (ebx & 1) {
-				ebx = showStyle->dissolveSeed ^ eax;
-			} else {
-				ebx = eax;
-			}
-		} while (ebx >= divisions);
-
-		if (ebx == showStyle->dissolveInitial) {
-			ebx = 0;
-		}
-	}
-
-	Common::Rect rect;
-
-	rect.left = (showStyle->width + showStyle->divisions - 1) / showStyle->divisions;
-	rect.top = (showStyle->height + showStyle->divisions - 1) / showStyle->divisions;
-
-	if (showStyle->currentStep <= showStyle->divisions) {
-		int ebp = 0;
-		do {
-			int ecx = ebx % showStyle->divisions;
-
-			Common::Rect drawRect;
-			drawRect.left = rect.left * ecx;
-			drawRect.right = drawRect.left + rect.left - 1;
-			drawRect.top = rect.top * ebx;
-			drawRect.bottom = rect.top * ebx + rect.top - 1;
-
-			bool doit;
-			if (drawRect.right >= 0 && drawRect.bottom >= 0 && drawRect.left <= rect.right && drawRect.top <= rect.bottom) {
-				doit = true;
-			} else {
-				doit = false;
-			}
-
-			if (doit) {
-				if (drawRect.left < 0) {
-					drawRect.left = 0;
-				}
-
-				if (drawRect.top < 0) {
-					drawRect.top = 0;
-				}
-
-				if (drawRect.right > rect.right) {
-					drawRect.right = rect.right;
-				}
-
-				if (drawRect.bottom > rect.bottom) {
-					drawRect.bottom = rect.bottom;
-				}
-			} else {
-				drawRect.right = 0;
-				drawRect.bottom = 0;
-				drawRect.left = 0;
-				drawRect.top = 0;
-			}
-
-			fillRect(bitmapData, drawRect, showStyle->color, showStyle->width);
-
-			int eax = ebx;
-			do {
-				eax >>= 1;
-				if (ebx & 1) {
-					ebx = showStyle->dissolveSeed;
-					ebx ^= eax;
-				} else {
-					ebx = eax;
-				}
-			} while (ebx >= divisions);
-
-			if (showStyle->currentStep != showStyle->divisions) {
-				ebp++;
-			} else {
-				drawRect.left = 0;
-				drawRect.top = 0;
-				drawRect.right = showStyle->width - 1;
-				drawRect.bottom = showStyle->height - 1;
-				fillRect(bitmapData, drawRect, showStyle->color, showStyle->width);
-			}
-
-		} while (ebp <= showStyle->divisions);
-
-		showStyle->unknown3A = ebx;
-		++showStyle->currentStep;
-		showStyle->nextTick += showStyle->delay;
-		// _screen->updateScreenItem(showStyle->bitmapScreenItem);
-	}
-
-	if (showStyle->currentStep >= showStyle->divisions) {
-		if (showStyle->fadeUp) {
-			showStyle->processed = true;
-		}
-
-		return true;
-	}
-
-	return false;
-}
-
-bool GfxFrameout::processShowStyle12(ShowStyleEntry *const showStyle) {
-	return true;
-}
-#endif
-
 void GfxFrameout::kernelFrameOut(const bool shouldShowBits) {
 	if (_showStyles != nullptr) {
 		processShowStyles();
@@ -1955,81 +1385,97 @@ void GfxFrameout::kernelFrameOut(const bool shouldShowBits) {
 		_palMorphIsOn = false;
 	} else {
 // TODO: Window scroll
-//		if (g_ScrollWindow) {
-//			doScroll();
+//		if (g_PlaneScroll) {
+//			processScrolls();
 //		}
 
 		frameOut(shouldShowBits);
 	}
 }
 
-uint16 GfxFrameout::kernelIsOnMe(int16 x, int16 y, uint16 checkPixels, reg_t screenObject) {
-	reg_t planeObject = readSelector(_segMan, screenObject, SELECTOR(plane));
-	Plane *screenItemPlane = _visiblePlanes.findByObject(planeObject); // Search for plane in visible planes
-	ScreenItem *screenItem = nullptr;
+#pragma mark -
+#pragma mark Mouse cursor
 
-	if (!screenItemPlane) {
-		// Specified plane not found
-		return 0;
+reg_t GfxFrameout::kernelIsOnMe(const reg_t object, const Common::Point &position, bool checkPixel) const {
+	const reg_t planeObject = readSelector(_segMan, object, SELECTOR(plane));
+	Plane *plane = _visiblePlanes.findByObject(planeObject);
+	if (plane == nullptr) {
+		return make_reg(0, 0);
 	}
 
-	screenItem = screenItemPlane->_screenItemList.findByObject(screenObject);
-	if (!screenItem) {
-		// Specified screen object not in item list
-		return 0;
+	ScreenItem *screenItem = plane->_screenItemList.findByObject(object);
+	if (screenItem == nullptr) {
+		return make_reg(0, 0);
 	}
 
-	// Original SCI32 seems to have made a copy (?) of the screenitem?
-	// there is also a "or [ebp+arg_56], 1 - not sure what that did
-	return isOnMe(screenItemPlane, screenItem, x, y, checkPixels);
+	// NOTE: The original engine passed a copy of the ScreenItem into isOnMe
+	// as a hack around the fact that the screen items in `_visiblePlanes`
+	// did not have their `_celObj` pointers cleared when their CelInfo was
+	// updated by `Plane::decrementScreenItemArrayCounts`. We handle this
+	// this more intelligently by clearing `_celObj` in the copy assignment
+	// operator, which is only ever called by `decrementScreenItemArrayCounts`
+	// anyway.
+	return make_reg(0, isOnMe(*screenItem, *plane, position, checkPixel));
 }
 
-uint16 GfxFrameout::isOnMe(Plane *screenItemPlane, ScreenItem *screenItem, int16 x, int16 y, uint16 checkPixels) {
-	// adjust coordinate according to resolution 
-	int32 adjustedX = x * getCurrentBuffer().screenWidth / getCurrentBuffer().scriptWidth;
-	int32 adjustedY = y * getCurrentBuffer().screenHeight / getCurrentBuffer().scriptHeight;
+bool GfxFrameout::isOnMe(const ScreenItem &screenItem, const Plane &plane, const Common::Point &position, const bool checkPixel) const {
 
-	adjustedX += screenItemPlane->_planeRect.left;
-	adjustedY += screenItemPlane->_planeRect.top;
+	Common::Point scaledPosition(position);
+	mulru(scaledPosition, Ratio(_currentBuffer.screenWidth, _currentBuffer.scriptWidth), Ratio(_currentBuffer.screenHeight, _currentBuffer.scriptHeight));
+	scaledPosition.x += plane._planeRect.left;
+	scaledPosition.y += plane._planeRect.top;
 
-	//warning("kIsOnMe %s %d (%d, %d -> %d, %d) mouse %d, %d", _segMan->getObjectName(screenObject), checkPixels, screenItem->_screenRect.left, screenItem->_screenRect.top, screenItem->_screenRect.right, screenItem->_screenRect.bottom, adjustedX, adjustedY);
-
-	if (!screenItem->_screenRect.contains(adjustedX, adjustedY)) {
-		// Specified coordinates are not within screen item
-		return 0;
+	if (!screenItem._screenRect.contains(scaledPosition)) {
+		return false;
 	}
 
-	//warning("HIT!");
-	if (checkPixels) {
-		//warning("Check Pixels");
-		CelObj &screenItemCelObject = screenItem->getCelObj();
+	if (checkPixel) {
+		CelObj &celObj = screenItem.getCelObj();
 
-		Common::Point celAdjustedPoint(adjustedX, adjustedY);
-		bool  celMirrored = screenItem->_mirrorX ^ screenItemCelObject._mirrorX;
+		bool mirrorX = screenItem._mirrorX ^ celObj._mirrorX;
 
-		celAdjustedPoint.x -= screenItem->_scaledPosition.x;
-		celAdjustedPoint.y -= screenItem->_scaledPosition.y;
+		scaledPosition.x -= screenItem._scaledPosition.x;
+		scaledPosition.y -= screenItem._scaledPosition.y;
 
-		Ratio celAdjustXRatio(screenItemCelObject._scaledWidth, getCurrentBuffer().screenWidth);
-		Ratio celAdjustYRatio(screenItemCelObject._scaledHeight, getCurrentBuffer().screenHeight);
-		mulru(celAdjustedPoint, celAdjustXRatio, celAdjustYRatio);
+		mulru(scaledPosition, Ratio(celObj._scaledWidth, _currentBuffer.screenWidth), Ratio(celObj._scaledHeight, _currentBuffer.screenHeight));
 
-		if ((screenItem->_scale.signal) && (screenItem->_scale.x) && (screenItem->_scale.y)) {
-			// Apply scaling
-			celAdjustedPoint.x = celAdjustedPoint.x * 128 / screenItem->_scale.x;
-			celAdjustedPoint.y = celAdjustedPoint.y * 128 / screenItem->_scale.y;
+		if (screenItem._scale.signal != kScaleSignalNone && screenItem._scale.x && screenItem._scale.y) {
+			scaledPosition.x = scaledPosition.x * 128 / screenItem._scale.x;
+			scaledPosition.y = scaledPosition.y * 128 / screenItem._scale.y;
 		}
 
-		byte coordinateColor = screenItemCelObject.readPixel(celAdjustedPoint.x, celAdjustedPoint.y, celMirrored);
-		byte transparentColor = screenItemCelObject._transparentColor;
-
-		if (coordinateColor == transparentColor) {
-			// Coordinate is transparent
-			//warning("TRANSPARENT!");
-			return 0;
-		}
+		uint8 pixel = celObj.readPixel(scaledPosition.x, scaledPosition.y, mirrorX);
+		return pixel != celObj._transparentColor;
 	}
-	return 1;
+
+	return true;
+}
+
+void GfxFrameout::kernelSetNowSeen(const reg_t screenItemObject) const {
+	const reg_t planeObject = readSelector(_segMan, screenItemObject, SELECTOR(plane));
+
+	Plane *plane = _planes.findByObject(planeObject);
+	if (plane == nullptr) {
+		error("kSetNowSeen: Plane %04x:%04x not found for screen item %04x:%04x", PRINT_REG(planeObject), PRINT_REG(screenItemObject));
+	}
+
+	ScreenItem *screenItem = plane->_screenItemList.findByObject(screenItemObject);
+	if (screenItem == nullptr) {
+		error("kSetNowSeen: Screen item %04x:%04x not found in plane %04x:%04x", PRINT_REG(screenItemObject), PRINT_REG(planeObject));
+	}
+
+	Common::Rect result = screenItem->getNowSeenRect(*plane);
+	writeSelectorValue(_segMan, screenItemObject, SELECTOR(nsLeft), result.left);
+	writeSelectorValue(_segMan, screenItemObject, SELECTOR(nsTop), result.top);
+	writeSelectorValue(_segMan, screenItemObject, SELECTOR(nsRight), result.right - 1);
+	writeSelectorValue(_segMan, screenItemObject, SELECTOR(nsBottom), result.bottom - 1);
+}
+
+void GfxFrameout::remapMarkRedraw() {
+	for (PlaneList::const_iterator it = _planes.begin(); it != _planes.end(); ++it) {
+		Plane *p = *it;
+		p->remapMarkRedraw();
+	}
 }
 
 #pragma mark -
@@ -2050,6 +1496,15 @@ void GfxFrameout::printVisiblePlaneList(Console *con) const {
 	printPlaneListInternal(con, _visiblePlanes);
 }
 
+void GfxFrameout::printPlaneItemListInternal(Console *con, const ScreenItemList &screenItemList) const {
+	ScreenItemList::size_type i = 0;
+	for (ScreenItemList::const_iterator sit = screenItemList.begin(); sit != screenItemList.end(); sit++) {
+		ScreenItem *screenItem = *sit;
+		con->debugPrintf("%2d: ", i++);
+		screenItem->printDebugInfo(con);
+	}
+}
+
 void GfxFrameout::printPlaneItemList(Console *con, const reg_t planeObject) const {
 	Plane *p = _planes.findByObject(planeObject);
 
@@ -2058,12 +1513,18 @@ void GfxFrameout::printPlaneItemList(Console *con, const reg_t planeObject) cons
 		return;
 	}
 
-	ScreenItemList::size_type i = 0;
-	for (ScreenItemList::iterator sit = p->_screenItemList.begin(); sit != p->_screenItemList.end(); sit++) {
-		ScreenItem *screenItem = *sit;
-		con->debugPrintf("%2d: ", i++);
-		screenItem->printDebugInfo(con);
+	printPlaneItemListInternal(con, p->_screenItemList);
+}
+
+void GfxFrameout::printVisiblePlaneItemList(Console *con, const reg_t planeObject) const {
+	Plane *p = _visiblePlanes.findByObject(planeObject);
+
+	if (p == nullptr) {
+		con->debugPrintf("Plane does not exist");
+		return;
 	}
+
+	printPlaneItemListInternal(con, p->_screenItemList);
 }
 
 } // End of namespace Sci

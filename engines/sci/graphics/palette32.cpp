@@ -28,6 +28,7 @@
 #include "sci/event.h"
 #include "sci/resource.h"
 #include "sci/graphics/palette32.h"
+#include "sci/graphics/remap.h"
 #include "sci/graphics/screen.h"
 
 namespace Sci {
@@ -55,7 +56,9 @@ GfxPalette32::GfxPalette32(ResourceManager *resMan, GfxScreen *screen)
 	_cyclers(),
 	_cycleMap() {
 		_varyPercent = _varyTargetPercent;
-		memset(_fadeTable, 100, sizeof(_fadeTable));
+		for (int i = 0, len = ARRAYSIZE(_fadeTable); i < len; ++i) {
+			_fadeTable[i] = 100;
+		}
 		// NOTE: In SCI engine, the palette manager constructor loads
 		// the default palette, but in ScummVM this initialisation
 		// is performed by SciEngine::run; see r49523 for details
@@ -68,7 +71,7 @@ GfxPalette32::~GfxPalette32() {
 }
 
 inline void mergePaletteInternal(Palette *const to, const Palette *const from) {
-	for (int i = 0; i < ARRAYSIZE(to->colors); ++i) {
+	for (int i = 0, len = ARRAYSIZE(to->colors); i < len; ++i) {
 		if (from->colors[i].used) {
 			to->colors[i] = from->colors[i];
 		}
@@ -221,9 +224,7 @@ int16 GfxPalette32::matchColor(const byte r, const byte g, const byte b, const i
 bool GfxPalette32::updateForFrame() {
 	applyAll();
 	_versionUpdated = false;
-	// TODO: Implement remapping
-	// return g_sci->_gfxFrameout->remapAllTables(_nextPalette != _sysPalette);
-	return false;
+	return g_sci->_gfxRemap32->remapAllTables(_nextPalette != _sysPalette);
 }
 
 void GfxPalette32::updateFFrame() {
@@ -231,8 +232,7 @@ void GfxPalette32::updateFFrame() {
 		_nextPalette.colors[i] = _sourcePalette.colors[i];
 	}
 	_versionUpdated = false;
-	// TODO: Implement remapping
-	// g_sci->_gfxFrameout->remapAllTables(_nextPalette != _sysPalette);
+	g_sci->_gfxRemap32->remapAllTables(_nextPalette != _sysPalette);
 }
 
 void GfxPalette32::updateHardware() {
@@ -695,14 +695,8 @@ void GfxPalette32::cycleAllOn() {
 }
 
 void GfxPalette32::cycleAllPause() {
-	// TODO: The SCI SQ6 cycleAllPause function does not seem to perform
-	// nullptr checking?? This would definitely cause null pointer
-	// dereference in SCI code. I have not seen anything actually call
-	// this function yet, so it is possible it is just unused and broken
-	// in SCI SQ6. This assert exists so that if this function is called,
-	// it is noticed and can be rechecked in the actual engine.
-	// Obviously this code *does* do nullptr checks instead of crashing. :)
-	assert(0);
+	// NOTE: The original engine did not check for null pointers in the
+	// palette cyclers pointer array.
 	for (int i = 0, len = ARRAYSIZE(_cyclers); i < len; ++i) {
 		PalCycler *cycler = _cyclers[i];
 		if (cycler != nullptr) {
@@ -795,7 +789,7 @@ void GfxPalette32::applyCycles() {
 // the last palette entry is intentionally left unmodified, or if this is a bug
 // in the engine. It certainly seems confused because all other places that accept
 // color ranges typically receive values in the range of 0–255.
-void GfxPalette32::setFade(uint8 percent, uint8 fromColor, uint16 numColorsToFade) {
+void GfxPalette32::setFade(uint16 percent, uint8 fromColor, uint16 numColorsToFade) {
 	if (fromColor > numColorsToFade) {
 		return;
 	}
@@ -817,9 +811,10 @@ void GfxPalette32::applyFade() {
 
 		Color &color = _nextPalette.colors[i];
 
-		color.r = (int16)color.r * _fadeTable[i] / 100;
-		color.g = (int16)color.g * _fadeTable[i] / 100;
-		color.b = (int16)color.b * _fadeTable[i] / 100;
+		color.r = MIN(255, (uint16)color.r * _fadeTable[i] / 100);
+		color.g = MIN(255, (uint16)color.g * _fadeTable[i] / 100);
+		color.b = MIN(255, (uint16)color.b * _fadeTable[i] / 100);
 	}
 }
-}
+
+} // End of namespace Sci

@@ -1275,10 +1275,7 @@ void ScummEngine::setupScumm() {
 	// On some systems it's not safe to run CD audio games from the CD.
 	if (_game.features & GF_AUDIOTRACKS && !Common::File::exists("CDDA.SOU")) {
 		checkCD();
-
-		int cd_num = ConfMan.getInt("cdrom");
-		if (cd_num >= 0)
-			_system->getAudioCDManager()->openCD(cd_num);
+		_system->getAudioCDManager()->open();
 	}
 
 	// Create the sound manager
@@ -2611,8 +2608,12 @@ bool ScummEngine::startManiac() {
 			Common::String path = dom.getVal("path");
 
 			if (path.hasPrefix(currentPath)) {
-				path.erase(0, currentPath.size() + 1);
-				if (path.equalsIgnoreCase("maniac")) {
+				path.erase(0, currentPath.size());
+				// Do a case-insensitive non-path-mode match of the remainder.
+				// While strictly speaking it's too broad, this matchString
+				// ignores the presence or absence of trailing path separators
+				// in either currentPath or path.
+				if (path.matchString("*maniac*", true, false)) {
 					maniacTarget = iter->_key;
 					break;
 				}

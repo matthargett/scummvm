@@ -50,6 +50,7 @@
 #include "graphics/cursorman.h"
 #include "graphics/fonts/bdf.h"
 #include "graphics/palette.h"
+#include "graphics/primitives.h"
 
 #include "wage/wage.h"
 #include "wage/design.h"
@@ -294,10 +295,10 @@ void Gui::drawBox(Graphics::Surface *g, int x, int y, int w, int h) {
 	g->frameRect(r, kColorBlack);
 }
 
-void Gui::fillRect(Graphics::Surface *g, int x, int y, int w, int h) {
+void Gui::fillRect(Graphics::Surface *g, int x, int y, int w, int h, int color) {
 	Common::Rect r(x, y, x + w, y + h);
 
-	g->fillRect(r, kColorBlack);
+	g->fillRect(r, color);
 }
 
 #define ARROW_W 12
@@ -310,8 +311,18 @@ const int arrowPixels[ARROW_H][ARROW_W] = {
 		{0,1,1,1,1,1,1,1,1,1,1,0},
 		{1,1,1,1,1,1,1,1,1,1,1,1}};
 
-void Gui::paintBorder(Graphics::Surface *g, Common::Rect &r, WindowType windowType) {
-	bool active = false, scrollable = false, closeable = false, closeBoxPressed = false, drawTitle = false;
+static void drawPixelInverted(int x, int y, int color, void *data) {
+	Graphics::Surface *surface = (Graphics::Surface *)data;
+
+	if (x >= 0 && x < surface->w && y >= 0 && y < surface->h) {
+		byte *p = (byte *)surface->getBasePtr(x, y);
+
+		*p = *p == kColorWhite ? kColorBlack : kColorWhite;
+	}
+}
+
+void Gui::paintBorder(Graphics::Surface *g, Common::Rect &r, WindowType windowType, int highlightedPart, float scrollPos, float scrollSize) {
+	bool active = false, scrollable = false, closeable = false, drawTitle = false;
 	const int size = kBorderWidth;
 	int x = r.left - size;
 	int y = r.top - size;
@@ -323,14 +334,12 @@ void Gui::paintBorder(Graphics::Surface *g, Common::Rect &r, WindowType windowTy
 		active = _sceneIsActive;
 		scrollable = false;
 		closeable = _sceneIsActive;
-		closeBoxPressed = false;
 		drawTitle = true;
 		break;
 	case kWindowConsole:
 		active = !_sceneIsActive;
 		scrollable = true;
 		closeable = !_sceneIsActive;
-		closeBoxPressed = false;
 		drawTitle = false;
 		break;
 	}
@@ -353,29 +362,32 @@ void Gui::paintBorder(Graphics::Surface *g, Common::Rect &r, WindowType windowTy
 		} else {
 			int x1 = x + width - 15;
 			int y1 = y + size + 1;
+
 			for (int yy = 0; yy < ARROW_H; yy++) {
-				for (int xx = 0; xx < ARROW_W; xx++) {
-					if (arrowPixels[yy][xx] != 0) {
-						g->hLine(x1 + xx, y1 + yy, x1 + xx, kColorBlack);
-					} else {
-						g->hLine(x1 + xx, y1 + yy, x1 + xx, kColorWhite);
-					}
-				}
+				for (int xx = 0; xx < ARROW_W; xx++)
+					g->hLine(x1 + xx, y1 + yy, x1 + xx, (arrowPixels[yy][xx] != 0 ? kColorBlack : kColorWhite));
 			}
+
 			fillRect(g, x + width - 13, y + size + ARROW_H, 8, height - 2 * size - 1 - ARROW_H * 2);
+
 			y1 += height - 2 * size - ARROW_H - 2;
 			for (int yy = 0; yy < ARROW_H; yy++) {
-				for (int xx = 0; xx < ARROW_W; xx++) {
-					if (arrowPixels[ARROW_H - yy - 1][xx] != 0) {
-						g->hLine(x1 + xx, y1 + yy, x1 + xx, kColorBlack);
-					} else {
-						g->hLine(x1 + xx, y1 + yy, x1 + xx, kColorWhite);
-					}
-				}
+				for (int xx = 0; xx < ARROW_W; xx++)
+					g->hLine(x1 + xx, y1 + yy, x1 + xx, (arrowPixels[ARROW_H - yy - 1][xx] != 0 ? kColorBlack : kColorWhite));
+			}
+
+			if (highlightedPart == kBorderScrollUp || highlightedPart == kBorderScrollDown) {
+				int rx1 = x + width - kBorderWidth + 2;
+				int ry1 = y + size + r.height() * scrollPos;
+				int rx2 = rx1 + size - 4;
+				int ry2 = ry1 + r.height() * scrollSize;
+				Common::Rect rr(rx1, ry1, rx2, ry2);
+
+				Graphics::drawFilledRect(rr, kColorBlack, drawPixelInverted, g);
 			}
 		}
 		if (closeable) {
-			if (closeBoxPressed) {
+			if (highlightedPart == kBorderCloseButton) {
 				fillRect(g, x + 6, y + 6, 6, 6);
 			} else {
 				drawBox(g, x + 5, y + 5, 7, 7);
@@ -499,6 +511,26 @@ void Gui::popCursor() {
 	CursorMan.popCursor();
 }
 
+static int isInBorder(Common::Rect &rect, int x, int y) {
+	if (x >= rect.left - kBorderWidth && x < rect.left && y >= rect.top - kBorderWidth && y < rect.top)
+		return kBorderCloseButton;
+
+	if (x >= rect.right && x < rect.right + kBorderWidth) {
+		if (y < rect.top - kBorderWidth)
+			return kBorderNone;
+
+		if (y >= rect.bottom + kBorderWidth)
+			return kBorderNone;
+
+		if (y >= rect.top + rect.height() / 2)
+			return kBorderScrollDown;
+
+		return kBorderScrollUp;
+	}
+
+	return kBorderNone;
+}
+
 Designed *Gui::mouseUp(int x, int y) {
 	if (_menu->_menuActivated) {
 		if (_menu->mouseRelease(x, y)) {
@@ -532,6 +564,8 @@ Designed *Gui::mouseUp(int x, int y) {
 		}
 	}
 
+	int borderClick;
+
 	if (_sceneArea.contains(x, y)) {
 		if (!_sceneIsActive) {
 			_sceneIsActive = true;
@@ -552,16 +586,44 @@ Designed *Gui::mouseUp(int x, int y) {
 			_sceneIsActive = false;
 			_bordersDirty = true;
 		}
+	} else if ((borderClick = isInBorder(_consoleTextArea, x, y)) != kBorderNone) {
+		_bordersDirty = true;
+		int _oldScrollPos = _scrollPos;
+
+		switch (borderClick) {
+			case kBorderScrollUp:
+				_scrollPos = MAX<int>(0, _scrollPos - _consoleLineHeight);
+				undrawCursor();
+				_cursorY -= (_scrollPos - _oldScrollPos);
+				_consoleDirty = true;
+				_consoleFullRedraw = true;
+				break;
+			case kBorderScrollDown:
+				_scrollPos = MIN<int>((_lines.size() - 2) * _consoleLineHeight, _scrollPos + _consoleLineHeight);
+				undrawCursor();
+				_cursorY -= (_scrollPos - _oldScrollPos);
+				_consoleDirty = true;
+				_consoleFullRedraw = true;
+				break;
+		}
 	}
 
 	return NULL;
 }
 
 void Gui::mouseDown(int x, int y) {
+	int borderClick;
+
 	if (_menu->mouseClick(x, y)) {
 		_menuDirty = true;
 	} else if (_consoleTextArea.contains(x, y)) {
 		startMarking(x, y);
+	} else if ((borderClick = isInBorder(_consoleTextArea, x, y)) != kBorderNone) {
+		int textFullSize = _lines.size() * _consoleLineHeight + _consoleTextArea.height();
+		float scrollPos = (float)_scrollPos / textFullSize;
+		float scrollSize = (float)_consoleTextArea.height() / textFullSize;
+
+		paintBorder(&_screen, _consoleTextArea, kWindowConsole, borderClick, scrollPos, scrollSize);
 	}
 }
 

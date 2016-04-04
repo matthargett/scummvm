@@ -102,12 +102,14 @@ WageEngine::~WageEngine() {
 }
 
 Common::Error WageEngine::run() {
+	debug("WageEngine::init");
+
 	initGraphics(512, 342, true);
 
 	// Create debugger console. It requires GFX to be initialized
 	_console = new Console(this);
 
-	debug("WageEngine::init");
+	_debugger = new Debugger(this);
 
 	// Your main event loop should be (invoked from) here.
 	_resManager = new Common::MacResManager();
@@ -130,6 +132,8 @@ Common::Error WageEngine::run() {
 	_shouldQuit = false;
 
 	while (!_shouldQuit) {
+		_debugger->onFrame();
+
 		processEvents();
 
 		_gui->draw();
@@ -180,6 +184,11 @@ void WageEngine::processEvents() {
 				break;
 
 			default:
+				if (event.kbd.ascii == '~') {
+					_debugger->attach();
+					break;
+				}
+
 				if (event.kbd.flags & (Common::KBD_ALT | Common::KBD_CTRL | Common::KBD_META)) {
 					if (event.kbd.ascii >= 0x20 && event.kbd.ascii <= 0x7f) {
 						_gui->processMenuShortCut(event.kbd.flags, event.kbd.ascii);

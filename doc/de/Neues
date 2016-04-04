@@ -3,7 +3,57 @@ Programmcodes finden Sie auf Englisch unter:
         https://github.com/scummvm/scummvm/commits/
 
 1.9.0 (DD.MM.YYYY)
+ AGI:
+   - Unterstützung für Hercules-Darstellung (Grün + Bernstein) hinzugefügt.
+   - Unterstützung für hochauflösende Hercules-Schriftart hinzugefügt
+     (auch außerhalb der Hercules-Darstellung nutzbar).
+   - Optionale Funktion "Pause, wenn Befehle eingegeben werden" hinzugefügt.
+     Diese Funktion war im originalen Interpreter nur im Hercules-Darstellungsmodus
+     verfügbar.
 
+1.8.1 (DD.MM.YYYY)
+ Allgemein:
+   - "TESTING"-Markierung von mehreren unterstützten Spielen entfernt.
+   - Chinesische Übersetzung (Pinyin) der Benutzeroberfläche hinzugefügt.
+
+ BBVS:
+   - Fehler beim erneuten Starten des Spiels behoben.
+
+ CinE:
+   - Fehler beim Laden der Soundeffekte behoben.
+
+ Gob:
+   - Aufhängen während Sound-Initialisierung in mehreren Spielen behoben.
+
+ Lab:
+   - Aufhängen während der End-Sequenz behoben.
+   - Interne Spiel-Bedienelemente verbessert.
+
+ SAGA:
+   - Fehlerhafte Farben der Bedienelemente in der französischen und deutschen
+     Version von "I Have No Mouth and I Must Screm" korrigiert.
+
+ SCUMM:
+   - Erkennung von Maniac Mansion innerhalb von Day of the Tentacle in der
+     Windows-Version von ScummVM repariert.
+   - In der EGA-Version von Loom wurde ein Sound-Effekt nicht korrekt angehalten,
+     wenn AdLib verwendet wurde. Dieser Fehler wurde behoben.
+
+ Baphomets Fluch 2.5:
+   - Option zur Auswahl von englischer Sprachausgabe anstelle der deutschen,
+     wenn in der gewählten Sprache keine Sprachausgabe verfügbar ist, hinzugefügt.
+   - Ressourcen-Freigabe beim Beenden des Spiels korrigiert.
+   - Fehler beim Neustart des Spiels nach dem Wechsel der Spiel-Sprache behoben.
+   - Flackern im Hauptmenü behoben.
+   - Lange Dauer des Speichervorgangs unter Windows behoben.
+
+ Windows-Portierung:
+   - Absturz im Zusammenhang mit nicht-funktionierenden MIDI-Geräten behoben.
+
+ Mac OS X-Portierung:
+   - Das Dock-Menü für ScummVM enthält nun eine Liste der zuletzt gespielten Spiele,
+     wenn ScummVM nicht läuft, und ermöglicht den direkten Start dieser Spiele.
+   - Sparkle-Updater für vereinfachte Programmaktualisierungen hinzugefügt.
 
 1.8.0 (04.03.2016)
  Neue Spiele:
@@ -59,7 +109,7 @@ Neue Portierungen:
      (verwendet von Mixed Up Mother Goose).
    - Feste Verzögerung von 2 Sekunden bei Raumwechseln entfernt und durch
      Heuristik ersetzt.
-   - Fehlerhafte Tastenbelegungen nach abspeichern/laden behoben
+   - Fehlerhafte Tastenbelegungen nach abspeichern/laden behoben.
 
  AGOS:
    - Arpeggio-Effekt in der Musik der Amiga-Version von Elvira 1 repariert.
@@ -71,7 +121,7 @@ Neue Portierungen:
      AdLib-Ausgabe erheblich und erhöht die Originaltreue.
 
  Baphomets Fluch 1:
-   - Sprachausgabe in Macintosh-Versionen korrigiert, wenn ScumMVM
+   - Sprachausgabe in Macintosh-Versionen korrigiert, wenn ScummVM
      auf Big-Endian-Systemen ausgeführt wird.
    - Fehler beim Laden eines Spielstandes aus dem Hauptmenü in der
      Bull's Head Hill-Szene korrigiert. Dieser Fehler trat womöglich auch

@@ -41,6 +41,8 @@ static const PlainGameDescriptor wageGames[] = {
 	{"afm", "Another Fine Mess"},
 	{"amot", "A Mess O' Trouble"},
 	{"cantitoe", "Camp Cantitoe"},
+	{"drakmythcastle", "Drakmyth Castle"},
+	{"raysmaze", "Ray's Maze"},
 	{"scepters", "Enchanted Scepters"},
 	{"twisted", "Twisted!"},
 	{"wage", "WAGE"},
@@ -52,8 +54,9 @@ static const PlainGameDescriptor wageGames[] = {
 class WageMetaEngine : public AdvancedMetaEngine {
 public:
 	WageMetaEngine() : AdvancedMetaEngine(Wage::gameDescriptions, sizeof(ADGameDescription), wageGames) {
-		_singleid = "wage";
-		_guioptions = GUIO2(GUIO_NOSPEECH, GUIO_NOMIDI);
+		_md5Bytes = 50000;
+		_singleId = "wage";
+		_guiOptions = GUIO2(GUIO_NOSPEECH, GUIO_NOMIDI);
 	}
 
 	virtual const char *getName() const {

@@ -20,21 +20,26 @@
  *
  */
 
-#ifndef BACKENDS_GRAPHICS_OPENGL_EXTENSIONS_H
-#define BACKENDS_GRAPHICS_OPENGL_EXTENSIONS_H
+#ifndef BACKENDS_GRAPHICS_OPENGL_PIPELINES_CLUT8_H
+#define BACKENDS_GRAPHICS_OPENGL_PIPELINES_CLUT8_H
+
+#include "backends/graphics/opengl/pipelines/shader.h"
 
 namespace OpenGL {
 
-/**
- * Checks for availability of extensions we want to use and initializes them
- * when available.
- */
-void initializeGLExtensions();
+#if !USE_FORCED_GLES
+class CLUT8LookUpPipeline : public ShaderPipeline {
+public:
+	CLUT8LookUpPipeline();
 
-/**
- * Whether non power of two textures are supported
- */
-extern bool g_extNPOTSupported;
+	void setPaletteTexture(const GLTexture *paletteTexture) { _paletteTexture = paletteTexture; }
+
+	virtual void drawTexture(const GLTexture &texture, const GLfloat *coordinates);
+
+private:
+	const GLTexture *_paletteTexture;
+};
+#endif // !USE_FORCED_GLES
 
 } // End of namespace OpenGL
 

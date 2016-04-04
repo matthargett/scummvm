@@ -58,6 +58,7 @@
 #include "sci/graphics/picture.h"
 #include "sci/graphics/ports.h"
 #include "sci/graphics/palette.h"
+#include "sci/graphics/remap.h"
 #include "sci/graphics/screen.h"
 #include "sci/graphics/text16.h"
 #include "sci/graphics/transitions.h"
@@ -163,6 +164,7 @@ SciEngine::~SciEngine() {
 	delete _gfxText32;
 	delete _robotDecoder;
 	delete _gfxFrameout;
+	delete _gfxRemap32;
 #endif
 	delete _gfxMenu;
 	delete _gfxControls16;
@@ -175,6 +177,7 @@ SciEngine::~SciEngine() {
 	delete _gfxPorts;
 	delete _gfxCache;
 	delete _gfxPalette16;
+	delete _gfxRemap16;
 	delete _gfxCursor;
 	delete _gfxScreen;
 
@@ -238,13 +241,7 @@ Common::Error SciEngine::run() {
 		// Only DOS+Windows
 		switch (_gameId) {
 		case GID_KQ6:
-			if (isCD())
-				_forceHiresGraphics = ConfMan.getBool("enable_high_resolution_graphics");
-			break;
 		case GID_GK1:
-			if ((isCD()) && (!isDemo()))
-				_forceHiresGraphics = ConfMan.getBool("enable_high_resolution_graphics");
-			break;
 		case GID_PQ4:
 			if (isCD())
 				_forceHiresGraphics = ConfMan.getBool("enable_high_resolution_graphics");
@@ -666,6 +663,7 @@ void SciEngine::initGraphics() {
 	_gfxPaint = 0;
 	_gfxPaint16 = 0;
 	_gfxPalette16 = 0;
+	_gfxRemap16 = 0;
 	_gfxPorts = 0;
 	_gfxText16 = 0;
 	_gfxTransitions = 0;
@@ -676,6 +674,7 @@ void SciEngine::initGraphics() {
 	_gfxFrameout = 0;
 	_gfxPaint32 = 0;
 	_gfxPalette32 = 0;
+	_gfxRemap32 = 0;
 #endif
 
 	if (hasMacIconBar())
@@ -685,9 +684,12 @@ void SciEngine::initGraphics() {
 	if (getSciVersion() >= SCI_VERSION_2) {
 		_gfxPalette32 = new GfxPalette32(_resMan, _gfxScreen);
 		_gfxPalette16 = _gfxPalette32;
+		_gfxRemap32 = new GfxRemap32(_gfxPalette32);
 	} else {
 #endif
 		_gfxPalette16 = new GfxPalette(_resMan, _gfxScreen);
+		if (getGameId() == GID_QFG4DEMO)
+			_gfxRemap16 = new GfxRemap(_gfxPalette16);
 #ifdef ENABLE_SCI32
 	}
 #endif
@@ -705,7 +707,7 @@ void SciEngine::initGraphics() {
 		_gfxPaint = _gfxPaint32;
 		_robotDecoder = new RobotDecoder(getPlatform() == Common::kPlatformMacintosh);
 		_gfxFrameout = new GfxFrameout(_gamestate->_segMan, _resMan, _gfxCoordAdjuster, _gfxCache, _gfxScreen, _gfxPalette32, _gfxPaint32);
-		_gfxText32 = new GfxText32(_gamestate->_segMan, _gfxCache, _gfxScreen);
+		_gfxText32 = new GfxText32(_gamestate->_segMan, _gfxCache);
 		_gfxControls32 = new GfxControls32(_gamestate->_segMan, _gfxCache, _gfxText32);
 		_gfxFrameout->run();
 	} else {
@@ -834,7 +836,7 @@ Console *SciEngine::getSciDebugger() {
 }
 
 const char *SciEngine::getGameIdStr() const {
-	return _gameDescription->gameid;
+	return _gameDescription->gameId;
 }
 
 Common::Language SciEngine::getLanguage() const {

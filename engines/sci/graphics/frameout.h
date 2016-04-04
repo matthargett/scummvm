@@ -130,64 +130,6 @@ struct ShowStyleEntry {
 	bool processed;
 
 	//
-	// Engine-specific properties for SCI2 through 2.1early
-	//
-
-	// TODO: Could union this stuff to save literally
-	// several bytes of memory.
-
-	/**
-	 * The width of the plane. Used to determine the correct
-	 * size of screen items for wipes.
-	 */
-	int width;
-
-	/**
-	 * The height of the plane. Used to determine the correct
-	 * size of screen items for wipes.
-	 */
-	int height;
-
-	/**
-	 * The number of edges that a transition operates on.
-	 * Slide wipe: 1 edge
-	 * Reveal wipe: 2 edges
-	 * Iris wipe: 4 edges
-	 */
-	// TODO: I have no idea why SCI engine stores this instead
-	// of a screenItems count
-	int edgeCount;
-
-	/**
-	 * Used by transition types 1 through 10.
-	 * One screen item per division per edge.
-	 */
-	ScreenItemList screenItems;
-
-	/**
-	 * Used by transition types 11 and 12. A copy of the
-	 * visible frame buffer.
-	 */
-	// TODO: This is a reg_t in SCI engine; not sure if
-	// we can avoid allocation through SegMan or not.
-	reg_t bitmapMemId;
-
-	/**
-	 * Used by transition types 11 and 12. A screen item
-	 * used to display the associated bitmap data.
-	 */
-	ScreenItem *bitmapScreenItem;
-
-	/**
-	 * A number used to pick pixels to dissolve by types
-	 * 11 and 12.
-	 */
-	int dissolveSeed;
-	int unknown3A;
-	// max?
-	int dissolveInitial;
-
-	//
 	// Engine specific properties for SCI2.1mid through SCI3
 	//
 
@@ -240,11 +182,13 @@ public:
 #pragma mark Screen items
 private:
 	void deleteScreenItem(ScreenItem *screenItem, const reg_t plane);
+	void remapMarkRedraw();
 
 public:
 	void kernelAddScreenItem(const reg_t object);
 	void kernelUpdateScreenItem(const reg_t object);
 	void kernelDeleteScreenItem(const reg_t object);
+	void kernelSetNowSeen(const reg_t screenItemObject) const;
 
 #pragma mark -
 #pragma mark Planes
@@ -259,6 +203,13 @@ private:
 	PlaneList _planes;
 
 	/**
+	 * Updates an existing plane with properties from the
+	 * given VM object.
+	 */
+	void updatePlane(Plane &plane);
+
+public:
+	/**
 	 * Creates and adds a new plane to the plane list, or
 	 * cancels deletion and updates an already-existing
 	 * plane if a plane matching the given plane VM object
@@ -270,18 +221,23 @@ private:
 	void addPlane(Plane &plane);
 
 	/**
-	 * Updates an existing plane with properties from the
-	 * given VM object.
+	 * Deletes a plane within the current plane list.
+	 *
+	 * @note This method is on Screen in SCI engine, but it
+	 * is only ever called on `GraphicsMgr.screen`.
 	 */
-	void updatePlane(Plane &plane);
+	void deletePlane(Plane &plane);
 
-public:
 	const PlaneList &getPlanes() const {
 		return _planes;
+	}
+	const PlaneList &getVisiblePlanes() const {
+		return _visiblePlanes;
 	}
 	void kernelAddPlane(const reg_t object);
 	void kernelUpdatePlane(const reg_t object);
 	void kernelDeletePlane(const reg_t object);
+	void kernelMovePlaneItems(const reg_t object, const int16 deltaX, const int16 deltaY, const bool scrollPics);
 	int16 kernelGetHighPlanePri();
 
 #pragma mark -
@@ -312,14 +268,11 @@ private:
 	bool processShowStyleNone(ShowStyleEntry *showStyle);
 	bool processShowStyleMorph(ShowStyleEntry *showStyle);
 	bool processShowStyleFade(const int direction, ShowStyleEntry *showStyle);
-#if 0
-	bool processShowStyleWipe(const int direction, ShowStyleEntry *const showStyle);
-#endif
 
 public:
 	// NOTE: This signature is taken from SCI3 Phantasmagoria 2
 	// and is valid for all implementations of SCI32
-	void kernelSetShowStyle(const uint16 argc, const reg_t &planeObj, const ShowStyleType type, const int16 seconds, const int16 direction, const int16 priority, const int16 animate, const int16 frameOutNow, const reg_t &pFadeArray, const int16 divisions, const int16 blackScreen);
+	void kernelSetShowStyle(const uint16 argc, const reg_t planeObj, const ShowStyleType type, const int16 seconds, const int16 direction, const int16 priority, const int16 animate, const int16 frameOutNow, reg_t pFadeArray, int16 divisions, const int16 blackScreen);
 
 #pragma mark -
 #pragma mark Rendering
@@ -337,13 +290,6 @@ private:
 	 * rects (which are also calculated by `calcLists`).
 	 */
 	Buffer _currentBuffer;
-
-	// TODO: In SCI2.1/SQ6, priority map pixels are not allocated
-	// by default. In SCI2/GK1, pixels are allocated, but not used
-	// anywhere except within CelObj::Draw in seemingly the same
-	// way they are used in SCI2.1/SQ6: that is, never read, only
-	// written.
-	Buffer _priorityMap;
 
 	/**
 	 * TODO: Documentation
@@ -423,13 +369,6 @@ private:
 	void drawScreenItemList(const DrawList &screenItemList);
 
 	/**
-	 * Updates the internal screen buffer for the next
-	 * frame. If `shouldShowBits` is true, also sends the
-	 * buffer to hardware.
-	 */
-	void frameOut(const bool shouldShowBits, const Common::Rect &rect = Common::Rect());
-
-	/**
 	 * Adds a new rectangle to the list of regions to write
 	 * out to the hardware. The provided rect may be merged
 	 * into an existing rectangle to reduce the number of
@@ -450,12 +389,6 @@ private:
 
 public:
 	/**
-	 * TODO: Document
-	 * This is used by CelObj::Draw.
-	 */
-	bool _hasRemappedScreenItem;
-
-	/**
 	 * Whether palMorphFrameOut should be used instead of
 	 * frameOut for rendering. Used by kMorphOn to
 	 * explicitly enable palMorphFrameOut for one frame.
@@ -469,15 +402,17 @@ public:
 	void kernelFrameOut(const bool showBits);
 
 	/**
+	 * Updates the internal screen buffer for the next
+	 * frame. If `shouldShowBits` is true, also sends the
+	 * buffer to hardware.
+	 */
+	void frameOut(const bool shouldShowBits, const Common::Rect &rect = Common::Rect());
+
+	/**
 	 * Modifies the raw pixel data for the next frame with
 	 * new palette indexes based on matched style ranges.
 	 */
 	void alterVmap(const Palette &palette1, const Palette &palette2, const int8 style, const int8 *const styleRanges);
-
-	// TODO: SCI2 engine never uses priority map?
-	inline Buffer &getPriorityMap() {
-		return _priorityMap;
-	}
 
 	// NOTE: This function is used within ScreenItem subsystem and assigned
 	// to various booleanish fields that seem to represent the state of the
@@ -491,8 +426,17 @@ public:
 		return 1;
 	};
 
-	uint16 kernelIsOnMe(int16 x, int16 y, uint16 checkPixels, reg_t screenObject);
-	uint16 isOnMe(Plane *screenItemPlane, ScreenItem *screenItem, int16 x, int16 y, uint16 checkPixels);
+#pragma mark -
+#pragma mark Mouse cursor
+private:
+	/**
+	 * Determines whether or not the point given by
+	 * `position` is inside of the given screen item.
+	 */
+	bool isOnMe(const ScreenItem &screenItem, const Plane &plane, const Common::Point &position, const bool checkPixel) const;
+
+public:
+	reg_t kernelIsOnMe(const reg_t object, const Common::Point &position, const bool checkPixel) const;
 
 #pragma mark -
 #pragma mark Debugging
@@ -501,6 +445,8 @@ public:
 	void printVisiblePlaneList(Console *con) const;
 	void printPlaneListInternal(Console *con, const PlaneList &planeList) const;
 	void printPlaneItemList(Console *con, const reg_t planeObject) const;
+	void printVisiblePlaneItemList(Console *con, const reg_t planeObject) const;
+	void printPlaneItemListInternal(Console *con, const ScreenItemList &screenItemList) const;
 };
 
 } // End of namespace Sci

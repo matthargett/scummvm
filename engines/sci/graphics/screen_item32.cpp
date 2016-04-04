@@ -83,7 +83,7 @@ _mirrorX(false) {
 	}
 }
 
-ScreenItem::ScreenItem(const reg_t plane, const CelInfo32 &celInfo, const Common::Rect &rect, const ScaleInfo &scaleInfo) :
+ScreenItem::ScreenItem(const reg_t plane, const CelInfo32 &celInfo, const Common::Point &position, const ScaleInfo &scaleInfo) :
 _plane(plane),
 _scale(scaleInfo),
 _useInsetRect(false),
@@ -91,7 +91,7 @@ _z(0),
 _celInfo(celInfo),
 _celObj(nullptr),
 _fixPriority(false),
-_position(rect.left, rect.top),
+_position(position),
 _object(make_reg(0, _nextObjectId++)),
 _pictureId(-1),
 _created(g_sci->_gfxFrameout->getScreenCount()),
@@ -115,7 +115,17 @@ _screenRect(other._screenRect) {
 }
 
 void ScreenItem::operator=(const ScreenItem &other) {
-	_celInfo = other._celInfo;
+	// NOTE: The original engine did not check for differences in `_celInfo`
+	// to clear `_celObj` here; instead, it unconditionally set `_celInfo`,
+	// didn't clear `_celObj`, and did hacky stuff in `kIsOnMe` to avoid
+	// testing a mismatched `_celObj`. See `GfxFrameout::kernelIsOnMe` for
+	// more detail.
+	if (_celInfo != other._celInfo) {
+		_celInfo = other._celInfo;
+		delete _celObj;
+		_celObj = nullptr;
+	}
+
 	_screenRect = other._screenRect;
 	_mirrorX = other._mirrorX;
 	_useInsetRect = other._useInsetRect;
@@ -124,6 +134,10 @@ void ScreenItem::operator=(const ScreenItem &other) {
 	}
 	_scale = other._scale;
 	_scaledPosition = other._scaledPosition;
+}
+
+ScreenItem::~ScreenItem() {
+	delete _celObj;
 }
 
 void ScreenItem::init() {
@@ -224,7 +238,9 @@ void ScreenItem::calcRects(const Plane &plane) {
 	const int16 screenWidth = g_sci->_gfxFrameout->getCurrentBuffer().screenWidth;
 	const int16 screenHeight = g_sci->_gfxFrameout->getCurrentBuffer().screenHeight;
 
-	Common::Rect celRect(_celObj->_width, _celObj->_height);
+	const CelObj &celObj = getCelObj();
+
+	Common::Rect celRect(celObj._width, celObj._height);
 	if (_useInsetRect) {
 		if (_insetRect.intersects(celRect)) {
 			_insetRect.clip(celRect);
@@ -235,28 +251,33 @@ void ScreenItem::calcRects(const Plane &plane) {
 		_insetRect = celRect;
 	}
 
-	Ratio newRatioX;
-	Ratio newRatioY;
+	Ratio scaleX, scaleY;
 
 	if (_scale.signal & kScaleSignalDoScaling32) {
 		if (_scale.signal & kScaleSignalUseVanishingPoint) {
 			int num = _scale.max * (_position.y - plane._vanishingPoint.y) / (scriptWidth - plane._vanishingPoint.y);
-			newRatioX = Ratio(num, 128);
-			newRatioY = Ratio(num, 128);
+			scaleX = Ratio(num, 128);
+			scaleY = Ratio(num, 128);
 		} else {
-			newRatioX = Ratio(_scale.x, 128);
-			newRatioY = Ratio(_scale.y, 128);
+			scaleX = Ratio(_scale.x, 128);
+			scaleY = Ratio(_scale.y, 128);
 		}
 	}
 
-	if (newRatioX.getNumerator() && newRatioY.getNumerator()) {
+	if (scaleX.getNumerator() && scaleY.getNumerator()) {
 		_screenItemRect = _insetRect;
 
-		if (_celObj->_scaledWidth != scriptWidth || _celObj->_scaledHeight != scriptHeight) {
+		const Ratio celToScreenX(screenWidth, celObj._scaledWidth);
+		const Ratio celToScreenY(screenHeight, celObj._scaledHeight);
+
+		// Cel may use a coordinate system that is not the same size as the
+		// script coordinate system (usually this means high-resolution
+		// pictures with low-resolution scripts)
+		if (celObj._scaledWidth != scriptWidth || celObj._scaledHeight != scriptHeight) {
 			if (_useInsetRect) {
-				Ratio celScriptXRatio(_celObj->_scaledWidth, scriptWidth);
-				Ratio celScriptYRatio(_celObj->_scaledHeight, scriptHeight);
-				mulru(_screenItemRect, celScriptXRatio, celScriptYRatio, 0);
+				const Ratio scriptToCelX(celObj._scaledWidth, scriptWidth);
+				const Ratio scriptToCelY(celObj._scaledHeight, scriptHeight);
+				mulru(_screenItemRect, scriptToCelX, scriptToCelY, 0);
 
 				if (_screenItemRect.intersects(celRect)) {
 					_screenItemRect.clip(celRect);
@@ -265,48 +286,47 @@ void ScreenItem::calcRects(const Plane &plane) {
 				}
 			}
 
-			int displaceX = _celObj->_displace.x;
-			int displaceY = _celObj->_displace.y;
+			int displaceX = celObj._displace.x;
+			int displaceY = celObj._displace.y;
 
-			if (_mirrorX != _celObj->_mirrorX && _celInfo.type != kCelTypePic) {
-				displaceX = _celObj->_width - _celObj->_displace.x - 1;
+			if (_mirrorX != celObj._mirrorX && _celInfo.type != kCelTypePic) {
+				displaceX = celObj._width - celObj._displace.x - 1;
 			}
 
-			if (!newRatioX.isOne() || !newRatioY.isOne()) {
-				mulinc(_screenItemRect, newRatioX, newRatioY);
-				displaceX = (displaceX * newRatioX).toInt();
-				displaceY = (displaceY * newRatioY).toInt();
+			if (!scaleX.isOne() || !scaleY.isOne()) {
+				mulinc(_screenItemRect, scaleX, scaleY);
+				displaceX = (displaceX * scaleX).toInt();
+				displaceY = (displaceY * scaleY).toInt();
 			}
 
-			Ratio celXRatio(screenWidth, _celObj->_scaledWidth);
-			Ratio celYRatio(screenHeight, _celObj->_scaledHeight);
+			mulinc(_screenItemRect, celToScreenX, celToScreenY);
+			displaceX = (displaceX * celToScreenX).toInt();
+			displaceY = (displaceY * celToScreenY).toInt();
 
-			displaceX = (displaceX * celXRatio).toInt();
-			displaceY = (displaceY * celYRatio).toInt();
-
-			mulinc(_screenItemRect, celXRatio, celYRatio);
+			const Ratio scriptToScreenX = Ratio(screenWidth, scriptWidth);
+			const Ratio scriptToScreenY = Ratio(screenHeight, scriptHeight);
 
 			if (/* TODO: dword_C6288 */ false && _celInfo.type == kCelTypePic) {
 				_scaledPosition.x = _position.x;
 				_scaledPosition.y = _position.y;
 			} else {
-				_scaledPosition.x = (_position.x * screenWidth / scriptWidth) - displaceX;
-				_scaledPosition.y = (_position.y * screenHeight / scriptHeight) - displaceY;
+				_scaledPosition.x = (_position.x * scriptToScreenX).toInt() - displaceX;
+				_scaledPosition.y = (_position.y * scriptToScreenY).toInt() - displaceY;
 			}
 
 			_screenItemRect.translate(_scaledPosition.x, _scaledPosition.y);
 
-			if (_mirrorX != _celObj->_mirrorX && _celInfo.type == kCelTypePic) {
+			if (_mirrorX != celObj._mirrorX && _celInfo.type == kCelTypePic) {
 				Common::Rect temp(_insetRect);
 
-				if (!newRatioX.isOne()) {
-					mulinc(temp, newRatioX, Ratio());
+				if (!scaleX.isOne()) {
+					mulinc(temp, scaleX, Ratio());
 				}
 
-				mulinc(temp, celXRatio, Ratio());
+				mulinc(temp, celToScreenX, Ratio());
 
 				CelObjPic *celObjPic = dynamic_cast<CelObjPic *>(_celObj);
-				temp.translate(celObjPic->_relativePosition.x * screenWidth / scriptWidth - displaceX, 0);
+				temp.translate((celObjPic->_relativePosition.x * scriptToScreenX).toInt() - displaceX, 0);
 
 				// TODO: This is weird.
 				int deltaX = plane._planeRect.width() - temp.right - 1 - temp.left;
@@ -319,16 +339,16 @@ void ScreenItem::calcRects(const Plane &plane) {
 			_scaledPosition.y += plane._planeRect.top;
 			_screenItemRect.translate(plane._planeRect.left, plane._planeRect.top);
 
-			_ratioX = newRatioX * Ratio(screenWidth, _celObj->_scaledWidth);
-			_ratioY = newRatioY * Ratio(screenHeight, _celObj->_scaledHeight);
+			_ratioX = scaleX * celToScreenX;
+			_ratioY = scaleY * celToScreenY;
 		} else {
-			int displaceX = _celObj->_displace.x;
-			if (_mirrorX != _celObj->_mirrorX && _celInfo.type != kCelTypePic) {
-				displaceX = _celObj->_width - _celObj->_displace.x - 1;
+			int displaceX = celObj._displace.x;
+			if (_mirrorX != celObj._mirrorX && _celInfo.type != kCelTypePic) {
+				displaceX = celObj._width - celObj._displace.x - 1;
 			}
 
-			if (!newRatioX.isOne() || !newRatioY.isOne()) {
-				mulinc(_screenItemRect, newRatioX, newRatioY);
+			if (!scaleX.isOne() || !scaleY.isOne()) {
+				mulinc(_screenItemRect, scaleX, scaleY);
 				// TODO: This was in the original code, baked into the
 				// multiplication though it is not immediately clear
 				// why this is the only one that reduces the BR corner
@@ -336,20 +356,20 @@ void ScreenItem::calcRects(const Plane &plane) {
 				_screenItemRect.bottom -= 1;
 			}
 
-			_scaledPosition.x = _position.x - (displaceX * newRatioX).toInt();
-			_scaledPosition.y = _position.y - (_celObj->_displace.y * newRatioY).toInt();
+			_scaledPosition.x = _position.x - (displaceX * scaleX).toInt();
+			_scaledPosition.y = _position.y - (celObj._displace.y * scaleY).toInt();
 			_screenItemRect.translate(_scaledPosition.x, _scaledPosition.y);
 
-			if (_mirrorX != _celObj->_mirrorX && _celInfo.type == kCelTypePic) {
+			if (_mirrorX != celObj._mirrorX && _celInfo.type == kCelTypePic) {
 				Common::Rect temp(_insetRect);
 
-				if (!newRatioX.isOne()) {
-					mulinc(temp, newRatioX, Ratio());
+				if (!scaleX.isOne()) {
+					mulinc(temp, scaleX, Ratio());
 					temp.right -= 1;
 				}
 
 				CelObjPic *celObjPic = dynamic_cast<CelObjPic *>(_celObj);
-				temp.translate(celObjPic->_relativePosition.x - (displaceX * newRatioX).toInt(), celObjPic->_relativePosition.y - (_celObj->_displace.y * newRatioY).toInt());
+				temp.translate(celObjPic->_relativePosition.x - (displaceX * scaleX).toInt(), celObjPic->_relativePosition.y - (celObj._displace.y * scaleY).toInt());
 
 				// TODO: This is weird.
 				int deltaX = plane._gameRect.width() - temp.right - 1 - temp.left;
@@ -362,15 +382,13 @@ void ScreenItem::calcRects(const Plane &plane) {
 			_scaledPosition.y += plane._gameRect.top;
 			_screenItemRect.translate(plane._gameRect.left, plane._gameRect.top);
 
-			if (screenWidth != _celObj->_scaledWidth || _celObj->_scaledHeight != screenHeight) {
-				Ratio celXRatio(screenWidth, _celObj->_scaledWidth);
-				Ratio celYRatio(screenHeight, _celObj->_scaledHeight);
-				mulru(_scaledPosition, celXRatio, celYRatio);
-				mulru(_screenItemRect, celXRatio, celYRatio, 1);
+			if (celObj._scaledWidth != screenWidth || celObj._scaledHeight != screenHeight) {
+				mulru(_scaledPosition, celToScreenX, celToScreenY);
+				mulru(_screenItemRect, celToScreenX, celToScreenY, 1);
 			}
 
-			_ratioX = newRatioX * Ratio(screenWidth, _celObj->_scaledWidth);
-			_ratioY = newRatioY * Ratio(screenHeight, _celObj->_scaledHeight);
+			_ratioX = scaleX * celToScreenX;
+			_ratioY = scaleY * celToScreenY;
 		}
 
 		_screenRect = _screenItemRect;
@@ -395,7 +413,7 @@ void ScreenItem::calcRects(const Plane &plane) {
 	}
 }
 
-CelObj &ScreenItem::getCelObj() {
+CelObj &ScreenItem::getCelObj() const {
 	if (_celObj == nullptr) {
 		switch (_celInfo.type) {
 			case kCelTypeView:
@@ -417,7 +435,7 @@ CelObj &ScreenItem::getCelObj() {
 }
 
 void ScreenItem::printDebugInfo(Console *con) const {
-	con->debugPrintf("%x:%x (%s), prio %d, x %d, y %d, z: %d, scaledX: %d, scaledY: %d flags: %d\n",
+	con->debugPrintf("%04x:%04x (%s), prio %d, x %d, y %d, z: %d, scaledX: %d, scaledY: %d flags: %d\n",
 		_object.getSegment(), _object.getOffset(),
 		g_sci->getEngineState()->_segMan->getObjectName(_object),
 		_priority,
@@ -491,6 +509,109 @@ void ScreenItem::update(const reg_t object) {
 	_deleted = 0;
 }
 
+// TODO: This code is quite similar to calcRects, so try to deduplicate
+// if possible
+Common::Rect ScreenItem::getNowSeenRect(const Plane &plane) const {
+	CelObj &celObj = getCelObj();
+
+	Common::Rect celObjRect(celObj._width, celObj._height);
+	Common::Rect nsRect;
+
+	if (_useInsetRect) {
+		// TODO: This is weird. Checking to see if the inset rect is
+		// fully inside the bounds of the celObjRect, and then
+		// clipping to the celObjRect, is pretty useless.
+		if (_insetRect.right > 0 && _insetRect.bottom > 0 && _insetRect.left < celObj._width && _insetRect.top < celObj._height) {
+			nsRect = _insetRect;
+			nsRect.clip(celObjRect);
+		} else {
+			nsRect = Common::Rect();
+		}
+	} else {
+		nsRect = celObjRect;
+	}
+
+	const uint16 scriptWidth = g_sci->_gfxFrameout->getCurrentBuffer().scriptWidth;
+	const uint16 scriptHeight = g_sci->_gfxFrameout->getCurrentBuffer().scriptHeight;
+
+	Ratio scaleX, scaleY;
+	if (_scale.signal & kScaleSignalDoScaling32) {
+		if (_scale.signal & kScaleSignalUseVanishingPoint) {
+			int num = _scale.max * (_position.y - plane._vanishingPoint.y) / (scriptWidth - plane._vanishingPoint.y);
+			scaleX = Ratio(num, 128);
+			scaleY = Ratio(num, 128);
+		} else {
+			scaleX = Ratio(_scale.x, 128);
+			scaleY = Ratio(_scale.y, 128);
+		}
+	}
+
+	if (scaleX.getNumerator() == 0 || scaleY.getNumerator() == 0) {
+		return Common::Rect();
+	}
+
+	int16 displaceX = celObj._displace.x;
+	int16 displaceY = celObj._displace.y;
+
+	if (_mirrorX != celObj._mirrorX && _celInfo.type != kCelTypePic) {
+		displaceX = celObj._width - displaceX - 1;
+	}
+
+	if (celObj._scaledWidth != scriptWidth || celObj._scaledHeight != scriptHeight) {
+		if (_useInsetRect) {
+			Ratio scriptToCelX(celObj._scaledWidth, scriptWidth);
+			Ratio scriptToCelY(celObj._scaledHeight, scriptHeight);
+			mulru(nsRect, scriptToCelX, scriptToCelY, 0);
+
+			// TODO: This is weird. Checking to see if the inset rect is
+			// fully inside the bounds of the celObjRect, and then
+			// clipping to the celObjRect, is pretty useless.
+			if (nsRect.right > 0 && nsRect.bottom > 0 && nsRect.left < celObj._width && nsRect.top < celObj._height) {
+				nsRect.clip(celObjRect);
+			} else {
+				nsRect = Common::Rect();
+			}
+		}
+
+		if (!scaleX.isOne() || !scaleY.isOne()) {
+			mulinc(nsRect, scaleX, scaleY);
+			// TODO: This was in the original code, baked into the
+			// multiplication though it is not immediately clear
+			// why this is the only one that reduces the BR corner
+			nsRect.right -= 1;
+			nsRect.bottom -= 1;
+		}
+
+		Ratio celToScriptX(scriptWidth, celObj._scaledWidth);
+		Ratio celToScriptY(scriptHeight, celObj._scaledHeight);
+
+		displaceX = (displaceX * scaleX * celToScriptX).toInt();
+		displaceY = (displaceY * scaleY * celToScriptY).toInt();
+
+		mulinc(nsRect, celToScriptX, celToScriptY);
+		nsRect.translate(_position.x - displaceX, _position.y - displaceY);
+	} else {
+		if (!scaleX.isOne() || !scaleY.isOne()) {
+			mulinc(nsRect, scaleX, scaleY);
+			// TODO: This was in the original code, baked into the
+			// multiplication though it is not immediately clear
+			// why this is the only one that reduces the BR corner
+			nsRect.right -= 1;
+			nsRect.bottom -= 1;
+		}
+
+		displaceX = (displaceX * scaleX).toInt();
+		displaceY = (displaceY * scaleY).toInt();
+		nsRect.translate(_position.x - displaceX, _position.y - displaceY);
+
+		if (_mirrorX != celObj._mirrorX && _celInfo.type != kCelTypePic) {
+			nsRect.translate(plane._gameRect.width() - nsRect.width(), 0);
+		}
+	}
+
+	return nsRect;
+}
+
 #pragma mark -
 #pragma mark ScreenItemList
 ScreenItem *ScreenItemList::findByObject(const reg_t object) const {
@@ -523,4 +644,4 @@ void ScreenItemList::unsort() {
 	}
 }
 
-}
+} // End of namespace Sci

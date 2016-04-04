@@ -104,6 +104,10 @@ struct CelInfo32 {
 			bitmap == other.bitmap
 		);
 	}
+
+	inline bool operator!=(const CelInfo32 &other) {
+		return !(*this == other);
+	}
 };
 
 class CelObj;
@@ -180,12 +184,15 @@ public:
 	CelScaler() :
 	_scaleTables(),
 	_activeIndex(0) {
-		CelScalerTable &table = _scaleTables[_activeIndex];
+		CelScalerTable &table = _scaleTables[0];
 		table.scaleX = Ratio();
 		table.scaleY = Ratio();
 		for (int i = 0; i < ARRAYSIZE(table.valuesX); ++i) {
 			table.valuesX[i] = i;
 			table.valuesY[i] = i;
+		}
+		for (int i = 1; i < ARRAYSIZE(_scaleTables); ++i) {
+			_scaleTables[i] = _scaleTables[0];
 		}
 	}
 
@@ -379,10 +386,10 @@ public:
 #pragma mark -
 #pragma mark CelObj - Drawing
 private:
-	template <typename MAPPER, typename SCALER>
+	template<typename MAPPER, typename SCALER>
 	void render(Buffer &target, const Common::Rect &targetRect, const Common::Point &scaledPosition) const;
 
-	template <typename MAPPER, typename SCALER>
+	template<typename MAPPER, typename SCALER>
 	void render(Buffer &target, const Common::Rect &targetRect, const Common::Point &scaledPosition, const Ratio &scaleX, const Ratio &scaleY) const;
 
 	void drawHzFlip(Buffer &target, const Common::Rect &targetRect, const Common::Point &scaledPosition) const;
@@ -391,18 +398,15 @@ private:
 	void drawUncompHzFlip(Buffer &target, const Common::Rect &targetRect, const Common::Point &scaledPosition) const;
 	void scaleDraw(Buffer &target, const Ratio &scaleX, const Ratio &scaleY, const Common::Rect &targetRect, const Common::Point &scaledPosition) const;
 	void scaleDrawUncomp(Buffer &target, const Ratio &scaleX, const Ratio &scaleY, const Common::Rect &targetRect, const Common::Point &scaledPosition) const;
+
 	void drawHzFlipMap(Buffer &target, const Common::Rect &targetRect, const Common::Point &scaledPosition) const;
 	void drawNoFlipMap(Buffer &target, const Common::Rect &targetRect, const Common::Point &scaledPosition) const;
 	void drawUncompNoFlipMap(Buffer &target, const Common::Rect &targetRect, const Common::Point &scaledPosition) const;
 	void drawUncompHzFlipMap(Buffer &target, const Common::Rect &targetRect, const Common::Point &scaledPosition) const;
 	void scaleDrawMap(Buffer &target, const Ratio &scaleX, const Ratio &scaleY, const Common::Rect &targetRect, const Common::Point &scaledPosition) const;
 	void scaleDrawUncompMap(Buffer &target, const Ratio &scaleX, const Ratio &scaleY, const Common::Rect &targetRect, const Common::Point &scaledPosition) const;
-	void drawHzFlipMap(Buffer &target, const Buffer &priorityMap, const Common::Rect &targetRect, const Common::Point &scaledPosition, const uint8 priority) const;
-	void drawNoFlipMap(Buffer &target, const Buffer &priorityMap, const Common::Rect &targetRect, const Common::Point &scaledPosition, const uint8 priority) const;
-	void drawUncompNoFlipMap(Buffer &target, const Buffer &priorityMap, const Common::Rect &targetRect, const Common::Point &scaledPosition, const uint8 priority) const;
-	void drawUncompHzFlipMap(Buffer &target, const Buffer &priorityMap, const Common::Rect &targetRect, const Common::Point &scaledPosition, const uint8 priority) const;
-	void scaleDrawMap(Buffer &target, const Buffer &priorityMap, const Ratio &scaleX, const Ratio &scaleY, const Common::Rect &targetRect, const Common::Point &scaledPosition, const uint8 priority) const;
-	void scaleDrawUncompMap(Buffer &target, const Buffer &priorityMap, const Ratio &scaleX, const Ratio &scaleY, const Common::Rect &targetRect, const Common::Point &scaledPosition, const uint8 priority) const;
+	// NOTE: The original includes versions of the above functions with priority parameters, which were not actually used in SCI32
+
 	void drawHzFlipNoMD(Buffer &target, const Common::Rect &targetRect, const Common::Point &scaledPosition) const;
 	void drawNoFlipNoMD(Buffer &target, const Common::Rect &targetRect, const Common::Point &scaledPosition) const;
 	void drawUncompNoFlipNoMD(Buffer &target, const Common::Rect &targetRect, const Common::Point &scaledPosition) const;
@@ -411,12 +415,7 @@ private:
 	void drawUncompHzFlipNoMDNoSkip(Buffer &target, const Common::Rect &targetRect, const Common::Point &scaledPosition) const;
 	void scaleDrawNoMD(Buffer &target, const Ratio &scaleX, const Ratio &scaleY, const Common::Rect &targetRect, const Common::Point &scaledPosition) const;
 	void scaleDrawUncompNoMD(Buffer &target, const Ratio &scaleX, const Ratio &scaleY, const Common::Rect &targetRect, const Common::Point &scaledPosition) const;
-	void drawHzFlipNoMD(Buffer &target, const Buffer &priorityMap, const Common::Rect &targetRect, const Common::Point &scaledPosition, const uint8 priority) const;
-	void drawNoFlipNoMD(Buffer &target, const Buffer &priorityMap, const Common::Rect &targetRect, const Common::Point &scaledPosition, const uint8 priority) const;
-	void drawUncompNoFlipNoMD(Buffer &target, const Buffer &priorityMap, const Common::Rect &targetRect, const Common::Point &scaledPosition, const uint8 priority) const;
-	void drawUncompHzFlipNoMD(Buffer &target, const Buffer &priorityMap, const Common::Rect &targetRect, const Common::Point &scaledPosition, const uint8 priority) const;
-	void scaleDrawNoMD(Buffer &target, const Buffer &priorityMap, const Ratio &scaleX, const Ratio &scaleY, const Common::Rect &targetRect, const Common::Point &scaledPosition, const uint8 priority) const;
-	void scaleDrawUncompNoMD(Buffer &target, const Buffer &priorityMap, const Ratio &scaleX, const Ratio &scaleY, const Common::Rect &targetRect, const Common::Point &scaledPosition, const uint8 priority) const;
+	// NOTE: The original includes versions of the above functions with priority parameters, which were not actually used in SCI32
 
 #pragma mark -
 #pragma mark CelObj - Caching
@@ -547,34 +546,6 @@ public:
  */
 class CelObjMem : public CelObj {
 public:
-	/**
-	 * Writes a bitmap header to the given data buffer.
-	 */
-	static void buildBitmapHeader(byte *bitmap, const int16 width, const int16 height, const uint8 skipColor, const int16 displaceX, const int16 displaceY, const int16 scaledWidth, const int16 scaledHeight, const uint32 hunkPaletteOffset, const bool useRemap);
-
-	/**
-	 * Gets the size of the bitmap header for the current
-	 * engine version.
-	 */
-	inline static uint32 getBitmapHeaderSize() {
-		// TODO: These values are accurate for each engine, but there may be no reason
-		// to not simply just always use size 40, since SCI2.1mid does not seem to
-		// actually store any data above byte 40, and SCI2 did not allow bitmaps with
-		// scaling resolutions other than the default (320x200). Perhaps SCI3 used
-		// the extra bytes, or there is some reason why they tried to align the header
-		// size with other headers like pic headers?
-//		uint32 bitmapHeaderSize;
-//		if (getSciVersion() >= SCI_VERSION_2_1_MIDDLE) {
-//			bitmapHeaderSize = 46;
-//		} else if (getSciVersion() == SCI_VERSION_2_1_EARLY) {
-//			bitmapHeaderSize = 40;
-//		} else {
-//			bitmapHeaderSize = 36;
-//		}
-//		return bitmapHeaderSize;
-		return 46;
-	}
-
 	CelObjMem(reg_t bitmap);
 	virtual ~CelObjMem() override {};
 
@@ -605,6 +576,6 @@ public:
 	virtual CelObjColor *duplicate() const override;
 	virtual byte *getResPointer() const override;
 };
-}
+} // End of namespace Sci
 
 #endif

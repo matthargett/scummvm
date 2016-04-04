@@ -27,6 +27,7 @@
 #include "sci/graphics/frameout.h"
 #include "sci/graphics/lists32.h"
 #include "sci/graphics/plane32.h"
+#include "sci/graphics/remap.h"
 #include "sci/graphics/screen.h"
 #include "sci/graphics/screen_item32.h"
 
@@ -43,10 +44,10 @@ void DrawList::add(ScreenItem *screenItem, const Common::Rect &rect) {
 #pragma mark Plane
 uint16 Plane::_nextObjectId = 20000;
 
-Plane::Plane(const Common::Rect &gameRect) :
+Plane::Plane(const Common::Rect &gameRect, PlanePictureCodes pictureId) :
 _width(g_sci->_gfxFrameout->getCurrentBuffer().scriptWidth),
 _height(g_sci->_gfxFrameout->getCurrentBuffer().scriptHeight),
-_pictureId(kPlanePicColored),
+_pictureId(pictureId),
 _mirrored(false),
 _back(0),
 _priorityChanged(0),
@@ -55,6 +56,7 @@ _redrawAllCount(g_sci->_gfxFrameout->getScreenCount()),
 _created(g_sci->_gfxFrameout->getScreenCount()),
 _updated(0),
 _deleted(0),
+_moved(0),
 _gameRect(gameRect) {
 	convertGameRectToPlaneRect();
 	_priority = MAX(10000, g_sci->_gfxFrameout->getPlanes().getTopPlanePriority() + 1);
@@ -296,7 +298,7 @@ void Plane::calcLists(Plane &visiblePlane, const PlaneList &planeList, DrawList 
 	ScreenItemList::size_type planeItemCount = _screenItemList.size();
 	ScreenItemList::size_type visiblePlaneItemCount = visiblePlane._screenItemList.size();
 
-	for (PlaneList::size_type i = 0; i < planeItemCount; ++i) {
+	for (ScreenItemList::size_type i = 0; i < planeItemCount; ++i) {
 		ScreenItem *vitem = nullptr;
 		// NOTE: The original engine used an array without bounds checking
 		// so could just get the visible screen item directly; we need to
@@ -311,22 +313,23 @@ void Plane::calcLists(Plane &visiblePlane, const PlaneList &planeList, DrawList 
 		if (i < _screenItemList.size() && item != nullptr) {
 			if (item->_deleted) {
 				// add item's rect to erase list
-				if (i < visiblePlane._screenItemList.size() && vitem != nullptr) {
-					if (!vitem->_screenRect.isEmpty()) {
-						if (/* TODO: g_Remap_numActiveRemaps */ false) { // active remaps?
-							mergeToRectList(vitem->_screenRect, eraseList);
-						} else {
-							eraseList.add(vitem->_screenRect);
-						}
+				if (
+					i < visiblePlane._screenItemList.size() &&
+					vitem != nullptr &&
+					!vitem->_screenRect.isEmpty()
+				) {
+					if (g_sci->_gfxRemap32->getRemapCount()) {
+						mergeToRectList(vitem->_screenRect, eraseList);
+					} else {
+						eraseList.add(vitem->_screenRect);
 					}
 				}
 			} else if (item->_created) {
 				// add item to draw list
-				item->getCelObj();
 				item->calcRects(*this);
 
 				if(!item->_screenRect.isEmpty()) {
-					if (/* TODO: g_Remap_numActiveRemaps */ false) { // active remaps?
+					if (g_sci->_gfxRemap32->getRemapCount()) {
 						drawList.add(item, item->_screenRect);
 						mergeToRectList(item->_screenRect, eraseList);
 					} else {
@@ -335,9 +338,8 @@ void Plane::calcLists(Plane &visiblePlane, const PlaneList &planeList, DrawList 
 				}
 			} else if (item->_updated) {
 				// add old rect to erase list, new item to draw list
-				item->getCelObj();
 				item->calcRects(*this);
-				if (/* TODO: g_Remap_numActiveRemaps */ false) { // active remaps
+				if (g_sci->_gfxRemap32->getRemapCount()) {
 					// if item and vitem don't overlap, ...
 					if (item->_screenRect.isEmpty() ||
 						i >= visiblePlaneItemCount ||
@@ -350,7 +352,11 @@ void Plane::calcLists(Plane &visiblePlane, const PlaneList &planeList, DrawList 
 							drawList.add(item, item->_screenRect);
 							mergeToRectList(item->_screenRect, eraseList);
 						}
-						if (i < visiblePlaneItemCount && vitem != nullptr && !vitem->_screenRect.isEmpty()) {
+						if (
+							i < visiblePlaneItemCount &&
+							vitem != nullptr &&
+							!vitem->_screenRect.isEmpty()
+						) {
 							mergeToRectList(vitem->_screenRect, eraseList);
 						}
 					} else {
@@ -358,10 +364,11 @@ void Plane::calcLists(Plane &visiblePlane, const PlaneList &planeList, DrawList 
 						// and item to draw list
 
 						// TODO: This was changed from disasm, verify please!
-						Common::Rect extendedScreenItem = vitem->_screenRect;
-						extendedScreenItem.extend(item->_screenRect);
+						Common::Rect extendedScreenRect = vitem->_screenRect;
+						extendedScreenRect.extend(item->_screenRect);
+
 						drawList.add(item, item->_screenRect);
-						mergeToRectList(extendedScreenItem, eraseList);
+						mergeToRectList(extendedScreenRect, eraseList);
 					}
 				} else {
 					// if no active remaps, just add item to draw list and old rect
@@ -369,7 +376,11 @@ void Plane::calcLists(Plane &visiblePlane, const PlaneList &planeList, DrawList 
 					if (!item->_screenRect.isEmpty()) {
 						drawList.add(item, item->_screenRect);
 					}
-					if (i < visiblePlaneItemCount && vitem != nullptr && !vitem->_screenRect.isEmpty()) {
+					if (
+						i < visiblePlaneItemCount &&
+						vitem != nullptr &&
+						!vitem->_screenRect.isEmpty()
+					) {
 						eraseList.add(vitem->_screenRect);
 					}
 				}
@@ -381,7 +392,10 @@ void Plane::calcLists(Plane &visiblePlane, const PlaneList &planeList, DrawList 
 	breakEraseListByPlanes(eraseList, planeList);
 	breakDrawListByPlanes(drawList, planeList);
 
-	// NOTE: Setting this to true fixes the menu bars in GK1
+	// We store the current size of the drawlist, as we want to loop
+	// over the currently inserted entries later.
+	DrawList::size_type drawListSizePrimary = drawList.size();
+
 	if (/* TODO: dword_C6288 */ false) {  // "high resolution pictures"????
 		_screenItemList.sort();
 		bool encounteredPic = false;
@@ -428,31 +442,42 @@ void Plane::calcLists(Plane &visiblePlane, const PlaneList &planeList, DrawList 
 		for (RectList::size_type i = 0; i < eraseList.size(); ++i) {
 			for (ScreenItemList::size_type j = 0; j < _screenItemList.size(); ++j) {
 				ScreenItem *item = _screenItemList[j];
-				if (item != nullptr && !item->_updated && !item->_deleted && !item->_created && eraseList[i]->intersects(item->_screenRect)) {
+				if (
+					item != nullptr &&
+					!item->_created && !item->_updated && !item->_deleted &&
+					eraseList[i]->intersects(item->_screenRect)
+				) {
 					drawList.add(item, eraseList[i]->findIntersectingRect(item->_screenRect));
 				}
 			}
 		}
 	}
-	if (/* TODO: g_Remap_numActiveRemaps == 0 */ true) { // no remaps active?
+
+	if (g_sci->_gfxRemap32->getRemapCount() == 0) { // no remaps active?
 		// Add all items that overlap with items in the drawlist and have higher
-		// priority
-		for (DrawList::size_type i = 0; i < drawList.size(); ++i) {
+		// priority.
+
+		// We only loop over "primary" items in the draw list, skipping
+		// those that were added because of the erase list in the previous loop,
+		// or those to be added in this loop.
+		for (DrawList::size_type i = 0; i < drawListSizePrimary; ++i) {
 			DrawItem *dli = drawList[i];
 
-			for (PlaneList::size_type j = 0; j < planeItemCount; ++j) {
+			for (ScreenItemList::size_type j = 0; j < planeItemCount; ++j) {
 				ScreenItem *sli = _screenItemList[j];
 
-				if (i < drawList.size() && dli) {
-					if (j < _screenItemList.size() && sli) {
-						if (!sli->_updated && !sli->_deleted && !sli->_created) {
-							ScreenItem *item = dli->screenItem;
-							if (sli->_priority > item->_priority /* TODO: || (sli->_priority == item->_priority && sli->_object > item->_object)*/) {
-								if (dli->rect.intersects(sli->_screenRect)) {
-									drawList.add(sli, dli->rect.findIntersectingRect(sli->_screenRect));
-								}
-							}
-						}
+				if (
+					i < drawList.size() && dli != nullptr &&
+					j < _screenItemList.size() && sli != nullptr &&
+					!sli->_created && !sli->_updated && !sli->_deleted
+				) {
+					ScreenItem *item = dli->screenItem;
+
+					if (
+						(sli->_priority > item->_priority || (sli->_priority == item->_priority && sli->_object > item->_object)) &&
+						dli->rect.intersects(sli->_screenRect)
+					) {
+						drawList.add(sli, dli->rect.findIntersectingRect(sli->_screenRect));
 					}
 				}
 			}
@@ -491,8 +516,7 @@ void Plane::decrementScreenItemArrayCounts(Plane *visiblePlane, const bool force
 			if (item->_created) {
 				item->_created--;
 				if (visiblePlane != nullptr) {
-					ScreenItem *n = new ScreenItem(*item);
-					visiblePlane->_screenItemList.add(n);
+					visiblePlane->_screenItemList.add(new ScreenItem(*item));
 				}
 			}
 
@@ -582,14 +606,13 @@ void Plane::filterUpEraseRects(DrawList &drawList, RectList &eraseList) const {
 	}
 }
 
-void Plane::mergeToDrawList(const DrawList::size_type index, const Common::Rect &rect, DrawList &drawList) const {
+void Plane::mergeToDrawList(const ScreenItemList::size_type index, const Common::Rect &rect, DrawList &drawList) const {
 	RectList rects;
 
-	Common::Rect r = _screenItemList[index]->_screenRect;
-	r.clip(rect);
-
-	rects.add(r);
 	ScreenItem *item = _screenItemList[index];
+	Common::Rect r = item->_screenRect;
+	r.clip(rect);
+	rects.add(r);
 
 	for (RectList::size_type i = 0; i < rects.size(); ++i) {
 		r = *rects[i];
@@ -666,7 +689,6 @@ void Plane::redrawAll(Plane *visiblePlane, const PlaneList &planeList, DrawList 
 		if (*screenItemPtr != nullptr) {
 			ScreenItem &screenItem = **screenItemPtr;
 			if (!screenItem._deleted) {
-				screenItem.getCelObj();
 				screenItem.calcRects(*this);
 				if (!screenItem._screenRect.isEmpty()) {
 					drawList.add(&screenItem, screenItem._screenRect);
@@ -776,8 +798,44 @@ void Plane::update(const reg_t object) {
 	_back = readSelectorValue(segMan, object, SELECTOR(back));
 }
 
+void Plane::scrollScreenItems(const int16 deltaX, const int16 deltaY, const bool scrollPics) {
+	_redrawAllCount = g_sci->_gfxFrameout->getScreenCount();
+
+	for (ScreenItemList::iterator it = _screenItemList.begin(); it != _screenItemList.end(); ++it) {
+		if (*it != nullptr) {
+			ScreenItem &screenItem = **it;
+			if (!screenItem._deleted && (screenItem._celInfo.type != kCelTypePic || scrollPics)) {
+				screenItem._position.x += deltaX;
+				screenItem._position.y += deltaY;
+			}
+		}
+	}
+}
+
+void Plane::remapMarkRedraw() {
+	for (ScreenItemList::const_iterator screenItemPtr = _screenItemList.begin(); screenItemPtr != _screenItemList.end(); ++screenItemPtr) {
+		if (*screenItemPtr != nullptr) {
+			ScreenItem &screenItem = **screenItemPtr;
+			if (screenItem.getCelObj()._remap && !screenItem._deleted && !screenItem._created) {
+				screenItem._updated = g_sci->_gfxFrameout->getScreenCount();
+			}
+		}
+	}
+}
+
 #pragma mark -
 #pragma mark PlaneList
+void PlaneList::add(Plane *plane) {
+	for (iterator it = begin(); it != end(); ++it) {
+		if ((*it)->_priority > plane->_priority) {
+			insert(it, plane);
+			return;
+		}
+	}
+
+	push_back(plane);
+}
+
 void PlaneList::clear() {
 	for (iterator it = begin(); it != end(); ++it) {
 		delete *it;
@@ -793,6 +851,11 @@ void PlaneList::erase(Plane *plane) {
 			break;
 		}
 	}
+}
+
+PlaneList::iterator PlaneList::erase(iterator it) {
+	delete *it;
+	return PlaneListBase::erase(it);
 }
 
 int PlaneList::findIndexByObject(const reg_t object) const {
@@ -837,15 +900,8 @@ int16 PlaneList::getTopSciPlanePriority() const {
 	return priority;
 }
 
-void PlaneList::add(Plane *plane) {
-	for (iterator it = begin(); it != end(); ++it) {
-		if ((*it)->_priority > plane->_priority) {
-			insert(it, plane);
-			return;
-		}
-	}
-
-	push_back(plane);
+void PlaneList::remove_at(size_type index) {
+	delete PlaneListBase::remove_at(index);
 }
 
-}
+} // End of namespace Sci

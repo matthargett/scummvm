@@ -67,7 +67,7 @@ uint16 GfxCompare::isOnControl(uint16 screenMask, const Common::Rect &rect) {
 	return result;
 }
 
-reg_t GfxCompare::canBeHereCheckRectList(reg_t checkObject, const Common::Rect &checkRect, List *list) {
+reg_t GfxCompare::canBeHereCheckRectList(const reg_t checkObject, const Common::Rect &checkRect, const List *list, const uint16 signalFlags) const {
 	reg_t curAddress = list->first;
 	Node *curNode = _segMan->lookupNode(curAddress);
 	reg_t curObject;
@@ -78,7 +78,7 @@ reg_t GfxCompare::canBeHereCheckRectList(reg_t checkObject, const Common::Rect &
 		curObject = curNode->value;
 		if (curObject != checkObject) {
 			signal = readSelectorValue(_segMan, curObject, SELECTOR(signal));
-			if (!(signal & (kSignalIgnoreActor | kSignalRemoveView | kSignalNoUpdate))) {
+			if (!(signal & signalFlags)) {
 				curRect.left = readSelectorValue(_segMan, curObject, SELECTOR(brLeft));
 				curRect.top = readSelectorValue(_segMan, curObject, SELECTOR(brTop));
 				curRect.right = readSelectorValue(_segMan, curObject, SELECTOR(brRight));
@@ -111,9 +111,6 @@ uint16 GfxCompare::kernelOnControl(byte screenMask, const Common::Rect &rect) {
 void GfxCompare::kernelSetNowSeen(reg_t objectReference) {
 	GfxView *view = NULL;
 	Common::Rect celRect(0, 0);
-	// TODO/FIXME: Torin's menu code tries to draw special views with an ID of 0xFFFF, which
-	// are not currently handled properly and cause a crash. These might be text views that
-	// are not properly implemented.
 	GuiResourceId viewId = (GuiResourceId)readSelectorValue(_segMan, objectReference, SELECTOR(view));
 	int16 loopNo = readSelectorValue(_segMan, objectReference, SELECTOR(loop));
 	int16 celNo = readSelectorValue(_segMan, objectReference, SELECTOR(cel));
@@ -124,25 +121,7 @@ void GfxCompare::kernelSetNowSeen(reg_t objectReference) {
 		z = (int16)readSelectorValue(_segMan, objectReference, SELECTOR(z));
 
 	view = _cache->getView(viewId);
-
-#ifdef ENABLE_SCI32
-	if (view->isSci2Hires())
-		view->adjustToUpscaledCoordinates(y, x);
-	else if ((getSciVersion() >= SCI_VERSION_2_1_EARLY) && (getSciVersion() <= SCI_VERSION_2_1_LATE))
-		_coordAdjuster->fromScriptToDisplay(y, x);
-#endif
-
 	view->getCelRect(loopNo, celNo, x, y, z, celRect);
-
-#ifdef ENABLE_SCI32
-	if (view->isSci2Hires()) {
-		view->adjustBackUpscaledCoordinates(celRect.top, celRect.left);
-		view->adjustBackUpscaledCoordinates(celRect.bottom, celRect.right);
-	} else if ((getSciVersion() >= SCI_VERSION_2_1_EARLY) && (getSciVersion() <= SCI_VERSION_2_1_LATE)) {
-		_coordAdjuster->fromDisplayToScript(celRect.top, celRect.left);
-		_coordAdjuster->fromDisplayToScript(celRect.bottom, celRect.right);
-	}
-#endif
 
 	if (lookupSelector(_segMan, objectReference, SELECTOR(nsTop), NULL, NULL) == kSelectorVariable) {
 		setNSRect(objectReference, celRect);
@@ -151,32 +130,57 @@ void GfxCompare::kernelSetNowSeen(reg_t objectReference) {
 
 reg_t GfxCompare::kernelCanBeHere(reg_t curObject, reg_t listReference) {
 	Common::Rect checkRect;
-	Common::Rect adjustedRect;
-	uint16 signal, controlMask;
 	uint16 result;
 
 	checkRect.left = readSelectorValue(_segMan, curObject, SELECTOR(brLeft));
 	checkRect.top = readSelectorValue(_segMan, curObject, SELECTOR(brTop));
 	checkRect.right = readSelectorValue(_segMan, curObject, SELECTOR(brRight));
 	checkRect.bottom = readSelectorValue(_segMan, curObject, SELECTOR(brBottom));
+	uint16 signal = readSelectorValue(_segMan, curObject, SELECTOR(signal));
 
 	if (!checkRect.isValidRect()) {	// can occur in Iceman and Mother Goose - HACK? TODO: is this really occuring in sierra sci? check this
 		warning("kCan(t)BeHere - invalid rect %d, %d -> %d, %d", checkRect.left, checkRect.top, checkRect.right, checkRect.bottom);
 		return NULL_REG; // this means "can be here"
 	}
 
-	adjustedRect = _coordAdjuster->onControl(checkRect);
-
-	signal = readSelectorValue(_segMan, curObject, SELECTOR(signal));
-	controlMask = readSelectorValue(_segMan, curObject, SELECTOR(illegalBits));
+	Common::Rect adjustedRect = _coordAdjuster->onControl(checkRect);
+	uint16 controlMask = readSelectorValue(_segMan, curObject, SELECTOR(illegalBits));
 	result = isOnControl(GFX_SCREEN_MASK_CONTROL, adjustedRect) & controlMask;
 	if ((!result) && (signal & (kSignalIgnoreActor | kSignalRemoveView)) == 0) {
 		List *list = _segMan->lookupList(listReference);
 		if (!list)
 			error("kCanBeHere called with non-list as parameter");
 
-		return canBeHereCheckRectList(curObject, checkRect, list);
+		return canBeHereCheckRectList(curObject, checkRect, list, kSignalIgnoreActor | kSignalRemoveView | kSignalNoUpdate);
 	}
+
+	return make_reg(0, result);
+}
+
+reg_t GfxCompare::kernelCantBeHere32(const reg_t curObject, const reg_t listReference) const {
+	// Most of SCI32 graphics code converts rects from the VM to exclusive
+	// rects before operating on them, but this call leverages SCI16 engine
+	// code that operates on inclusive rects, so the rect's bottom-right
+	// point is not modified like in other SCI32 kernel calls
+	Common::Rect checkRect(
+		readSelectorValue(_segMan, curObject, SELECTOR(brLeft)),
+		readSelectorValue(_segMan, curObject, SELECTOR(brTop)),
+		readSelectorValue(_segMan, curObject, SELECTOR(brRight)),
+		readSelectorValue(_segMan, curObject, SELECTOR(brBottom))
+	);
+
+	uint16 result = 0;
+	uint16 signal = readSelectorValue(_segMan, curObject, SELECTOR(signal));
+	const uint16 signalFlags = kSignalIgnoreActor | kSignalHidden;
+
+	if ((signal & signalFlags) == 0) {
+		List *list = _segMan->lookupList(listReference);
+		if (!list) {
+			error("kCantBeHere called with non-list as parameter");
+		}
+		result = !canBeHereCheckRectList(curObject, checkRect, list, signalFlags).isNull();
+	}
+
 	return make_reg(0, result);
 }
 

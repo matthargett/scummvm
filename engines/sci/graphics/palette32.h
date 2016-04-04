@@ -257,6 +257,7 @@ public:
 	void cycleAllOff();
 	void applyAllCycles();
 	void applyCycles();
+	const bool *getCyclemap() { return _cycleMap; }
 
 #pragma mark -
 #pragma mark Fading
@@ -265,13 +266,19 @@ private:
 	 * The fade table records the expected intensity level of each pixel
 	 * in the palette that will be displayed on the next frame.
 	 */
-	byte _fadeTable[256];
+	uint16 _fadeTable[256];
 
 public:
-	void setFade(const uint8 percent, const uint8 fromColor, const uint16 toColor);
+	/**
+	 * Sets the intensity level for a range of palette
+	 * entries. An intensity of zero indicates total
+	 * darkness. Intensity may be set to over 100 percent.
+	 */
+	void setFade(const uint16 percent, const uint8 fromColor, const uint16 toColor);
 	void fadeOff();
 	void applyFade();
 };
-}
+
+} // End of namespace Sci
 
 #endif

@@ -412,7 +412,7 @@ reg_t kPlatform(EngineState *s, int argc, reg_t *argv);
 reg_t kTextColors(EngineState *s, int argc, reg_t *argv);
 reg_t kTextFonts(EngineState *s, int argc, reg_t *argv);
 reg_t kShow(EngineState *s, int argc, reg_t *argv);
-reg_t kRemapColors(EngineState *s, int argc, reg_t *argv);
+reg_t kRemapColors16(EngineState *s, int argc, reg_t *argv);
 reg_t kDummy(EngineState *s, int argc, reg_t *argv);
 reg_t kEmpty(EngineState *s, int argc, reg_t *argv);
 reg_t kStub(EngineState *s, int argc, reg_t *argv);
@@ -452,8 +452,14 @@ reg_t kScrollWindowShow(EngineState *s, int argc, reg_t *argv);
 reg_t kScrollWindowDestroy(EngineState *s, int argc, reg_t *argv);
 
 reg_t kMulDiv(EngineState *s, int argc, reg_t *argv);
-reg_t kCantBeHere32(EngineState *s, int argc, reg_t *argv);
-reg_t kRemapColors32(EngineState *s, int argc, reg_t *argv);
+
+reg_t kRemapColors(EngineState *s, int argc, reg_t *argv);
+reg_t kRemapOff(EngineState *s, int argc, reg_t *argv);
+reg_t kRemapByRange(EngineState *s, int argc, reg_t *argv);
+reg_t kRemapByPercent(EngineState *s, int argc, reg_t *argv);
+reg_t kRemapToGray(EngineState *s, int argc, reg_t *argv);
+reg_t kRemapToPercentGray(EngineState *s, int argc, reg_t *argv);
+reg_t kRemapSetNoMatchRange(EngineState *s, int argc, reg_t *argv);
 
 reg_t kAddScreenItem(EngineState *s, int argc, reg_t *argv);
 reg_t kUpdateScreenItem(EngineState *s, int argc, reg_t *argv);
@@ -480,10 +486,13 @@ reg_t kBitmapCreateFromUnknown(EngineState *s, int argc, reg_t *argv);
 reg_t kAddPlane(EngineState *s, int argc, reg_t *argv);
 reg_t kDeletePlane(EngineState *s, int argc, reg_t *argv);
 reg_t kUpdatePlane(EngineState *s, int argc, reg_t *argv);
+reg_t kMovePlaneItems(EngineState *s, int argc, reg_t *argv);
 reg_t kSetShowStyle(EngineState *s, int argc, reg_t *argv);
 reg_t kSetPalStyleRange(EngineState *s, int argc, reg_t *argv);
 reg_t kGetHighPlanePri(EngineState *s, int argc, reg_t *argv);
 reg_t kFrameOut(EngineState *s, int argc, reg_t *argv);
+reg_t kCelHigh32(EngineState *s, int argc, reg_t *argv);
+reg_t kCelWide32(EngineState *s, int argc, reg_t *argv);
 
 reg_t kIsOnMe(EngineState *s, int argc, reg_t *argv); // kOnMe for SCI2, kIsOnMe for SCI2.1
 reg_t kInPolygon(EngineState *s, int argc, reg_t *argv);

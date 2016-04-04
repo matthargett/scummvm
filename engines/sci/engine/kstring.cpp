@@ -765,11 +765,14 @@ reg_t kStringCopy(EngineState *s, int argc, reg_t *argv) {
 	}
 
 	// The original engine ignores bad copies too
-	if (index2 > string2Size)
+	if (index2 >= string2Size)
 		return NULL_REG;
 
 	// A count of -1 means fill the rest of the array
-	uint32 count = argv[4].toSint16() == -1 ? string2Size - index2 + 1 : argv[4].toUint16();
+	uint32 count = string2Size - index2;
+	if (argv[4].toSint16() != -1) {
+		count = MIN(count, (uint32)argv[4].toUint16());
+	}
 //	reg_t strAddress = argv[0];
 
 	SciString *string1 = s->_segMan->lookupString(argv[0]);
