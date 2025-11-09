@@ -2055,6 +2055,11 @@ playdate)
 		echo "Please set PLAYDATE_SDK_PATH in your environment. export PLAYDATE_SDK_PATH=<path to Playdate SDK>"
 		exit 1
 	fi
+	# Add C++11 support with gnu++ extension for embedded toolchain compatibility
+	append_var CXXFLAGS "-std=gnu++11"
+	append_var CXXFLAGS "-fno-exceptions"
+	append_var CXXFLAGS "-fno-rtti"
+	append_var CXXFLAGS "-I$PLAYDATE_SDK_PATH/C_API"
 	;;
 3ds)
 	if test -z "$DEVKITPRO"; then
@@ -3777,13 +3782,8 @@ if test -n "$_host"; then
 			_lua=no
 			_detection_features_full=no
 			_port_mk="backends/platform/playdate/playdate.mk"
-			# Set up Playdate SDK paths
-			append_var CXXFLAGS "-I$PLAYDATE_SDK_PATH/C_API"
+			# C++ flags already set in sanity check section
 			append_var INCLUDES "-I$PLAYDATE_SDK_PATH/C_API"
-			# Add C++11 support flags - use gnu++11 for better embedded support
-			_cxx11_std=gnu++11
-			append_var CXXFLAGS "-fno-exceptions"
-			append_var CXXFLAGS "-fno-rtti"
 			# Optimization for embedded ARM
 			_optimization_level=-O2
 			append_var CXXFLAGS "-mthumb"
