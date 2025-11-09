@@ -78,10 +78,17 @@ jobs:
           cat config.mk || echo "config.mk not found"
           echo "=== config.h contents (first 100 lines) ==="
           head -100 config.h || echo "config.h not found"
+          echo "=== Checking port_mk setting ==="
+          grep "^port_mk" config.mk || echo "port_mk not found in config.mk"
+          echo "=== Checking BACKEND setting ==="
+          grep "^BACKEND" config.mk || echo "BACKEND not set"
+          echo "=== Checking what all target depends on ==="
+          make -n all 2>&1 | head -30
 
       - name: Build ScummVM
         run: |
-          make -j$(nproc) 2>&1 | tee build.log
+          echo "=== Running make with verbose output ==="
+          make -j$(nproc) VERBOSE_BUILD=1 2>&1 | tee build.log
           BUILD_EXIT=$?
           echo "Build exit code: $BUILD_EXIT"
           if [ $BUILD_EXIT -ne 0 ]; then
@@ -90,6 +97,10 @@ jobs:
             tail -100 build.log
             exit $BUILD_EXIT
           fi
+          echo "=== Build completed, listing files ==="
+          ls -lah . | head -50
+          echo "=== Checking for any .elf, .bin, or PDX files ==="
+          find . -maxdepth 2 -type f \( -name "*.elf" -o -name "*.bin" -o -name "scummvm*" \) -o -type d -name "*.pdx" | head -20
 
       - name: Upload configure log
         if: always()
