@@ -26,8 +26,15 @@
 #include "common/rect.h"
 #include "graphics/pixelformat.h"
 #include "graphics/surface.h"
+#include "backends/platform/playdate/portdefs.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include "pd_api.h"
+#ifdef __cplusplus
+}
+#endif
 
 /**
  * Graphics manager for Playdate's 1-bit 400x240 monochrome display.
@@ -90,9 +97,6 @@ public:
 	void setCursorPalette(const byte *colors, uint start, uint num) override;
 
 private:
-	static const int PLAYDATE_SCREEN_WIDTH = 400;
-	static const int PLAYDATE_SCREEN_HEIGHT = 240;
-
 	PlaydateAPI *_pd;
 
 	// Screen dimensions

@@ -24,7 +24,14 @@
 
 #include "backends/modular-backend.h"
 #include "backends/platform/playdate/playdate-graphics.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include "pd_api.h"
+#ifdef __cplusplus
+}
+#endif
 
 /**
  * OSystem implementation for Panic Playdate handheld console.

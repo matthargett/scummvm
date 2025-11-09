@@ -23,24 +23,16 @@
 
 #include "backends/platform/playdate/osystem_playdate.h"
 #include "base/main.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 #include "pd_api.h"
+#ifdef __cplusplus
+}
+#endif
 
 static PlaydateAPI *g_pd = nullptr;
-static bool g_scummvmInitialized = false;
-static bool g_scummvmRunning = false;
-
-// Playdate update callback - called every frame
-static int updateCallback(void *userdata) {
-	if (!g_scummvmRunning) {
-		return 0;
-	}
-
-	// Process ScummVM frame
-	// The main loop is handled internally by scummvm_main
-	// We just need to keep the event loop running
-
-	return 1;  // Return 1 to continue running
-}
 
 // Playdate event handler - main entry point
 #ifdef __cplusplus
@@ -53,82 +45,32 @@ int eventHandler(PlaydateAPI *pd, PDSystemEvent event, uint32_t arg) {
 		// Save Playdate API pointer
 		g_pd = pd;
 
-		// Set update callback
-		pd->system->setUpdateCallback(updateCallback, pd);
+		// Create OSystem
+		g_system = new OSystem_Playdate(pd);
+		assert(g_system);
 
-		// Initialize ScummVM
-		if (!g_scummvmInitialized) {
-			// Create OSystem
-			g_system = new OSystem_Playdate(pd);
-			assert(g_system);
+		// Build command line arguments
+		static const char *argv[] = { "scummvm", nullptr };
+		static int argc = 1;
 
-			// Build command line arguments
-			// For now, just pass the program name
-			// TODO: Add support for loading specific games
-			const char *argv[] = { "scummvm" };
-			int argc = 1;
+		// Run ScummVM main
+		// Note: This may block, but that should be OK for Playdate
+		int result = scummvm_main(argc, const_cast<char**>(argv));
 
-			// Start ScummVM main loop in background
-			// Note: This will block, so we need to handle this differently
-			// For now, we'll initialize and then run updates in the callback
-			g_scummvmInitialized = true;
-			g_scummvmRunning = true;
+		pd->system->logToConsole("ScummVM exited with code %d", result);
 
-			// Note: We can't call scummvm_main here directly as it blocks
-			// Instead, we need to initialize the backend and then
-			// handle the main loop updates in the update callback
-
-			// Initialize backend
-			g_system->initBackend();
-
-			pd->system->logToConsole("ScummVM initialized for Playdate");
-		}
-	} else if (event == kEventTerminate) {
 		// Cleanup
 		if (g_system) {
 			g_system->destroy();
+			delete g_system;
 			g_system = nullptr;
 		}
-		g_scummvmRunning = false;
-	} else if (event == kEventPause) {
-		// Game paused
-		g_scummvmRunning = false;
-	} else if (event == kEventResume) {
-		// Game resumed
-		g_scummvmRunning = true;
+	} else if (event == kEventTerminate) {
+		// Cleanup on terminate
+		if (g_system) {
+			g_system->quit();
+		}
 	}
 
 	return 0;
-}
-
-// Alternative approach: Run ScummVM in a thread-like manner
-// Since Playdate doesn't support threads, we need to integrate differently
-
-// For initial testing, we'll use a simpler approach:
-// Let the update callback drive the main loop
-
-static bool g_mainLoopStarted = false;
-
-static int playdateUpdate(void *userdata) {
-	if (!g_scummvmRunning) {
-		return 1;
-	}
-
-	if (!g_mainLoopStarted) {
-		// Start the main loop on first update
-		const char *argv[] = { "scummvm", "--list-targets" };
-		int argc = 2;
-
-		// This will block, so we need a different approach
-		// TODO: Integrate ScummVM's main loop more deeply
-		// scummvm_main(argc, (char **)argv);
-
-		g_mainLoopStarted = true;
-	}
-
-	// Process events and update
-	// The event manager and graphics manager will be called
-	// through the normal ScummVM flow
-
-	return 1;
 }
