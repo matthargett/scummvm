@@ -1796,6 +1796,15 @@ dreamcast)
 	append_var CXXFLAGS "-ml -m4-single-only"
 	append_var LDFLAGS "-ml -m4-single-only"
 	;;
+playdate)
+	_host_os=playdate
+	_host_cpu=arm
+	_host_alias=arm-none-eabi
+	test "x$prefix" = xNONE && prefix=.
+	datarootdir='${prefix}/data'
+	datadir='${datarootdir}'
+	docdir='${prefix}/doc'
+	;;
 ds)
 	_host_os=ds
 	_host_cpu=arm
@@ -2040,6 +2049,12 @@ android)
 		echo "Please set ANDROID_NDK_ROOT in your environment: export ANDROID_NDK_ROOT=<path to Android NDK>"
  		exit 1
  	fi
+	;;
+playdate)
+	if test -z "$PLAYDATE_SDK_PATH"; then
+		echo "Please set PLAYDATE_SDK_PATH in your environment. export PLAYDATE_SDK_PATH=<path to Playdate SDK>"
+		exit 1
+	fi
 	;;
 3ds)
 	if test -z "$DEVKITPRO"; then
@@ -3744,6 +3759,32 @@ if test -n "$_host"; then
 			_mad=yes
 			_zlib=yes
 			_port_mk="backends/platform/dc/dreamcast.mk"
+			;;
+		playdate)
+			# Playdate is a very constrained platform
+			append_var DEFINES "-D__PLAYDATE__"
+			append_var DEFINES "-DDISABLE_COMMAND_LINE"
+			append_var DEFINES "-DDISABLE_TEXT_CONSOLE"
+			append_var DEFINES "-DDISABLE_FANCY_THEMES"
+			append_var DEFINES "-DREDUCE_MEMORY_USAGE"
+			_backend="playdate"
+			_build_scalers=no
+			_build_aspect=no
+			_mt32emu=no
+			_nuked_opl=no
+			_tinygl=no
+			_bink=no
+			_lua=no
+			_detection_features_full=no
+			_port_mk="backends/platform/playdate/playdate.mk"
+			# Set up Playdate SDK paths
+			append_var CXXFLAGS "-I$PLAYDATE_SDK_PATH/C_API"
+			append_var INCLUDES "-I$PLAYDATE_SDK_PATH/C_API"
+			# Only enable AGI and SCI engines (disable SCI32)
+			engine_disable_all
+			engine_enable agi
+			engine_enable sci
+			engine_disable sci32
 			;;
 		ds)
 			if test "$_dynamic_modules" = yes ; then
