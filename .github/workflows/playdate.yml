@@ -33,6 +33,15 @@ jobs:
           rm /tmp/playdate-sdk.tar.gz
           echo "SDK downloaded and extracted to ~/PlaydateSDK"
 
+      - name: Verify SDK Structure
+        run: |
+          echo "=== PlaydateSDK directory contents ==="
+          ls -la ~/PlaydateSDK || echo "SDK directory not found!"
+          echo "=== PlaydateSDK/C_API contents ==="
+          ls -la ~/PlaydateSDK/C_API || echo "C_API directory not found!"
+          echo "=== Checking for pd_api.h ==="
+          find ~/PlaydateSDK -name "pd_api.h" || echo "pd_api.h not found!"
+
       - name: Install ARM toolchain
         run: |
           sudo apt-get update
@@ -42,21 +51,53 @@ jobs:
         run: |
           arm-none-eabi-gcc --version
           which arm-none-eabi-gcc
+          echo "=== Testing C++11 support ==="
+          echo 'int main() { return 0; }' > /tmp/test.cpp
+          arm-none-eabi-g++ -std=gnu++11 /tmp/test.cpp -o /tmp/test || echo "C++11 test failed"
 
       - name: Set up Playdate SDK environment
         run: |
           echo "PLAYDATE_SDK_PATH=$HOME/PlaydateSDK" >> $GITHUB_ENV
-          ls -la ~/PlaydateSDK
-          ls -la ~/PlaydateSDK/C_API
 
       - name: Configure ScummVM for Playdate
         run: |
-          ./configure --host=playdate
+          export PLAYDATE_SDK_PATH=$HOME/PlaydateSDK
+          echo "=== Starting configure ==="
+          ./configure --host=playdate 2>&1 | tee configure.log
+          echo "=== Configure exit code: $? ==="
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "Configure failed! Last 50 lines:"
+            tail -50 configure.log
+            exit 1
+          fi
+
+      - name: Show config
+        if: always()
+        run: |
+          echo "=== config.mk contents ==="
+          cat config.mk || echo "config.mk not found"
+          echo "=== config.h contents (first 100 lines) ==="
+          head -100 config.h || echo "config.h not found"
 
       - name: Build ScummVM
         run: |
-          make -j$(nproc) 2>&1 | tee build.log || true
-          echo "Build exit code: $?"
+          make -j$(nproc) 2>&1 | tee build.log
+          BUILD_EXIT=$?
+          echo "Build exit code: $BUILD_EXIT"
+          if [ $BUILD_EXIT -ne 0 ]; then
+            echo "=== BUILD FAILED ==="
+            echo "Last 100 lines of build log:"
+            tail -100 build.log
+            exit $BUILD_EXIT
+          fi
+
+      - name: Upload configure log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: configure-log
+          path: configure.log
+          if-no-files-found: warn
 
       - name: Upload build log
         if: always()
@@ -64,13 +105,30 @@ jobs:
         with:
           name: build-log
           path: build.log
+          if-no-files-found: warn
+
+      - name: Upload config files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: config-files
+          path: |
+            config.mk
+            config.h
+          if-no-files-found: warn
 
       - name: Check if PDX was created
         run: |
-          if [ -f "scummvm.pdx/pdex.bin" ] || [ -f "scummvm" ]; then
-            echo "Build output found"
-            ls -lah scummvm* || true
-            file scummvm* || true
+          if [ -d "scummvm.pdx" ]; then
+            echo "PDX directory found"
+            ls -lah scummvm.pdx/
+            if [ -f "scummvm.pdx/pdex.bin" ]; then
+              echo "pdex.bin found!"
+              file scummvm.pdx/pdex.bin
+            fi
+          elif [ -f "scummvm" ]; then
+            echo "scummvm executable found"
+            file scummvm
           else
             echo "No build output found"
             exit 1
