@@ -32,6 +32,8 @@
 #include "common/config-manager.h"
 #include "common/scummsys.h"
 
+#include <cmath>  // for fabs()
+
 OSystem_Playdate::OSystem_Playdate(PlaydateAPI *pd)
 	: _pd(pd),
 	  _startTime(0),
