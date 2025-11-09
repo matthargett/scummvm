@@ -2,6 +2,14 @@
 
 PLAYDATE_PRODUCT = scummvm.pdx
 
+$(info ====== PLAYDATE.MK DEBUG ======)
+$(info EXECUTABLE=$(EXECUTABLE))
+$(info EXEPRE=$(EXEPRE))
+$(info EXEEXT=$(EXEEXT))
+$(info OBJS count=$(words $(OBJS)))
+$(info MODULES=$(MODULES))
+$(info ================================)
+
 all: $(PLAYDATE_PRODUCT)
 
 clean: playdate_clean
@@ -12,7 +20,9 @@ playdate_clean:
 
 # Create Playdate PDX bundle
 $(PLAYDATE_PRODUCT): $(EXECUTABLE)
-	@echo "Creating Playdate PDX bundle..."
+	@echo "====== Creating Playdate PDX bundle ======"
+	@echo "EXECUTABLE file: $(EXECUTABLE)"
+	@ls -lah $(EXECUTABLE) || echo "ERROR: $(EXECUTABLE) not found!"
 	@mkdir -p $(PLAYDATE_PRODUCT)
 	@cp $(EXECUTABLE) $(PLAYDATE_PRODUCT)/pdex.bin
 	@# Copy themes if they exist
