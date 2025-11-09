@@ -1,0 +1,84 @@
+name: Playdate Build
+
+on:
+  push:
+    branches:
+      - 'claude/scummvm-playdate-agi-sci-*'
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-playdate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Cache Playdate SDK
+        id: cache-sdk
+        uses: actions/cache@v3
+        with:
+          path: ~/PlaydateSDK
+          key: playdate-sdk-3.0.1-linux
+
+      - name: Download Playdate SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          echo "Downloading Playdate SDK 3.0.1 for Linux..."
+          wget -q https://download.panic.com/playdate_sdk/Linux/PlaydateSDK-3.0.1.tar.gz -O /tmp/playdate-sdk.tar.gz
+          mkdir -p ~/PlaydateSDK
+          tar -xzf /tmp/playdate-sdk.tar.gz -C ~/PlaydateSDK --strip-components=1
+          rm /tmp/playdate-sdk.tar.gz
+          echo "SDK downloaded and extracted to ~/PlaydateSDK"
+
+      - name: Install ARM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi
+
+      - name: Verify ARM toolchain
+        run: |
+          arm-none-eabi-gcc --version
+          which arm-none-eabi-gcc
+
+      - name: Set up Playdate SDK environment
+        run: |
+          echo "PLAYDATE_SDK_PATH=$HOME/PlaydateSDK" >> $GITHUB_ENV
+          ls -la ~/PlaydateSDK
+          ls -la ~/PlaydateSDK/C_API
+
+      - name: Configure ScummVM for Playdate
+        run: |
+          ./configure --host=playdate
+
+      - name: Build ScummVM
+        run: |
+          make -j$(nproc) 2>&1 | tee build.log || true
+          echo "Build exit code: $?"
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: build-log
+          path: build.log
+
+      - name: Check if PDX was created
+        run: |
+          if [ -f "scummvm.pdx/pdex.bin" ] || [ -f "scummvm" ]; then
+            echo "Build output found"
+            ls -lah scummvm* || true
+            file scummvm* || true
+          else
+            echo "No build output found"
+            exit 1
+          fi
+
+      - name: Upload PDX bundle
+        if: success()
+        uses: actions/upload-artifact@v3
+        with:
+          name: scummvm-playdate
+          path: scummvm.pdx/
