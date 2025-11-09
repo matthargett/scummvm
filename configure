@@ -3780,16 +3780,13 @@ if test -n "$_host"; then
 			# Set up Playdate SDK paths
 			append_var CXXFLAGS "-I$PLAYDATE_SDK_PATH/C_API"
 			append_var INCLUDES "-I$PLAYDATE_SDK_PATH/C_API"
-			# Add C++11 support flags
-			append_var CXXFLAGS "-std=c++11"
+			# Add C++11 support flags - use gnu++11 for better embedded support
+			_cxx11_std=gnu++11
 			append_var CXXFLAGS "-fno-exceptions"
 			append_var CXXFLAGS "-fno-rtti"
-			# Optimization flags for ARM Cortex-M7
+			# Optimization for embedded ARM
 			_optimization_level=-O2
-			append_var CXXFLAGS "-mcpu=cortex-m7"
 			append_var CXXFLAGS "-mthumb"
-			append_var CXXFLAGS "-mfloat-abi=hard"
-			append_var CXXFLAGS "-mfpu=fpv5-sp-d16"
 			# Only enable AGI and SCI engines (disable SCI32)
 			engine_disable_all
 			engine_enable agi
