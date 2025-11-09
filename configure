@@ -4343,6 +4343,9 @@ case $_backend in
 			;;
 		esac
 		;;
+	playdate)
+		# Playdate backend - libraries and SDK path already configured
+		;;
 	*)
 		echo "support for $_backend backend not implemented in configure script yet"
 		exit 1
