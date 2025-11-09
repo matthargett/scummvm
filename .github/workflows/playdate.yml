@@ -18,7 +18,7 @@ jobs:
 
       - name: Cache Playdate SDK
         id: cache-sdk
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/PlaydateSDK
           key: playdate-sdk-3.0.1-linux
@@ -60,7 +60,7 @@ jobs:
 
       - name: Upload build log
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: build-log
           path: build.log
@@ -78,7 +78,7 @@ jobs:
 
       - name: Upload PDX bundle
         if: success()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: scummvm-playdate
           path: scummvm.pdx/
