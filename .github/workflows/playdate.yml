@@ -87,10 +87,13 @@ jobs:
 
       - name: Build ScummVM
         run: |
-          echo "=== Running make with verbose output ==="
+          echo "=== Checking what make will build (dry run) ==="
+          make -n 2>&1 | head -100
+          echo "=== Running actual make with verbose output ==="
           make -j$(nproc) VERBOSE_BUILD=1 2>&1 | tee build.log
           BUILD_EXIT=$?
           echo "Build exit code: $BUILD_EXIT"
+          echo "=== Build log line count: $(wc -l < build.log) ==="
           if [ $BUILD_EXIT -ne 0 ]; then
             echo "=== BUILD FAILED ==="
             echo "Last 100 lines of build log:"
