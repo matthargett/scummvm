@@ -30,6 +30,7 @@ MODULE_OBJS := \
 	op_test.o \
 	picture.o \
 	picture_gal.o \
+	playdate_menu.o \
 	saveload.o \
 	sound.o \
 	sound_2gs.o \

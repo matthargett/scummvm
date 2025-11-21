@@ -658,7 +658,7 @@ get_system_exe_extension() {
 	riscos)
 		_exeext=",e1f"
 		;;
-	3ds | dreamcast | ds | gamecube | n64 | psp | switch | wii)
+	3ds | dreamcast | ds | gamecube | n64 | playdate | psp | switch | wii)
 		_exeext=".elf"
 		;;
 	kolibrios | kos32)
@@ -1058,6 +1058,8 @@ Optional Features:
   --enable-ext-sse2        allow code to use sse2 extensions on x86/amd64
   --enable-ext-avx2        allow code to use avx2 extensions on x86/amd64
   --enable-ext-neon        allow code to use neon extensions on ARM
+  --enable-ext-neon        allow code to use neon extensions on ARM
+  --enable-playdate-simulator build for Playdate Simulator (host arch)
   --enable-test-c++11      build the C++11 features test file
 
 Optional Documentation Options:
@@ -1404,6 +1406,7 @@ for ac_option in $@; do
 	--disable-ext-avx2)          _ext_avx2=no            ;;
 	--enable-ext-neon)           _ext_neon=yes           ;;
 	--disable-ext-neon)          _ext_neon=no            ;;
+	--enable-playdate-simulator) _playdate_simulator=yes ;;
 	--with-fluidsynth-prefix=*)
 		arg=`echo $ac_option | cut -d '=' -f 2`
 		FLUIDSYNTH_CFLAGS="-I$arg/include"
@@ -3470,6 +3473,7 @@ EOF
 		_nuked_opl=no
 		_sid_audio=no
 		;;
+
 	openbsd*)
 		append_var LDFLAGS "-L/usr/local/lib"
 		append_var CXXFLAGS "-I/usr/local/include"
@@ -4275,6 +4279,40 @@ case $_backend in
 		append_var LDFLAGS "-shared"
 		append_var LDFLAGS "-fpic"
 		_sdl=auto
+		;;
+	playdate)
+		if test -z "$PLAYDATE_SDK_PATH"; then
+			PLAYDATE_SDK_PATH="/Users/matt/Developer/PlaydateSDK"
+		fi
+		
+		append_var DEFINES "-DPLAYDATE"
+		append_var DEFINES "-DNONSTANDARD_PORT"
+		append_var DEFINES "-DTARGET_EXTENSION"
+		
+		if test "$_playdate_simulator" = yes ; then
+			append_var DEFINES "-DTARGET_SIMULATOR"
+			# Simulator builds for host architecture, so no ARM flags
+			# We need to build a shared library
+			append_var CXXFLAGS "-fPIC"
+			append_var LDFLAGS "-shared"
+			if test "$_host_os" = darwin ; then
+				append_var LDFLAGS "-dynamiclib -undefined dynamic_lookup"
+			fi
+		else
+			# ARM Cortex-M7 flags for Device
+			append_var CXXFLAGS "-mcpu=cortex-m7 -mthumb -mfpu=fpv5-sp-d16 -mfloat-abi=hard"
+			append_var CXXFLAGS "-fno-exceptions -fno-rtti -fno-threadsafe-statics"
+			
+			# Linker flags
+			append_var LDFLAGS "-mcpu=cortex-m7 -mthumb -mfpu=fpv5-sp-d16 -mfloat-abi=hard"
+		fi
+
+		append_var INCLUDES "-I$PLAYDATE_SDK_PATH/C_API"
+		append_var INCLUDES "-I\$(srcdir)/backends/platform/playdate"
+		
+		_seq_midi=no
+		_timidity=no
+		_mt32emu=no
 		;;
 	sdl)
 		_sdl=auto

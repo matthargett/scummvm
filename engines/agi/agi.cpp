@@ -19,13 +19,13 @@
  *
  */
 
-#include "common/md5.h"
-#include "common/file.h"
-#include "common/memstream.h"
-#include "common/savefile.h"
 #include "common/config-manager.h"
 #include "common/debug-channels.h"
+#include "common/file.h"
+#include "common/md5.h"
+#include "common/memstream.h"
 #include "common/random.h"
+#include "common/savefile.h"
 #include "common/textconsole.h"
 
 #include "engines/util.h"
@@ -42,12 +42,13 @@
 #include "agi/font.h"
 #include "agi/graphics.h"
 #include "agi/inv.h"
-#include "agi/loader.h"
-#include "agi/sprite.h"
-#include "agi/text.h"
 #include "agi/keyboard.h"
+#include "agi/loader.h"
 #include "agi/menu.h"
+#include "agi/playdate_menu.h"
+#include "agi/sprite.h"
 #include "agi/systemui.h"
+#include "agi/text.h"
 #include "agi/words.h"
 
 #include "gui/predictivedialog.h"
@@ -111,6 +112,9 @@ int AgiEngine::agiInit() {
 	if (!_menu)
 		_menu = new GfxMenu(this, _gfx, _picture, _text);
 
+	if (!_playdateMenu && _renderMode == Common::kRenderPlaydate)
+		_playdateMenu = new PlaydateMenu(this);
+
 	_gfx->initPriorityTable();
 
 	// Clear the string buffer on startup, but not when the game restarts, as
@@ -127,13 +131,13 @@ int AgiEngine::agiInit() {
 	switch (getVersion() >> 12) {
 	case 2:
 		debug("Emulating Sierra AGI v%x.%03x",
-		      (int)(getVersion() >> 12) & 0xF,
-		      (int)(getVersion()) & 0xFFF);
+			  (int)(getVersion() >> 12) & 0xF,
+			  (int)(getVersion()) & 0xFFF);
 		break;
 	case 3:
 		debug("Emulating Sierra AGI v%x.002.%03x",
-		      (int)(getVersion() >> 12) & 0xF,
-		      (int)(getVersion()) & 0xFFF);
+			  (int)(getVersion() >> 12) & 0xF,
+			  (int)(getVersion()) & 0xFFF);
 		break;
 	default:
 		warning("Unknown AGI Emulation Version %x", (int)(getVersion() >> 12));
@@ -196,7 +200,7 @@ void AgiEngine::agiDeinit() {
 		return;
 
 	_words->clearEgoWords(); // remove all words from memory
-	unloadResources();    // unload resources in memory
+	unloadResources();       // unload resources in memory
 	unloadResource(RESOURCETYPE_LOGIC, 0);
 	_objects.clear();
 	_words->unloadDictionary();
@@ -461,6 +465,7 @@ AgiEngine::AgiEngine(OSystem *syst, const AGIGameDescription *gameDesc) : AgiBas
 	_text = nullptr;
 	_loader = nullptr;
 	_menu = nullptr;
+	_playdateMenu = nullptr;
 	_systemUI = nullptr;
 	_inventory = nullptr;
 	_logFile = nullptr;
@@ -551,7 +556,7 @@ void AgiEngine::initialize() {
 		_loader = new AgiLoader_v3(this);
 	}
 	_loader->init();
-	
+
 	// finally set up actual VM opcodes, because we should now have figured out the right AGI version
 	setupOpCodes(getVersion());
 
@@ -581,7 +586,7 @@ bool AgiEngine::promptIsEnabled() {
 }
 
 void AgiEngine::redrawScreen() {
-	_game.gfxMode = true; // enable graphics mode
+	_game.gfxMode = true;   // enable graphics mode
 	_gfx->setPalette(true); // set graphics mode palette
 	_text->charAttrib_Set(_text->_textAttrib.foreground, _text->_textAttrib.background);
 	_gfx->clearDisplay(0);
@@ -604,6 +609,7 @@ AgiEngine::~AgiEngine() {
 	delete _inventory;
 	delete _systemUI;
 	delete _menu;
+	delete _playdateMenu;
 	delete _text;
 	delete _sprites;
 	delete _picture;
@@ -629,10 +635,14 @@ Common::Error AgiEngine::go() {
 	int ec = runGame();
 
 	switch (ec) {
-	case errOK:            return Common::kNoError;
-	case errFilesNotFound: return Common::kNoGameDataFoundError;
-	case errBadFileOpen:   return Common::kReadingFailed;
-	default:               return Common::kUnknownError;
+	case errOK:
+		return Common::kNoError;
+	case errFilesNotFound:
+		return Common::kNoGameDataFoundError;
+	case errBadFileOpen:
+		return Common::kReadingFailed;
+	default:
+		return Common::kUnknownError;
 	}
 }
 
@@ -656,7 +666,7 @@ void AgiEngine::sayText(const Common::String &text, Common::TextToSpeechManager:
 		if (_replaceDisplayNewlines) {
 			ttsMessage.replace('\n', ' ');
 		}
-		
+
 		ttsMessage.replace('<', ' ');
 		ttsMessage.replace('=', ' ');
 		ttsMan->say(ttsMessage, action, _ttsEncoding);
@@ -699,7 +709,6 @@ void AgiEngine::stopTextToSpeech(bool clearPreviousSaid) {
 //  - right at the start of the game (NewRoom)
 //  - after exiting the very first room, a message pops up, that isn't readable without it (NewRoom)
 //  - Climbing into shuttle on planet Labion. "You open the hatch and head on in." (NewRoom)
-
 
 // Games, that must not be triggered:
 //
@@ -747,11 +756,10 @@ void AgiEngine::artificialDelay_CycleDone() {
 
 //         script, description,                                       signature                   patch
 static const AgiArtificialDelayEntry artificialDelayTable[] = {
-	{ GID_GOLDRUSH,   Common::kPlatformApple2GS, ARTIFICIALDELAYTYPE_NEWROOM,     14,  21, 2200 }, // Stagecoach path: right after getting on it in Brooklyn
-	{ GID_PQ1,        Common::kPlatformApple2GS, ARTIFICIALDELAYTYPE_NEWPICTURE,   1,   2, 2200 }, // Intro: music track is supposed to finish before credits screen. Developers must have assumed that room loading would take that long.
-	{ GID_MH1,        Common::kPlatformApple2GS, ARTIFICIALDELAYTYPE_NEWPICTURE, 155, 183, 2200 }, // Happens, when hitting fingers at bar
-	{ GID_AGIDEMO,    Common::kPlatformUnknown,  ARTIFICIALDELAYTYPE_END,         -1,  -1,    0 }
-};
+	{GID_GOLDRUSH, Common::kPlatformApple2GS, ARTIFICIALDELAYTYPE_NEWROOM, 14, 21, 2200}, // Stagecoach path: right after getting on it in Brooklyn
+	{GID_PQ1, Common::kPlatformApple2GS, ARTIFICIALDELAYTYPE_NEWPICTURE, 1, 2, 2200},     // Intro: music track is supposed to finish before credits screen. Developers must have assumed that room loading would take that long.
+	{GID_MH1, Common::kPlatformApple2GS, ARTIFICIALDELAYTYPE_NEWPICTURE, 155, 183, 2200}, // Happens, when hitting fingers at bar
+	{GID_AGIDEMO, Common::kPlatformUnknown, ARTIFICIALDELAYTYPE_END, -1, -1, 0}};
 
 uint16 AgiEngine::artificialDelay_SearchTable(AgiArtificialDelayTriggerType triggerType, int16 orgNr, int16 newNr) {
 	if (getPlatform() != Common::kPlatformApple2GS) {
@@ -776,7 +784,7 @@ uint16 AgiEngine::artificialDelay_SearchTable(AgiArtificialDelayTriggerType trig
 }
 
 void AgiEngine::artificialDelayTrigger_NewRoom(int16 newRoomNr) {
-	//warning("artificial delay trigger: room %d -> new room %d", _artificialDelayCurrentRoom, newRoomNr);
+	// warning("artificial delay trigger: room %d -> new room %d", _artificialDelayCurrentRoom, newRoomNr);
 
 	if (!_game.automaticRestoreGame) {
 		uint16 millisecondsDelay = artificialDelay_SearchTable(ARTIFICIALDELAYTYPE_NEWROOM, _artificialDelayCurrentRoom, newRoomNr);
@@ -814,7 +822,7 @@ void AgiEngine::artificialDelayTrigger_NewRoom(int16 newRoomNr) {
 }
 
 void AgiEngine::artificialDelayTrigger_DrawPicture(int16 newPictureNr) {
-	//warning("artificial delay trigger: picture %d -> new picture %d", _artificialDelayCurrentPicture, newPictureNr);
+	// warning("artificial delay trigger: picture %d -> new picture %d", _artificialDelayCurrentPicture, newPictureNr);
 
 	if (!_game.automaticRestoreGame) {
 		uint16 millisecondsDelay = artificialDelay_SearchTable(ARTIFICIALDELAYTYPE_NEWPICTURE, _artificialDelayCurrentPicture, newPictureNr);
