@@ -21,10 +21,10 @@
 
 #include "base/plugins.h"
 
-#include "common/func.h"
-#include "common/debug.h"
-#include "common/debug-channels.h"
 #include "common/config-manager.h"
+#include "common/debug-channels.h"
+#include "common/debug.h"
+#include "common/func.h"
 
 #ifdef DYNAMIC_MODULES
 #include "common/fs.h"
@@ -43,7 +43,6 @@ const int pluginTypeVersions[PLUGIN_TYPE_MAX] = {
 	PLUGIN_TYPE_DETECTION_VERSION,
 	PLUGIN_TYPE_SCALER_VERSION,
 };
-
 
 // Abstract plugins
 
@@ -66,8 +65,8 @@ StaticPlugin::~StaticPlugin() {
 	delete _pluginObject;
 }
 
-bool StaticPlugin::loadPlugin()		{ return true; }
-void StaticPlugin::unloadPlugin()	{}
+bool StaticPlugin::loadPlugin() { return true; }
+void StaticPlugin::unloadPlugin() {}
 
 class StaticPluginProvider : public PluginProvider {
 public:
@@ -80,86 +79,86 @@ public:
 	PluginList getPlugins() override {
 		PluginList pl;
 
-		#define LINK_PLUGIN(ID) \
-			extern const PluginType g_##ID##_type; \
-			extern PluginObject *g_##ID##_getObject(); \
-			pl.push_back(new StaticPlugin(g_##ID##_getObject(), g_##ID##_type));
+#define LINK_PLUGIN(ID)                        \
+	extern const PluginType g_##ID##_type;     \
+	extern PluginObject *g_##ID##_getObject(); \
+	pl.push_back(new StaticPlugin(g_##ID##_getObject(), g_##ID##_type));
 
-		// "Loader" for the static plugins.
-		// Iterate over all registered (static) plugins and load them.
+// "Loader" for the static plugins.
+// Iterate over all registered (static) plugins and load them.
 
-		// Engine plugins
-		#include "engines/plugins_table.h"
+// Engine plugins
+#include "engines/plugins_table.h"
 
-		#ifdef DETECTION_STATIC
-		// Engine-detection plugins are included if we don't use uncached plugins.
-		#include "engines/detection_table.h"
-		#endif
+#ifdef DETECTION_STATIC
+// Engine-detection plugins are included if we don't use uncached plugins.
+#include "engines/detection_table.h"
+#endif
 
 		// Music plugins
 		// TODO: Use defines to disable or enable each MIDI driver as a
 		// static/dynamic plugin, like it's done for the engines
 		LINK_PLUGIN(AUTO)
 		LINK_PLUGIN(NULL)
-		#if defined(WIN32)
+#if defined(WIN32)
 		LINK_PLUGIN(WINDOWS)
-		#endif
-		#if defined(USE_ALSA)
+#endif
+#if defined(USE_ALSA)
 		LINK_PLUGIN(ALSA)
-		#endif
-		#if defined(USE_SEQ_MIDI)
+#endif
+#if defined(USE_SEQ_MIDI)
 		LINK_PLUGIN(SEQ)
-		#endif
-		#if defined(USE_SNDIO)
+#endif
+#if defined(USE_SNDIO)
 		LINK_PLUGIN(SNDIO)
-		#endif
-		#if defined(__MINT__)
+#endif
+#if defined(__MINT__)
 		LINK_PLUGIN(STMIDI)
-		#endif
-		#if defined(IRIX)
+#endif
+#if defined(IRIX)
 		LINK_PLUGIN(DMEDIA)
-		#endif
-		#if defined(__amigaos4__) || defined(__MORPHOS__)
+#endif
+#if defined(__amigaos4__) || defined(__MORPHOS__)
 		LINK_PLUGIN(CAMD)
-		#endif
-		#if defined(RISCOS)
+#endif
+#if defined(RISCOS)
 		LINK_PLUGIN(RISCOS)
-		#endif
-		#if defined(MACOSX)
+#endif
+#if defined(MACOSX)
 		LINK_PLUGIN(COREAUDIO)
 		LINK_PLUGIN(COREMIDI)
-		#endif
-		#ifdef USE_FLUIDSYNTH
+#endif
+#ifdef USE_FLUIDSYNTH
 		LINK_PLUGIN(FLUIDSYNTH)
-		#endif
+#endif
 
-		#ifdef EMSCRIPTEN
+#ifdef EMSCRIPTEN
 		LINK_PLUGIN(WEBMIDI)
-		#endif
-		#ifdef USE_MT32EMU
+#endif
+#ifdef USE_MT32EMU
 		LINK_PLUGIN(MT32)
-		#endif
-		#if defined(USE_SONIVOX)
+#endif
+#if defined(USE_SONIVOX)
 		LINK_PLUGIN(EAS)
-		#endif
+#endif
 		LINK_PLUGIN(ADLIB)
 		LINK_PLUGIN(PCSPK)
 		LINK_PLUGIN(PCJR)
 		LINK_PLUGIN(CMS)
-		#if defined(USE_SID_AUDIO)
+#if defined(USE_SID_AUDIO)
 		LINK_PLUGIN(C64)
-		#endif
+#endif
 		LINK_PLUGIN(AMIGA)
 		LINK_PLUGIN(APPLEIIGS)
 		LINK_PLUGIN(MACINTOSH)
-		#if defined(USE_FMTOWNS_PC98_AUDIO)
+#if defined(USE_FMTOWNS_PC98_AUDIO)
 		LINK_PLUGIN(TOWNS)
 		LINK_PLUGIN(PC98)
 		LINK_PLUGIN(SEGACD)
-		#endif
-		#if defined(USE_TIMIDITY)
+#endif
+#if defined(USE_TIMIDITY)
 		LINK_PLUGIN(TIMIDITY)
-		#endif
+#endif
 
 		// Scaler plugins
 		LINK_PLUGIN(NORMAL)
@@ -191,13 +190,13 @@ PluginList FilePluginProvider::getPlugins() {
 	// Prepare the list of directories to search
 	Common::FSList pluginDirs;
 
-	// Add the default directories
-	#ifndef WIN32
+// Add the default directories
+#ifndef WIN32
 	pluginDirs.push_back(Common::FSNode("."));
-	#endif
-	#ifndef PSP2
+#endif
+#ifndef PSP2
 	pluginDirs.push_back(Common::FSNode("plugins"));
-	#endif
+#endif
 
 	// Add the provider's custom directories
 	addCustomDirectories(pluginDirs);
@@ -263,9 +262,9 @@ PluginManager &PluginManager::instance() {
 		return *_instance;
 
 #if defined(UNCACHED_PLUGINS) && defined(DYNAMIC_MODULES)
-		_instance = new PluginManagerUncached();
+	_instance = new PluginManagerUncached();
 #else
-		_instance = new PluginManager();
+	_instance = new PluginManager();
 #endif
 	return *_instance;
 }
@@ -346,13 +345,13 @@ void PluginManagerUncached::init() {
 				if (curPlugin->getType() == PLUGIN_TYPE_ENGINE) {
 					curPlugin->unloadPlugin();
 					_allEnginePlugins.push_back(curPlugin);
-				} else {	// add non-engine plugins to the 'in-memory' list
-							// these won't ever get unloaded
+				} else { // add non-engine plugins to the 'in-memory' list
+						 // these won't ever get unloaded
 					addToPluginsInMemList(curPlugin);
 				}
 			}
- 		}
- 	}
+		}
+	}
 }
 
 /**
@@ -791,7 +790,7 @@ const Plugin *PluginManager::findEnginePlugin(const Common::String &engineId) {
 
 	// Now look for the plugin using the engine ID. This is much faster than scanning plugin
 	// by plugin
-	if (loadPluginFromEngineId(engineId))  {
+	if (loadPluginFromEngineId(engineId)) {
 		plugin = findLoadedPlugin(engineId);
 		if (plugin)
 			return plugin;
@@ -906,7 +905,7 @@ void EngineManager::upgradeTargetForEngineId(const Common::String &target) const
 		DetectedGames candidates = metaEngine.detectGames(files);
 		if (candidates.empty()) {
 			warning("No games supported by the engine '%s' were found in path '%s' when upgrading target '%s'",
-			        metaEngine.getName(), path.toString(Common::Path::kNativeSeparator).c_str(), target.c_str());
+					metaEngine.getName(), path.toString(Common::Path::kNativeSeparator).c_str(), target.c_str());
 			return;
 		}
 
@@ -1014,31 +1013,30 @@ struct LegacyGraphicsMode {
 // Table for using old names for scalers in the configuration
 // to keep compatibiblity with old config files.
 static const LegacyGraphicsMode s_legacyGraphicsModes[] = {
-	{ "1x", "normal", 1 },
-	{ "2x", "normal", 2 },
-	{ "3x", "normal", 3 },
-	{ "normal1x", "normal", 1 },
-	{ "normal2x", "normal", 2 },
-	{ "normal3x", "normal", 3 },
-	{ "normal4x", "normal", 4 },
-	{ "hq2x", "hq", 2 },
-	{ "hq3x", "hq", 3 },
-	{ "edge2x", "edge", 2 },
-	{ "edge3x", "edge", 3 },
-	{ "advmame2x", "advmame", 2 },
-	{ "advmame3x", "advmame", 3 },
-	{ "advmame4x", "advmame", 4 },
-	{ "2xsai", "sai", 2 },
-	{ "sai2x", "sai", 2 },
-	{ "super2xsai", "supersai", 2 },
-	{ "supersai2x", "supersai", 2 },
-	{ "supereagle", "supereagle", 2 },
-	{ "supereagle2x", "supereagle", 2 },
-	{ "pm2x", "pm", 2 },
-	{ "dotmatrix", "dotmatrix", 2 },
-	{ "dotmatrix2x", "dotmatrix", 2 },
-	{ "tv2x", "tv", 2 }
-};
+	{"1x", "normal", 1},
+	{"2x", "normal", 2},
+	{"3x", "normal", 3},
+	{"normal1x", "normal", 1},
+	{"normal2x", "normal", 2},
+	{"normal3x", "normal", 3},
+	{"normal4x", "normal", 4},
+	{"hq2x", "hq", 2},
+	{"hq3x", "hq", 3},
+	{"edge2x", "edge", 2},
+	{"edge3x", "edge", 3},
+	{"advmame2x", "advmame", 2},
+	{"advmame3x", "advmame", 3},
+	{"advmame4x", "advmame", 4},
+	{"2xsai", "sai", 2},
+	{"sai2x", "sai", 2},
+	{"super2xsai", "supersai", 2},
+	{"supersai2x", "supersai", 2},
+	{"supereagle", "supereagle", 2},
+	{"supereagle2x", "supereagle", 2},
+	{"pm2x", "pm", 2},
+	{"dotmatrix", "dotmatrix", 2},
+	{"dotmatrix2x", "dotmatrix", 2},
+	{"tv2x", "tv", 2}};
 
 bool ScalerManager::isOldGraphicsSetting(const Common::String &gfxMode) {
 	for (uint i = 0; i < ARRAYSIZE(s_legacyGraphicsModes); ++i) {

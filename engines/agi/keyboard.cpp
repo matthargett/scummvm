@@ -68,9 +68,11 @@ void AgiEngine::processScummVMEvents() {
 	int key = 0;
 
 	while (_eventMan->pollEvent(event)) {
+#ifdef PLAYDATE
 		if (_playdateMenu && _playdateMenu->isVisible()) {
 			_playdateMenu->handleEvent(event);
 		}
+#endif
 
 		switch (event.type) {
 		case Common::EVENT_PREDICTIVE_DIALOG:

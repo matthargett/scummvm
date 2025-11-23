@@ -215,6 +215,7 @@ _bink=yes
 _cloud=auto
 _dlc=no
 _scummvmdlc=no
+_playdate_simulator=no
 _pandoc=no
 _curl=yes
 _lld=no
@@ -1057,7 +1058,6 @@ Optional Features:
   --disable-windows-unicode use Windows ANSI APIs
   --enable-ext-sse2        allow code to use sse2 extensions on x86/amd64
   --enable-ext-avx2        allow code to use avx2 extensions on x86/amd64
-  --enable-ext-neon        allow code to use neon extensions on ARM
   --enable-ext-neon        allow code to use neon extensions on ARM
   --enable-playdate-simulator build for Playdate Simulator (host arch)
   --enable-test-c++11      build the C++11 features test file
@@ -3041,42 +3041,47 @@ case $_host_os in
 			append_var DEFINES "-D_GNU_SOURCE"
 		fi
 		;;
-	darwin*)
-		append_var DEFINES "-DMACOSX"
-		append_var LIBS "-framework AudioUnit -framework AudioToolbox -framework Carbon -framework CoreMIDI"
-		# SDL2 doesn't seem to add Cocoa for us.
-		append_var LIBS "-framework Cocoa"
-		add_line_to_config_mk 'MACOSX = 1'
-		_seq_midi=no
-		# Custom openUrl() doesn't require it, and it's unavailable on 10.4 anyway
-		_has_posix_spawn=no
+darwin*)
+		if test "$_backend" = "playdate"; then
+			# Do not pull macOS frameworks or set MACOSX for Playdate builds
+			_seq_midi=no
+			_has_posix_spawn=no
+		else
+			append_var DEFINES "-DMACOSX"
+			append_var LIBS "-framework AudioUnit -framework AudioToolbox -framework Carbon -framework CoreMIDI"
+			# SDL2 doesn't seem to add Cocoa for us.
+			append_var LIBS "-framework Cocoa"
+			add_line_to_config_mk 'MACOSX = 1'
+			_seq_midi=no
+			# Custom openUrl() doesn't require it, and it's unavailable on 10.4 anyway
+			_has_posix_spawn=no
 
-		# Now we may have MacPorts or Fink installed
-		# Which put libraries and headers in non-standard places
-		# Checking them here
+			# Now we may have MacPorts or Fink installed
+			# Which put libraries and headers in non-standard places
+			# Checking them here
 
-		# MacPorts
-		# There is no way to get the prefix, so implementing a hack here
-		macport_version=`port version 2>/dev/null`
-		if test "$?" -eq 0; then
-			macport_version="`echo "${macport_version}" | sed -ne 's/Version: \([0-9]\.[0-9]\.[0-9]\)/\1/gp'`"
-			echo_n "You seem to be running MacPorts version ${macport_version}..."
+			# MacPorts
+			# There is no way to get the prefix, so implementing a hack here
+			macport_version=`port version 2>/dev/null`
+			if test "$?" -eq 0; then
+				macport_version="`echo "${macport_version}" | sed -ne 's/Version: \([0-9]\.[0-9]\.[0-9]\)/\1/gp'`"
+				echo_n "You seem to be running MacPorts version ${macport_version}..."
 
-			macport_prefix=`which port`
-			# strip off /bin/port from /opt/local/bin/port
-			macport_prefix=`dirname ${macport_prefix}`
-			macport_prefix=`dirname ${macport_prefix}`
+				macport_prefix=`which port`
+				# strip off /bin/port from /opt/local/bin/port
+				macport_prefix=`dirname ${macport_prefix}`
+				macport_prefix=`dirname ${macport_prefix}`
 
-			echo "adding ${macport_prefix} to paths"
+				echo "adding ${macport_prefix} to paths"
 
-			LDFLAGS="-L${macport_prefix}/lib $LDFLAGS"
-			CXXFLAGS="-I${macport_prefix}/include $CXXFLAGS"
+				LDFLAGS="-L${macport_prefix}/lib $LDFLAGS"
+				CXXFLAGS="-I${macport_prefix}/include $CXXFLAGS"
 
-			if test -z "$_staticlibpath"; then
-				_staticlibpath=${macport_prefix}
-				echo "Set staticlib-prefix to ${_staticlibpath}"
+				if test -z "$_staticlibpath"; then
+					_staticlibpath=${macport_prefix}
+					echo "Set staticlib-prefix to ${_staticlibpath}"
+				fi
 			fi
-		fi
 
 		# Fink
 		# There is no way to get the prefix, so implementing a hack here
@@ -3252,6 +3257,7 @@ EOF
 		_pandoc=yes
 		if test "$_pandocformat" = "default"; then
 			_pandocformat="html"
+		fi
 		fi
 		;;
 	dreamcast)
@@ -4284,20 +4290,41 @@ case $_backend in
 		if test -z "$PLAYDATE_SDK_PATH"; then
 			PLAYDATE_SDK_PATH="/Users/matt/Developer/PlaydateSDK"
 		fi
-		
+
+		# Keep the footprint small and force static assets
+		_ogg=no
+		_vorbis=no
+		_flac=no
+		_mad=no
+		_png=no
+		_jpeg=no
+		_gif=no
+		_theoradec=no
+		_vpx=no
+		_faad=no
+		_libmikmod=no
+		_libopenmpt=no
+		_freetype2=no
+		_fribidi=no
+		_tts=no
+		_seq_midi=no
+		_timidity=no
+		_mt32emu=no
+		_updates=no
+		_cloud=no
+		_libcurl=no
+		_sdlnet=no
+		_sdl=no
+		_lld=no
+
 		append_var DEFINES "-DPLAYDATE"
 		append_var DEFINES "-DNONSTANDARD_PORT"
 		append_var DEFINES "-DTARGET_EXTENSION"
-		
+		append_var CXXFLAGS "-flto -fvisibility=hidden"
+
 		if test "$_playdate_simulator" = yes ; then
 			append_var DEFINES "-DTARGET_SIMULATOR"
-			# Simulator builds for host architecture, so no ARM flags
-			# We need to build a shared library
 			append_var CXXFLAGS "-fPIC"
-			append_var LDFLAGS "-shared"
-			if test "$_host_os" = darwin ; then
-				append_var LDFLAGS "-dynamiclib -undefined dynamic_lookup"
-			fi
 		else
 			# ARM Cortex-M7 flags for Device
 			append_var CXXFLAGS "-mcpu=cortex-m7 -mthumb -mfpu=fpv5-sp-d16 -mfloat-abi=hard"
@@ -4309,10 +4336,6 @@ case $_backend in
 
 		append_var INCLUDES "-I$PLAYDATE_SDK_PATH/C_API"
 		append_var INCLUDES "-I\$(srcdir)/backends/platform/playdate"
-		
-		_seq_midi=no
-		_timidity=no
-		_mt32emu=no
 		;;
 	sdl)
 		_sdl=auto

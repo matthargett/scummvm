@@ -62,6 +62,7 @@ private:
 
 	uint8 _paletteGfxMode[256 * 3];
 	uint8 _paletteTextMode[256 * 3];
+	uint8 _playdateLuma[16];
 
 	uint8 _agipalPalette[16 * 3];
 	int _agipalFileNum;

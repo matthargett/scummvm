@@ -762,7 +762,9 @@ public:
 	PictureMgr *_picture;
 	AgiLoader *_loader;
 	GfxMenu *_menu;
+#ifdef PLAYDATE
 	PlaydateMenu *_playdateMenu;
+#endif
 	SystemUI *_systemUI;
 	Common::DumpFile *_logFile; // File used for the log() agi command.
 

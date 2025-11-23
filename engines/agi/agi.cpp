@@ -112,8 +112,10 @@ int AgiEngine::agiInit() {
 	if (!_menu)
 		_menu = new GfxMenu(this, _gfx, _picture, _text);
 
+#ifdef PLAYDATE
 	if (!_playdateMenu && _renderMode == Common::kRenderPlaydate)
 		_playdateMenu = new PlaydateMenu(this);
+#endif
 
 	_gfx->initPriorityTable();
 
@@ -465,7 +467,9 @@ AgiEngine::AgiEngine(OSystem *syst, const AGIGameDescription *gameDesc) : AgiBas
 	_text = nullptr;
 	_loader = nullptr;
 	_menu = nullptr;
+#ifdef PLAYDATE
 	_playdateMenu = nullptr;
+#endif
 	_systemUI = nullptr;
 	_inventory = nullptr;
 	_logFile = nullptr;
@@ -609,7 +613,9 @@ AgiEngine::~AgiEngine() {
 	delete _inventory;
 	delete _systemUI;
 	delete _menu;
+#ifdef PLAYDATE
 	delete _playdateMenu;
+#endif
 	delete _text;
 	delete _sprites;
 	delete _picture;

@@ -1318,9 +1318,11 @@ void GfxMgr::shakeScreen(int16 repeatCount) {
 }
 
 void GfxMgr::updateScreen() {
+#ifdef PLAYDATE
 	if (_vm->_playdateMenu && _vm->_playdateMenu->isVisible()) {
 		_vm->_playdateMenu->draw();
 	}
+#endif
 	_vm->_system->updateScreen();
 }
 
@@ -1604,144 +1606,81 @@ void GfxMgr::setCursorPalette(bool amigaStyleCursor) {
 }
 #endif
 
-// 4x4 Dither patterns for 16 colors
-// Each byte is a row of 4 pixels (MSB first? No, let's say bit 0 is left)
-// Actually, let's use a simple bitmask: 0x8, 0x4, 0x2, 0x1
-static const uint8 playdateDitherPatterns[16][4] = {
-	{0x0, 0x0, 0x0, 0x0}, // 0: Black
-	{0x2, 0x0, 0x8, 0x0}, // 1: Blue (Dark Grey)
-	{0x8, 0x2, 0x8, 0x2}, // 2: Green (Medium Grey)
-	{0xA, 0x5, 0xA, 0x5}, // 3: Cyan (Light Grey)
-	{0x8, 0x0, 0x2, 0x0}, // 4: Red (Dark Grey)
-	{0xA, 0x0, 0xA, 0x0}, // 5: Magenta (Medium Grey)
-	{0xA, 0x2, 0xA, 0x2}, // 6: Brown (Medium Grey)
-	{0xA, 0x5, 0xA, 0x5}, // 7: Light Grey
-	{0x5, 0x0, 0x5, 0x0}, // 8: Dark Grey
-	{0x5, 0xA, 0x5, 0xA}, // 9: Light Blue
-	{0xF, 0xA, 0xF, 0xA}, // 10: Light Green
-	{0xF, 0x5, 0xF, 0x5}, // 11: Light Cyan
-	{0xF, 0xA, 0xF, 0xA}, // 12: Light Red
-	{0xF, 0x5, 0xF, 0x5}, // 13: Light Magenta
-	{0xF, 0xE, 0xF, 0xB}, // 14: Yellow
-	{0xF, 0xF, 0xF, 0xF}  // 15: White
+
+static const uint8 kPlaydateBayer4x4[4][4] = {
+	{0, 8, 2, 10},
+	{12, 4, 14, 6},
+	{3, 11, 1, 9},
+	{15, 7, 13, 5}
 };
 
+static inline byte playdateDither(uint8 luma, int displayX, int displayY) {
+	const uint8 threshold = kPlaydateBayer4x4[displayY & 3][displayX & 3];
+	return ((luma >> 4) >= threshold) ? 1 : 0;
+}
+
 void GfxMgr::render_BlockPlaydate(int16 x, int16 y, int16 width, int16 height) {
+	const int xScale = 2 + _displayWidthMulAdjust;
+	const int yScale = 1 + _displayHeightMulAdjust;
+	const int baseY = _renderStartDisplayOffsetY;
+
 	uint32 offsetVisual = SCRIPT_WIDTH * y + x;
 	uint32 offsetDisplay = getDisplayOffsetToGameScreenPos(x, y);
-	int16 remainingHeight = height;
-	byte curColor = 0;
-	int16 displayWidth = width * (2 + _displayWidthMulAdjust);
 
-	while (remainingHeight) {
-		int16 remainingWidth = width;
-		int16 currentX = x;
-		int16 currentY = y + (height - remainingHeight); // Calculate absolute Y for dither pattern
+	for (int16 row = 0; row < height; ++row) {
+		const int displayY = (y + row) * yScale + baseY;
+		uint32 displayPos = offsetDisplay + row * _displayScreenWidth;
 
-		// We are writing to _displayScreen which is 400 wide.
-		// offsetDisplay points to the start of the line in _displayScreen.
-		// We need to write 2 pixels for each 1 pixel of width.
+		for (int16 col = 0; col < width; ++col) {
+			const byte color = _activeScreen[offsetVisual++] & 0x0F;
+			const uint8 luma = _playdateLuma[color];
+			const int displayX = col * xScale;
 
-		uint32 currentDisplayOffset = offsetDisplay;
-
-		while (remainingWidth) {
-			curColor = _activeScreen[offsetVisual++] & 0x0F;
-
-			// Get dither pattern row for this color and Y
-			uint8 patternRow = playdateDitherPatterns[curColor][currentY % 4];
-
-			// Pixel 1 (Left)
-			// Display X is currentX * 2
-			int dX1 = (currentX * 2) % 4;
-			byte p1 = (patternRow >> (3 - dX1)) & 0x1;
-
-			// Pixel 2 (Right)
-			// Display X is currentX * 2 + 1
-			int dX2 = (currentX * 2 + 1) % 4;
-			byte p2 = (patternRow >> (3 - dX2)) & 0x1;
-
-			_displayScreen[currentDisplayOffset++] = p1;
-			_displayScreen[currentDisplayOffset++] = p2;
-
-			currentX++;
-			remainingWidth--;
+			_displayScreen[displayPos + displayX] = playdateDither(luma, (x * xScale) + displayX, displayY);
+			_displayScreen[displayPos + displayX + 1] = playdateDither(luma, (x * xScale) + displayX + 1, displayY);
 		}
 
 		offsetVisual += SCRIPT_WIDTH - width;
-		offsetDisplay += _displayScreenWidth - displayWidth;
-		offsetDisplay += _displayScreenWidth; // Skip to next line
-
-		remainingHeight--;
 	}
 }
 
 void GfxMgr::drawDisplayRectPlaydate(int16 x, int16 y, int16 width, int16 height, byte color) {
-	// Similar to render_BlockPlaydate but for a solid color rect
-	// x, y are in display coordinates (0-399, 0-239)
+	const uint8 luma = _playdateLuma[color & 0x0F];
 
-	uint32 offsetDisplay = y * _displayScreenWidth + x;
-	int16 remainingHeight = height;
+	for (int16 row = 0; row < height; ++row) {
+		const int displayY = y + row;
+		uint32 displayPos = (y + row) * _displayScreenWidth + x;
 
-	while (remainingHeight) {
-		int16 remainingWidth = width;
-		int16 currentX = x; // This is display X
-		int16 currentY = y + (height - remainingHeight);
-		uint32 currentDisplayOffset = offsetDisplay;
-
-		// Map display X to dither pattern column
-		// Since we are in display coordinates, we just use X % 4
-
-		uint8 patternRow = playdateDitherPatterns[color & 0x0F][currentY % 4];
-
-		while (remainingWidth) {
-			int dX = currentX % 4;
-			byte p = (patternRow >> (3 - dX)) & 0x1;
-			_displayScreen[currentDisplayOffset++] = p;
-			currentX++;
-			remainingWidth--;
+		for (int16 col = 0; col < width; ++col) {
+			const int displayX = x + col;
+			_displayScreen[displayPos + col] = playdateDither(luma, displayX, displayY);
 		}
-
-		offsetDisplay += _displayScreenWidth;
-		remainingHeight--;
 	}
 }
 
 void GfxMgr::drawPlaydateText(int16 x, int16 y, const Common::String &text, bool inverted) {
-	// Draw text directly to _displayScreen (400x240)
-	// Assumes 8x8 font for now (standard AGI font)
-
 	const byte *fontData = _vm->getFontData();
 	if (!fontData)
 		return;
 
-	int curX = x;
-	for (uint i = 0; i < text.size(); i++) {
-		byte c = (byte)text[i];
+	const byte on = inverted ? 0 : 1;
+	const byte off = inverted ? 1 : 0;
 
-		for (int row = 0; row < 8; row++) {
-			byte charRow = fontData[c * 8 + row];
+	for (uint i = 0; i < text.size(); ++i) {
+		const byte c = (byte)text[i];
 
-			for (int col = 0; col < 8; col++) {
-				if (curX + col >= _displayScreenWidth || y + row >= _displayScreenHeight)
+		for (int row = 0; row < 8; ++row) {
+			const byte charRow = fontData[c * 8 + row];
+			uint32 displayPos = (y + row) * _displayScreenWidth + x + (i * 8);
+
+			for (int col = 0; col < 8; ++col) {
+				if ((x + i * 8 + col) >= _displayScreenWidth || (y + row) >= _displayScreenHeight)
 					continue;
 
-				bool bit = (charRow >> (7 - col)) & 1;
-				if (inverted)
-					bit = !bit;
-
-				// Map to dither pattern? No, text should be solid black/white
-				// 0 = Black, 1 = White
-				// AGI Font: 1 = Pixel, 0 = Background
-				// Playdate: 1 = White, 0 = Black
-				// So we want 1 -> White (1), 0 -> Black (0)?
-				// Or 1 -> Black (0), 0 -> White (1)?
-				// Usually text is black on white or white on black.
-				// Let's assume White text (1) on Black background (0) for now.
-
-				_displayScreen[(y + row) * _displayScreenWidth + (curX + col)] = bit ? 1 : 0;
+				const bool bit = (charRow >> (7 - col)) & 1;
+				_displayScreen[displayPos + col] = bit ? on : off;
 			}
 		}
-		curX += 8;
 	}
 }
 

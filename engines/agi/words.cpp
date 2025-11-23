@@ -22,6 +22,7 @@
 #include "agi/agi.h"
 #include "agi/words.h"
 
+#include "common/algorithm.h"
 #include "common/textconsole.h"
 
 namespace Agi {
@@ -403,6 +404,30 @@ const char *Words::getEgoWord(int16 wordNr) const {
 uint16 Words::getEgoWordId(int16 wordNr) const {
 	assert(wordNr >= 0 && wordNr < MAX_WORDS);
 	return _egoWords[wordNr].id;
+}
+
+void Words::collectAllWords(Common::Array<Common::String> &out) const {
+	out.clear();
+
+	for (Common::HashMap<byte, Common::Array<WordEntry>>::const_iterator it = _dictionary.begin(); it != _dictionary.end(); ++it) {
+		const Common::Array<WordEntry> &bucket = it->_value;
+		for (uint i = 0; i < bucket.size(); ++i) {
+			out.push_back(bucket[i].word);
+		}
+	}
+
+	Common::sort(out.begin(), out.end(), [](const Common::String &a, const Common::String &b) {
+		return a.compareToIgnoreCase(b) < 0;
+	});
+
+	// Deduplicate while preserving order after sort
+	Common::Array<Common::String> unique;
+	for (uint i = 0; i < out.size(); ++i) {
+		if (unique.empty() || !unique.back().equalsIgnoreCase(out[i]))
+			unique.push_back(out[i]);
+	}
+
+	out.swap(unique);
 }
 
 bool Words::handleSpeedCommands(const Common::String &userInputLowercase) {

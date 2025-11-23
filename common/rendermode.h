@@ -51,8 +51,7 @@ enum RenderMode {
 	kRenderEGA = 2,
 	kRenderCGA = 3,
 	kRenderHercG = 4,
-	kRenderHercA = 13,
-	kRenderPlaydate = 14,
+	kRenderHercA = 5,
 	kRenderAmiga = 6,
 	kRenderFMTowns = 7,
 	kRenderPC98_256c = 8,
@@ -69,7 +68,8 @@ enum RenderMode {
 	kRenderVGAGrey = 19,
 	kRenderPC98_8c = 20,
 	kRenderWin256c = 21,
-	kRenderWin16c = 22
+	kRenderWin16c = 22,
+	kRenderPlaydate = 23
 };
 
 struct RenderModeDescription {
