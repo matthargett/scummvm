@@ -368,6 +368,16 @@ void GfxMgr::copyDisplayRectToScreenUsingVisualPos(int16 x, int16 y, int16 width
 }
 
 void GfxMgr::copyDisplayToScreen() {
+	// Debug: dump first row before blit to backend
+	static int copyLogCount = 0;
+	if (copyLogCount < 3) {
+		Common::String rowDump = "copyDisplay row0:";
+		for (int i = 0; i < 16 && i < _displayScreenWidth; ++i)
+			rowDump += Common::String::format(" %d", _displayScreen[i]);
+		warning("%s", rowDump.c_str());
+		++copyLogCount;
+	}
+
 	_vm->_system->copyRectToScreen(_displayScreen, _displayScreenWidth, 0, 0, _displayScreenWidth, _displayScreenHeight);
 }
 
@@ -823,6 +833,22 @@ void GfxMgr::render_BlockHercules(int16 x, int16 y, int16 width, int16 height) {
 		offsetDisplay += _displayScreenWidth;
 
 		remainingHeight--;
+	}
+
+	// Debug: dump first few bytes to see if Hercules render produced pixels
+	static int hercLogCount = 0;
+	if (hercLogCount < 3) {
+		Common::String dump = Common::String::format("Herc render y=%d h=%d w=%d dispW=%d active=%p", y, height, width, _displayScreenWidth, _activeScreen);
+		warning("%s", dump.c_str());
+		const uint32 screenSize = _displayScreenWidth * _displayScreenHeight;
+		for (int sampleY = y; sampleY < y + 2 && sampleY < _displayScreenHeight; ++sampleY) {
+			Common::String rowDump = Common::String::format("HercRow %d:", sampleY);
+			uint32 base = getDisplayOffsetToGameScreenPos(x, sampleY);
+			for (int i = 0; i < 16 && (base + i) < screenSize; ++i)
+				rowDump += Common::String::format(" %d", _displayScreen[base + i]);
+			warning("%s", rowDump.c_str());
+		}
+		++hercLogCount;
 	}
 }
 

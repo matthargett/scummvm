@@ -160,7 +160,7 @@ static int update(void *userdata) {
 		g_scummvm_thread = std::thread([pathArgStr]() {
 			const char *argv[] = {
 				"scummvm",
-				"--render-mode=playdate",
+				"--render-mode=hercGreen",
 				"--music-driver=adlib",
 				"--engine=agi",
 				"--auto-detect",
@@ -175,10 +175,6 @@ static int update(void *userdata) {
 	if (g_pd && g_pd->graphics && playdateConsumeDirtyFlag()) {
 		const Common::Array<uint8_t> &src = playdateBackBuffer();
 		uint8_t *dst = g_pd->graphics->getFrame();
-		// Playdate framebuffer stride is 52 bytes (400 bits padded to 32-bit boundaries)
-		const int stride = 52;
-		std::memset(dst, 0, stride * 240);
-
 		const int srcW = playdateBackBufferWidth() ? playdateBackBufferWidth() : 320;
 		const int srcH = playdateBackBufferHeight() ? playdateBackBufferHeight() : 200;
 
@@ -195,7 +191,14 @@ static int update(void *userdata) {
 		const int offsetX = 0;
 		const int offsetY = 0;
 
-		// Blit scaled
+		// Playdate framebuffer stride is 52 bytes (400 bits padded to 32-bit boundaries)
+		const int stride = 52;
+
+		// Clear to black each frame; we set bits for white pixels
+		std::memset(dst, 0, stride * 240);
+
+		static int logCount = 0;
+		int whiteCount = 0;
 		for (int y = 0; y < destH; ++y) {
 			int srcY = (int)((y / scale));
 			if (srcY < 0) srcY = 0;
@@ -209,15 +212,40 @@ static int update(void *userdata) {
 				if (srcX < 0) srcX = 0;
 				if (srcX >= srcW) srcX = srcW - 1;
 				int destX = x + offsetX;
+				int byteIndex = destX / 8;
+				int bitIndex = 7 - (destX % 8); // MSB-first packing
 				if (srcRow[srcX]) {
-					int byteIndex = destX / 8;
-					int bitIndex = 7 - (destX % 8);
-					row[byteIndex] |= (1 << bitIndex);
+					row[byteIndex] |= (1 << bitIndex); // white pixel
+					++whiteCount;
 				}
+			}
+
+			if (logCount < 3 && y == 0) {
+				Common::String srcDump = "SRC0:";
+				for (int b = 0; b < 16 && b < srcW; ++b)
+					srcDump += Common::String::format(" %02X", srcRow[b]);
+				Common::String dstDump = "DST0:";
+				for (int b = 0; b < 8; ++b)
+					dstDump += Common::String::format(" %02X", row[b]);
+				if (g_pd && g_pd->system) {
+					g_pd->system->logToConsole("%s", srcDump.c_str());
+					g_pd->system->logToConsole("%s", dstDump.c_str());
+				}
+				if (logCount == 0 && destH > 50) {
+					const uint8_t *srcMid = src.data() + (destH / 2) * srcW;
+					Common::String srcMidDump = "SRCmid:";
+					for (int b = 0; b < 16 && b < srcW; ++b)
+						srcMidDump += Common::String::format(" %02X", srcMid[b]);
+					if (g_pd && g_pd->system)
+						g_pd->system->logToConsole("%s", srcMidDump.c_str());
+				}
+				++logCount;
 			}
 		}
 
 		g_pd->graphics->markUpdatedRows(0, 240);
+		if (g_pd && g_pd->system && logCount < 6)
+			g_pd->system->logToConsole("Blit stats: white=%d total=%d", whiteCount, destW * destH);
 	}
 	return 1; // Continue running
 }

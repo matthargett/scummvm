@@ -124,6 +124,7 @@ OSystem_Playdate::OSystem_Playdate(PlaydateAPI *pd) : _pd(pd), _startTime(0) {
 		g_backBufferW = 320;
 		g_backBufferH = 200;
 		g_playdateBackBuffer.resize(g_backBufferW * g_backBufferH);
+		std::fill(g_playdateBackBuffer.begin(), g_playdateBackBuffer.end(), 0);
 	}
 }
 
@@ -222,6 +223,12 @@ void OSystem_Playdate::initSize(uint width, uint height, const Graphics::PixelFo
 	g_backBufferH = height;
 	g_playdateBackBuffer.clear();
 	g_playdateBackBuffer.resize(g_backBufferW * g_backBufferH);
+	std::fill(g_playdateBackBuffer.begin(), g_playdateBackBuffer.end(), 0);
+
+	// Overlay matches game area
+	_overlaySurface.free();
+	_overlaySurface.create(width, height, Graphics::PixelFormat::createFormatCLUT8());
+	_overlayVisible = false;
 }
 
 int16 OSystem_Playdate::getHeight() {
@@ -253,6 +260,10 @@ void OSystem_Playdate::copyRectToScreen(const void *buf, int pitch, int x, int y
 		const byte *srcRow = src + j * pitch;
 		uint8_t *dstRow = frameBuffer + dstY * destStride;
 
+		// Clear the destination span so moving sprites/dithers can erase correctly
+		if (x < g_backBufferW)
+			memset(dstRow + x, 0, MIN<int>(w, g_backBufferW - x));
+
 		for (int i = 0; i < w; i++) {
 			int dstX = x + i;
 			if (dstX >= g_backBufferW)
@@ -278,22 +289,46 @@ void OSystem_Playdate::setShakePos(int shakeXOffset, int shakeYOffset) {
 }
 
 void OSystem_Playdate::showOverlay(bool inGUI) {
+	_overlayVisible = true;
 }
 
 void OSystem_Playdate::hideOverlay() {
+	_overlayVisible = false;
 }
 
 bool OSystem_Playdate::isOverlayVisible() const {
-	return false;
+	return _overlayVisible;
 }
 
 void OSystem_Playdate::clearOverlay() {
+	if (!_overlaySurface.getPixels())
+		return;
+	_overlaySurface.fillRect(Common::Rect(_overlaySurface.w, _overlaySurface.h), 0);
 }
 
 void OSystem_Playdate::grabOverlay(Graphics::Surface &surface) {
+	if (!_overlaySurface.getPixels())
+		return;
+	surface.copyFrom(_overlaySurface);
 }
 
 void OSystem_Playdate::copyRectToOverlay(const void *buf, int pitch, int x, int y, int w, int h) {
+	// Lazily create overlay if missing
+	if (!_overlaySurface.getPixels()) {
+		_overlaySurface.create(g_backBufferW ? g_backBufferW : 320, g_backBufferH ? g_backBufferH : 200,
+			Graphics::PixelFormat::createFormatCLUT8());
+	}
+	if (!_overlaySurface.getPixels())
+		return;
+	if (x >= _overlaySurface.w || y >= _overlaySurface.h)
+		return;
+	int maxW = MIN(w, _overlaySurface.w - x);
+	int maxH = MIN(h, _overlaySurface.h - y);
+	if (maxW <= 0 || maxH <= 0)
+		return;
+	_overlaySurface.copyRectToSurface((const byte *)buf, pitch, x, y, maxW, maxH);
+	// Mark backbuffer dirty so overlay is composited on next blit
+	g_backBufferDirty = true;
 }
 
 int16 OSystem_Playdate::getOverlayHeight() const {

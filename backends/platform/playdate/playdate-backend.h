@@ -8,6 +8,7 @@ extern "C" {
 #include "backends/base-backend.h"
 #include "common/scummsys.h"
 #include "common/system.h"
+#include "graphics/surface.h"
 
 // Expose backbuffer helpers for the Playdate main thread blitter
 const Common::Array<uint8_t> &playdateBackBuffer();
@@ -80,6 +81,8 @@ private:
 	uint16 _screenHeight = 0;
 	PlaydateEventSource *_eventSource = nullptr;
 	PaletteManager *_paletteManager = nullptr;
+	Graphics::Surface _overlaySurface;
+	bool _overlayVisible = false;
 };
 
 #endif
