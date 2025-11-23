@@ -1,0 +1,9 @@
+name=ScummVM AGI
+author=ScummVM Team
+description=ScummVM AGI Engine for Playdate
+bundleID=org.scummvm.agi
+imagePath=
+launchSoundPath=
+contentWarning=
+contentWarning2=
+buildNumber=1
