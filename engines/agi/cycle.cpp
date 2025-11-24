@@ -30,6 +30,9 @@
 #include "agi/menu.h"
 #include "agi/systemui.h"
 #include "agi/appleIIgs_timedelay_overwrite.h"
+#ifdef PLAYDATE
+#include "agi/playdate_menu.h"
+#endif
 
 namespace Agi {
 
@@ -82,6 +85,11 @@ void AgiEngine::newRoom(int16 newRoomNr) {
 	setVar(VM_VAR_BORDER_TOUCH_OBJECT, 0);
 	setVar(VM_VAR_BORDER_CODE, 0);
 	setVar(VM_VAR_EGO_VIEW_RESOURCE, screenObjEgo->currentViewNr);
+
+#ifdef PLAYDATE
+	if (_playdateMenu)
+		_playdateMenu->resetContextWords();
+#endif
 
 	loadResource(RESOURCETYPE_LOGIC, newRoomNr);
 

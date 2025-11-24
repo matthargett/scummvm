@@ -10,6 +10,8 @@
 #include "backends/mixer/mixer.h"
 #include "backends/mutex/null/null-mutex.h"
 #include "backends/saves/default/default-saves.h"
+#include "common/array.h"
+#include "common/mutex.h"
 #include <thread>
 #include <chrono>
 #include "common/array.h"
@@ -33,7 +35,7 @@ static bool g_backBufferDirty = false;
 static int g_backBufferW = 0;
 static int g_backBufferH = 0;
 static int g_reservedRight = 80;
-static int g_reservedBottom = 40;
+static int g_reservedBottom = 0;
 
 const Common::Array<uint8_t> &playdateBackBuffer() { return g_playdateBackBuffer; }
 bool playdateConsumeDirtyFlag() {

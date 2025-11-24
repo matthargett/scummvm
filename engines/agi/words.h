@@ -63,6 +63,7 @@ public:
 	void clearEgoWords();
 	void parseUsingDictionary(const char *rawUserInput);
 	void collectAllWords(Common::Array<Common::String> &out) const;
+	void collectWordsForIds(const Common::Array<uint16> &ids, Common::Array<Common::String> &out) const;
 
 private:
 	void  cleanUpInput(const char *userInput, Common::String &cleanInput);

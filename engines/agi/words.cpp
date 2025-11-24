@@ -430,6 +430,37 @@ void Words::collectAllWords(Common::Array<Common::String> &out) const {
 	out.swap(unique);
 }
 
+void Words::collectWordsForIds(const Common::Array<uint16> &ids, Common::Array<Common::String> &out) const {
+	out.clear();
+	if (ids.empty())
+		return;
+
+	for (Common::HashMap<byte, Common::Array<WordEntry>>::const_iterator it = _dictionary.begin(); it != _dictionary.end(); ++it) {
+		const Common::Array<WordEntry> &bucket = it->_value;
+		for (uint i = 0; i < bucket.size(); ++i) {
+			for (uint j = 0; j < ids.size(); ++j) {
+				if (bucket[i].id == ids[j]) {
+					out.push_back(bucket[i].word);
+					break;
+				}
+			}
+		}
+	}
+
+	// Sort and dedupe for stable UI presentation
+	Common::sort(out.begin(), out.end(), [](const Common::String &a, const Common::String &b) {
+		return a.compareToIgnoreCase(b) < 0;
+	});
+
+	Common::Array<Common::String> unique;
+	for (uint i = 0; i < out.size(); ++i) {
+		if (unique.empty() || !unique.back().equalsIgnoreCase(out[i]))
+			unique.push_back(out[i]);
+	}
+
+	out.swap(unique);
+}
+
 bool Words::handleSpeedCommands(const Common::String &userInputLowercase) {
 	// We add speed controls to games that didn't originally have them.
 	// Apple II games had no speed controls, the interpreter ran as fast as it could.

@@ -838,7 +838,7 @@ void GfxMgr::render_BlockHercules(int16 x, int16 y, int16 width, int16 height) {
 	// Debug: dump first few bytes to see if Hercules render produced pixels
 	static int hercLogCount = 0;
 	if (hercLogCount < 3) {
-		Common::String dump = Common::String::format("Herc render y=%d h=%d w=%d dispW=%d active=%p", y, height, width, _displayScreenWidth, _activeScreen);
+		Common::String dump = Common::String::format("Herc render y=%d h=%d w=%d dispW=%d", y, height, width, _displayScreenWidth);
 		warning("%s", dump.c_str());
 		const uint32 screenSize = _displayScreenWidth * _displayScreenHeight;
 		for (int sampleY = y; sampleY < y + 2 && sampleY < _displayScreenHeight; ++sampleY) {
@@ -1646,27 +1646,46 @@ static inline byte playdateDither(uint8 luma, int displayX, int displayY) {
 }
 
 void GfxMgr::render_BlockPlaydate(int16 x, int16 y, int16 width, int16 height) {
-	const int xScale = 2 + _displayWidthMulAdjust;
-	const int yScale = 1 + _displayHeightMulAdjust;
+	static int s_playdateLogCount = 0;
+	if (s_playdateLogCount < 5) {
+		warning("render_BlockPlaydate x=%d y=%d w=%d h=%d", x, y, width, height);
+		++s_playdateLogCount;
+	}
+
+	// Hercules-style dither on Playdate: expand each script pixel to 2x1 using the Hercules color mapping.
+	const int xScale = 2; // two hardware pixels per script pixel -> 320px game width
 	const int baseY = _renderStartDisplayOffsetY;
 
 	uint32 offsetVisual = SCRIPT_WIDTH * y + x;
-	uint32 offsetDisplay = getDisplayOffsetToGameScreenPos(x, y);
+	uint16 lookupOffset = (y * 2) & 0x07;
 
 	for (int16 row = 0; row < height; ++row) {
-		const int displayY = (y + row) * yScale + baseY;
-		uint32 displayPos = offsetDisplay + row * _displayScreenWidth;
+		const int displayY = (y + row) + baseY;
+		if (displayY >= _displayScreenHeight)
+			break;
+
+		uint32 displayPos = displayY * _displayScreenWidth + x * xScale;
+		uint16 lookup = lookupOffset & 0x07;
+		bool getUpperNibble = (x & 1) ? false : true;
 
 		for (int16 col = 0; col < width; ++col) {
 			const byte color = _activeScreen[offsetVisual++] & 0x0F;
-			const uint8 luma = _playdateLuma[color];
-			const int displayX = col * xScale;
 
-			_displayScreen[displayPos + displayX] = playdateDither(luma, (x * xScale) + displayX, displayY);
-			_displayScreen[displayPos + displayX + 1] = playdateDither(luma, (x * xScale) + displayX + 1, displayY);
+			byte pat = getUpperNibble ? (herculesColorMapping[color * 8 + lookup] & 0x0F)
+			                          : (herculesColorMapping[color * 8 + lookup] >> 4);
+			getUpperNibble ^= true;
+
+			const byte p0 = (pat & 0x0C) ? 1 : 0;
+			const byte p1 = (pat & 0x03) ? 1 : 0;
+
+			const int displayX = col * xScale;
+			_displayScreen[displayPos + displayX] = p0;
+			if (displayX + 1 < _displayScreenWidth)
+				_displayScreen[displayPos + displayX + 1] = p1;
 		}
 
 		offsetVisual += SCRIPT_WIDTH - width;
+		lookupOffset = (lookupOffset + 2) & 0x07;
 	}
 }
 

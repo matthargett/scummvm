@@ -24,6 +24,9 @@
 #include "agi/graphics.h"
 #include "agi/opcodes.h"
 #include "agi/words.h"
+#ifdef PLAYDATE
+#include "agi/playdate_menu.h"
+#endif
 
 #include "common/endian.h"
 
@@ -332,6 +335,21 @@ bool AgiEngine::testSaid(uint8 nwords, uint8 *cc) {
 	Words *words = vm->_words;
 	int n = words->getEgoWordCount();
 	int z = 0;
+
+#ifdef PLAYDATE
+	// Collect contextual words from current said() checks for the Playdate picker.
+	if (_playdateMenu && cc && nwords) {
+		Common::Array<uint16> saidIds;
+		const uint8 *scan = cc;
+		for (uint i = 0; i < nwords; ++i) {
+			uint16 wid = READ_LE_UINT16(scan + (i * 2));
+			if (wid != 1 && wid != 9999)
+				saidIds.push_back(wid);
+		}
+		if (!saidIds.empty())
+			_playdateMenu->addContextWordIds(saidIds);
+	}
+#endif
 
 	if (vm->getFlag(VM_FLAG_SAID_ACCEPTED_INPUT) || !vm->getFlag(VM_FLAG_ENTERED_CLI))
 		return false;

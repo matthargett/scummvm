@@ -52,6 +52,10 @@ static const uint8 fontData_ArrowRightCharacter[8] = {
 };
 
 void GfxFont::init() {
+#ifdef PLAYDATE
+	// On Playdate avoid the Hercules hires font; the standard AGI font is more legible at the device dot pitch.
+	ConfMan.setBool("herculesfont", false);
+#else
 	if (ConfMan.getBool("herculesfont")) {
 		// User wants, that we use Hercules hires font, try to load it
 		loadFontHercules();
@@ -66,6 +70,7 @@ void GfxFont::init() {
 			break;
 		}
 	}
+#endif
 
 	if (!_fontData) {
 		switch (_vm->_renderMode) {

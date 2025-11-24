@@ -146,6 +146,8 @@ static int update(void *userdata) {
 			wheel.type = (steps > 0) ? Common::EVENT_WHEELDOWN : Common::EVENT_WHEELUP;
 			for (int i = 0; i < ABS(steps); ++i)
 				PlaydateEventSource::enqueue(wheel);
+			if (g_pd && g_pd->system)
+				g_pd->system->logToConsole("Crank->wheel steps=%d delta=%.2f", steps, delta);
 		}
 		g_lastCrank = currentCrank;
 	}
@@ -160,7 +162,7 @@ static int update(void *userdata) {
 		g_scummvm_thread = std::thread([pathArgStr]() {
 			const char *argv[] = {
 				"scummvm",
-				"--render-mode=hercGreen",
+				"--render-mode=playdate",
 				"--music-driver=adlib",
 				"--engine=agi",
 				"--auto-detect",
@@ -178,16 +180,10 @@ static int update(void *userdata) {
 		const int srcW = playdateBackBufferWidth() ? playdateBackBufferWidth() : 320;
 		const int srcH = playdateBackBufferHeight() ? playdateBackBufferHeight() : 200;
 
-		// Layout: reserve 80px on the right for word list, 40px on the bottom for input bar.
-		const int reservedRight = playdateReservedRight();
-		const int reservedBottom = playdateReservedBottom();
-		const int gameAreaW = 400 - reservedRight;
-		const int gameAreaH = 240 - reservedBottom;
-
-		const float scale = MIN((float)gameAreaW / srcW, (float)gameAreaH / srcH);
-		const int destW = (int)(srcW * scale);
-		const int destH = (int)(srcH * scale);
-		// Place at top-left of game area (0,0) for now; UI will occupy the reserved area
+		// Scale entire backbuffer to the Playdate screen; overlays (word list) are already drawn into the backbuffer.
+		// Copy backbuffer 1:1 (no scaling) to preserve Playdate renderer dithering.
+		const int destW = MIN(srcW, 400);
+		const int destH = MIN(srcH, 240);
 		const int offsetX = 0;
 		const int offsetY = 0;
 
@@ -197,56 +193,21 @@ static int update(void *userdata) {
 		// Clear to black each frame; we set bits for white pixels
 		std::memset(dst, 0, stride * 240);
 
-		static int logCount = 0;
-		int whiteCount = 0;
 		for (int y = 0; y < destH; ++y) {
-			int srcY = (int)((y / scale));
-			if (srcY < 0) srcY = 0;
-			if (srcY >= srcH) srcY = srcH - 1;
-			const uint8_t *srcRow = src.data() + srcY * srcW;
-
+			const uint8_t *srcRow = src.data() + y * srcW;
 			uint8_t *row = dst + (y + offsetY) * stride;
-
 			for (int x = 0; x < destW; ++x) {
-				int srcX = (int)((x / scale));
-				if (srcX < 0) srcX = 0;
-				if (srcX >= srcW) srcX = srcW - 1;
-				int destX = x + offsetX;
-				int byteIndex = destX / 8;
-				int bitIndex = 7 - (destX % 8); // MSB-first packing
-				if (srcRow[srcX]) {
-					row[byteIndex] |= (1 << bitIndex); // white pixel
-					++whiteCount;
-				}
-			}
-
-			if (logCount < 3 && y == 0) {
-				Common::String srcDump = "SRC0:";
-				for (int b = 0; b < 16 && b < srcW; ++b)
-					srcDump += Common::String::format(" %02X", srcRow[b]);
-				Common::String dstDump = "DST0:";
-				for (int b = 0; b < 8; ++b)
-					dstDump += Common::String::format(" %02X", row[b]);
-				if (g_pd && g_pd->system) {
-					g_pd->system->logToConsole("%s", srcDump.c_str());
-					g_pd->system->logToConsole("%s", dstDump.c_str());
-				}
-				if (logCount == 0 && destH > 50) {
-					const uint8_t *srcMid = src.data() + (destH / 2) * srcW;
-					Common::String srcMidDump = "SRCmid:";
-					for (int b = 0; b < 16 && b < srcW; ++b)
-						srcMidDump += Common::String::format(" %02X", srcMid[b]);
-					if (g_pd && g_pd->system)
-						g_pd->system->logToConsole("%s", srcMidDump.c_str());
-				}
-				++logCount;
+				const int destX = x + offsetX;
+				const int byteIndex = destX / 8;
+				const int bitIndex = 7 - (destX % 8); // MSB-first packing
+				if (srcRow[x])
+					row[byteIndex] |= (1 << bitIndex);
 			}
 		}
 
 		g_pd->graphics->markUpdatedRows(0, 240);
-		if (g_pd && g_pd->system && logCount < 6)
-			g_pd->system->logToConsole("Blit stats: white=%d total=%d", whiteCount, destW * destH);
 	}
+
 	return 1; // Continue running
 }
 

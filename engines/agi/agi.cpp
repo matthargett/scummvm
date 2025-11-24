@@ -45,11 +45,14 @@
 #include "agi/keyboard.h"
 #include "agi/loader.h"
 #include "agi/menu.h"
-#include "agi/playdate_menu.h"
 #include "agi/sprite.h"
 #include "agi/systemui.h"
 #include "agi/text.h"
 #include "agi/words.h"
+
+#ifdef PLAYDATE
+#include "agi/playdate_menu.h"
+#endif
 
 #include "gui/predictivedialog.h"
 
@@ -113,7 +116,7 @@ int AgiEngine::agiInit() {
 		_menu = new GfxMenu(this, _gfx, _picture, _text);
 
 #ifdef PLAYDATE
-	if (!_playdateMenu && _renderMode == Common::kRenderPlaydate)
+	if (!_playdateMenu && (_renderMode == Common::kRenderPlaydate || _renderMode == Common::kRenderHercG || _renderMode == Common::kRenderHercA))
 		_playdateMenu = new PlaydateMenu(this);
 #endif
 
@@ -401,6 +404,7 @@ void AgiBase::initRenderMode() {
 	case Common::kRenderApple2GS:
 	case Common::kRenderAtariST:
 	case Common::kRenderMacintosh:
+	case Common::kRenderPlaydate:
 		_renderMode = configRenderMode;
 		break;
 	default:

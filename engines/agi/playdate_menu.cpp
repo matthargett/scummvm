@@ -45,10 +45,53 @@ void PlaydateMenu::populateWords() {
 	_initialized = true;
 }
 
+void PlaydateMenu::rebuildContextWords() {
+	_contextWords.clear();
+
+	if (!_vm || !_vm->_words || _contextWordIds.empty())
+		return;
+
+	_vm->_words->collectWordsForIds(_contextWordIds, _contextWords);
+}
+
+void PlaydateMenu::resetContextWords() {
+	_contextWordIds.clear();
+	_contextWords.clear();
+	_selectedIndex = 0;
+	_scrollOffset = 0;
+}
+
+void PlaydateMenu::addContextWordIds(const Common::Array<uint16> &ids) {
+	if (ids.empty())
+		return;
+
+	for (uint i = 0; i < ids.size(); ++i) {
+		const uint16 id = ids[i];
+		if (id == 0)
+			continue;
+		bool present = false;
+		for (uint j = 0; j < _contextWordIds.size(); ++j) {
+			if (_contextWordIds[j] == id) {
+				present = true;
+				break;
+			}
+		}
+		if (!present)
+			_contextWordIds.push_back(id);
+	}
+
+	rebuildContextWords();
+	clampSelection();
+	if (_visible)
+		draw();
+}
+
 void PlaydateMenu::show() {
 	populateWords();
 	_visible = true;
 	draw();
+	if (_vm)
+		warning("PlaydateMenu show: total=%u context=%u", (uint)_allWords.size(), (uint)_contextWords.size());
 }
 
 void PlaydateMenu::hide() {
@@ -65,17 +108,20 @@ void PlaydateMenu::draw() {
 
 	populateWords();
 
+	const Common::Array<Common::String> &words = activeWordList();
+	warning("PlaydateMenu draw: words=%u selected=%d scroll=%d", (uint)words.size(), _selectedIndex, _scrollOffset);
+
 	// Clear menu area (Right side: 320,0 to 400,240)
 	_vm->_gfx->drawDisplayRectPlaydate(kMenuX, 0, kMenuWidth, 240, 0); // 0 = Black
 
 	int y = 0;
 	for (int i = 0; i < kVisibleLines; i++) {
 		int wordIndex = _scrollOffset + i;
-		if (wordIndex >= (int)_allWords.size())
+		if (wordIndex >= (int)words.size())
 			break;
 
 		bool selected = (wordIndex == _selectedIndex);
-		Common::String word = _allWords[wordIndex];
+		Common::String word = words[wordIndex];
 
 		// Truncate if too long (approx 10 chars fit in 80px with 8px font)
 		if (word.size() > 10) {
@@ -101,14 +147,17 @@ void PlaydateMenu::handleEvent(const Common::Event &event) {
 	if (_allWords.empty())
 		return;
 
+	const Common::Array<Common::String> &words = activeWordList();
+
 	if (event.type == Common::EVENT_WHEELDOWN) {
 		// Scroll Down
-		if (_selectedIndex < (int)_allWords.size() - 1) {
+		if (_selectedIndex < (int)words.size() - 1) {
 			_selectedIndex++;
 			if (_selectedIndex >= _scrollOffset + kVisibleLines) {
 				_scrollOffset++;
 			}
 			draw();
+			warning("PlaydateMenu wheel down sel=%d scroll=%d", _selectedIndex, _scrollOffset);
 		}
 	} else if (event.type == Common::EVENT_WHEELUP) {
 		// Scroll Up
@@ -118,12 +167,13 @@ void PlaydateMenu::handleEvent(const Common::Event &event) {
 				_scrollOffset--;
 			}
 			draw();
+			warning("PlaydateMenu wheel up sel=%d scroll=%d", _selectedIndex, _scrollOffset);
 		}
 	} else if (event.type == Common::EVENT_KEYDOWN) {
 		if (event.kbd.keycode == Common::KEYCODE_RETURN) {
 			// Select word
-			if (_selectedIndex >= 0 && _selectedIndex < (int)_allWords.size()) {
-				Common::String word = _allWords[_selectedIndex];
+			if (_selectedIndex >= 0 && _selectedIndex < (int)words.size()) {
+				Common::String word = words[_selectedIndex];
 
 				// Inject word into input line
 				for (uint i = 0; i < word.size(); i++) {
@@ -133,9 +183,24 @@ void PlaydateMenu::handleEvent(const Common::Event &event) {
 				// Append space
 				_vm->_keyQueue[_vm->_keyQueueEnd++] = ' ';
 				_vm->_keyQueueEnd %= KEY_QUEUE_SIZE;
+				warning("PlaydateMenu selected word '%s'", word.c_str());
 			}
 		}
 	}
+}
+
+const Common::Array<Common::String> &PlaydateMenu::activeWordList() const {
+	return _contextWords.empty() ? _allWords : _contextWords;
+}
+
+void PlaydateMenu::clampSelection() {
+	const Common::Array<Common::String> &words = activeWordList();
+	if (_selectedIndex >= (int)words.size())
+		_selectedIndex = MAX<int>(0, (int)words.size() - 1);
+	if (_scrollOffset > _selectedIndex)
+		_scrollOffset = _selectedIndex;
+	if (_scrollOffset < 0)
+		_scrollOffset = 0;
 }
 
 } // End of namespace Agi

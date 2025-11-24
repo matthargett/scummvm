@@ -39,14 +39,23 @@ public:
 	void show();
 	void hide();
 	bool isVisible() const;
+	void resetContextWords();
+	void addContextWordIds(const Common::Array<uint16> &ids);
 	void draw();
 	void handleEvent(const Common::Event &event);
 
 private:
+	void populateWords();
+	void rebuildContextWords();
+	const Common::Array<Common::String> &activeWordList() const;
+	void clampSelection();
+
 	AgiEngine *_vm;
 	bool _visible;
 	bool _initialized;
 	Common::Array<Common::String> _allWords;
+	Common::Array<uint16> _contextWordIds;
+	Common::Array<Common::String> _contextWords;
 	int _selectedIndex;
 	int _scrollOffset;
 
@@ -55,8 +64,6 @@ private:
 	static const int kVisibleLines = 24; // 240 / 10
 	static const int kMenuX = 320;
 	static const int kMenuWidth = 80;
-
-	void populateWords();
 };
 
 } // End of namespace Agi
