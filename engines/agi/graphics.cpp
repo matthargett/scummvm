@@ -149,18 +149,17 @@ void GfxMgr::initVideo() {
 		}
 		break;
 	case Common::kRenderPlaydate:
-		// Playdate uses a 1-bit palette, but we map internally from EGA/Mac palette
-		// We'll use the Mac palette as a base for mapping to patterns
-		initPaletteCLUT(_paletteGfxMode, PALETTE_MACINTOSH_CLUT, 16);
-
+		// Playdate: 400x240 display, native patterns at full resolution
+		// Scale: 160 AGI → 400 display (2.5x), 200 visual → 240 display (1.2x)
+		// Font: 10x10 for readability (40 columns × 10 = 400)
+		initPalette(_paletteGfxMode, PALETTE_HERCULES_GREEN, 2, 8);
 		_upscaledHires = DISPLAY_UPSCALED_DISABLED;
 		_displayScreenWidth = 400;
 		_displayScreenHeight = 240;
-		_displayFontWidth = 8;
-		_displayFontHeight = 8;
-
-		_displayWidthMulAdjust = 0;  // visualPos * (2+0) = displayPos (x*2)
-		_displayHeightMulAdjust = 0; // visualPos * (1+0) = displayPos (y*1)
+		_displayFontWidth = 10;  // 40 columns × 10 pixels = 400
+		_displayFontHeight = 10;
+		_displayWidthMulAdjust = 0;
+		_displayHeightMulAdjust = 0;
 		break;
 	default:
 		error("initVideo: unsupported render mode: %d", _vm->_renderMode);
@@ -264,26 +263,44 @@ uint16 GfxMgr::getRenderStartDisplayOffsetY() const {
 // Translates a game screen coordinate to a display screen coordinate
 // Game screen to 320x200 -> x * 2, y + renderStart
 // Game screen to 640x400 -> x * 4, (y * 2) + renderStart
+// Game screen to 400x240 (Playdate) -> x * 2.5, y * 1.2 + renderStart
 void GfxMgr::translateGamePosToDisplayScreen(int16 &x, int16 &y) const {
-	x = x * (2 + _displayWidthMulAdjust);
-	y = y * (1 + _displayHeightMulAdjust) + _renderStartDisplayOffsetY;
+	if (_vm->_renderMode == Common::kRenderPlaydate) {
+		x = (x * 400) / 160;
+		y = ((y + _renderStartVisualOffsetY) * 240) / 200;
+	} else {
+		x = x * (2 + _displayWidthMulAdjust);
+		y = y * (1 + _displayHeightMulAdjust) + _renderStartDisplayOffsetY;
+	}
 }
 
 // Translates a visual coordinate to a display screen coordinate
 // Visual to 320x200 -> x * 2, y
 // Visual to 640x400 -> x * 4, y * 2
+// Visual to 400x240 (Playdate) -> x * 2.5, y * 1.2
 void GfxMgr::translateVisualPosToDisplayScreen(int16 &x, int16 &y) const {
-	x = x * (2 + _displayWidthMulAdjust);
-	y = y * (1 + _displayHeightMulAdjust);
+	if (_vm->_renderMode == Common::kRenderPlaydate) {
+		x = (x * 400) / 160;
+		y = (y * 240) / 200;
+	} else {
+		x = x * (2 + _displayWidthMulAdjust);
+		y = y * (1 + _displayHeightMulAdjust);
+	}
 }
 
 // Translates a display screen coordinate to a game screen coordinate
 // Display screen to 320x200 -> x / 2, y - renderStart
 // Display screen to 640x400 -> x / 4, (y / 2) - renderStart
+// Display screen to 400x240 (Playdate) -> x / 2.5, y / 1.2 - renderStart
 void GfxMgr::translateDisplayPosToGameScreen(int16 &x, int16 &y) const {
-	y -= _renderStartDisplayOffsetY; // remove status bar line
-	x = x / (2 + _displayWidthMulAdjust);
-	y = y / (1 + _displayHeightMulAdjust);
+	if (_vm->_renderMode == Common::kRenderPlaydate) {
+		x = (x * 160) / 400;
+		y = (y * 200) / 240 - _renderStartVisualOffsetY;
+	} else {
+		y -= _renderStartDisplayOffsetY; // remove status bar line
+		x = x / (2 + _displayWidthMulAdjust);
+		y = y / (1 + _displayHeightMulAdjust);
+	}
 	if (y < 0)
 		y = 0;
 	if (y >= SCRIPT_HEIGHT)
@@ -292,14 +309,24 @@ void GfxMgr::translateDisplayPosToGameScreen(int16 &x, int16 &y) const {
 
 // Translates dimension from visual screen to display screen
 void GfxMgr::translateVisualDimensionToDisplayScreen(int16 &width, int16 &height) const {
-	width = width * (2 + _displayWidthMulAdjust);
-	height = height * (1 + _displayHeightMulAdjust);
+	if (_vm->_renderMode == Common::kRenderPlaydate) {
+		width = (width * 400) / 160;
+		height = (height * 240) / 200;
+	} else {
+		width = width * (2 + _displayWidthMulAdjust);
+		height = height * (1 + _displayHeightMulAdjust);
+	}
 }
 
 // Translates dimension from display screen to visual screen
 void GfxMgr::translateDisplayDimensionToVisualScreen(int16 &width, int16 &height) const {
-	width = width / (2 + _displayWidthMulAdjust);
-	height = height / (1 + _displayHeightMulAdjust);
+	if (_vm->_renderMode == Common::kRenderPlaydate) {
+		width = (width * 160) / 400;
+		height = (height * 200) / 240;
+	} else {
+		width = width / (2 + _displayWidthMulAdjust);
+		height = height / (1 + _displayHeightMulAdjust);
+	}
 }
 
 // Translates a rect from game screen to display screen
@@ -597,15 +624,15 @@ void GfxMgr::render_Block(int16 x, int16 y, int16 width, int16 height, bool copy
 	case Common::kRenderHercA:
 		render_BlockHercules(x, y, width, height);
 		break;
+	case Common::kRenderPlaydate:
+		render_BlockPlaydate(x, y, width, height);
+		break;
 	case Common::kRenderCGA:
 		render_BlockCGA(x, y, width, height);
 		break;
 	case Common::kRenderEGA:
 	default:
 		render_BlockEGA(x, y, width, height);
-		break;
-	case Common::kRenderPlaydate:
-		render_BlockPlaydate(x, y, width, height);
 		break;
 	}
 
@@ -1631,74 +1658,119 @@ void GfxMgr::setCursorPalette(bool amigaStyleCursor) {
 	}
 }
 #endif
-
-
-static const uint8 kPlaydateBayer4x4[4][4] = {
-	{0, 8, 2, 10},
-	{12, 4, 14, 6},
-	{3, 11, 1, 9},
-	{15, 7, 13, 5}
+// Native Playdate dither patterns - 8x8 tiles designed for 400x240 native resolution.
+// These patterns are NOT downsampled from Hercules - they are designed to produce
+// the same visual appearance at native Playdate dot pitch.
+// Format: 16 colors × 8 rows = 128 bytes
+static const uint8 playdatePatterns[] = {
+	// Color 0: Black (0%)
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	// Color 1: Very sparse (~6%)
+	0x88, 0x00, 0x00, 0x00, 0x22, 0x00, 0x00, 0x00,
+	// Color 2: Sparse diagonal (~12%)
+	0x80, 0x10, 0x02, 0x20, 0x01, 0x08, 0x40, 0x04,
+	// Color 3: Horizontal lines (~25%)
+	0xAA, 0x00, 0xAA, 0x00, 0xAA, 0x00, 0xAA, 0x00,
+	// Color 4: Vertical stripes (~25%)
+	0x22, 0x88, 0x22, 0x88, 0x22, 0x88, 0x22, 0x88,
+	// Color 5: Sparse grid (~12%)
+	0x88, 0x00, 0x88, 0x00, 0x88, 0x00, 0x88, 0x00,
+	// Color 6: Diagonal (/) (~25%)
+	0x11, 0x22, 0x44, 0x88, 0x11, 0x22, 0x44, 0x88,
+	// Color 7: Checkerboard (~50%)
+	0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA,
+	// Color 8: Sparse dots staggered (~12%)
+	0x22, 0x00, 0x88, 0x00, 0x22, 0x00, 0x88, 0x00,
+	// Color 9: Dense (~75%)
+	0xD7, 0xFF, 0x7D, 0xFF, 0xD7, 0xFF, 0x7D, 0xFF,
+	// Color 10: Crosshatch (~50%)
+	0xDD, 0x55, 0x77, 0xAA, 0xDD, 0x55, 0x77, 0xAA,
+	// Color 11: Inverse diagonal (~75%)
+	0x7F, 0xEF, 0xFD, 0xDF, 0xFE, 0xF7, 0xBF, 0xFB,
+	// Color 12: Dense horizontal (~75%)
+	0xAA, 0xFF, 0xAA, 0xFF, 0xAA, 0xFF, 0xAA, 0xFF,
+	// Color 13: Dense diagonal (\\) (~75%)
+	0x77, 0xBB, 0xDD, 0xEE, 0x77, 0xBB, 0xDD, 0xEE,
+	// Color 14: Nearly solid (~88%)
+	0x77, 0xFF, 0xFF, 0xFF, 0xDD, 0xFF, 0xFF, 0xFF,
+	// Color 15: White (100%)
+	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
 };
 
-static inline byte playdateDither(uint8 luma, int displayX, int displayY) {
-	const uint8 threshold = kPlaydateBayer4x4[displayY & 3][displayX & 3];
-	return ((luma >> 4) >= threshold) ? 1 : 0;
-}
-
 void GfxMgr::render_BlockPlaydate(int16 x, int16 y, int16 width, int16 height) {
-	static int s_playdateLogCount = 0;
-	if (s_playdateLogCount < 5) {
-		warning("render_BlockPlaydate x=%d y=%d w=%d h=%d", x, y, width, height);
-		++s_playdateLogCount;
-	}
+	// Render at native Playdate resolution (400x240) using native patterns.
+	// Patterns are 8x8 tiles that tile across the entire display.
+	// NO downsampling or scaling of patterns - they render at native dot pitch.
 
-	// Hercules-style dither on Playdate: expand each script pixel to 2x1 using the Hercules color mapping.
-	const int xScale = 2; // two hardware pixels per script pixel -> 320px game width
-	const int baseY = _renderStartDisplayOffsetY;
+	// Calculate the display area for this AGI block
+	// Scale: 160 AGI → 400 display (2.5x horizontal)
+	// Scale: 200 visual → 240 display (1.2x vertical)
+	const int displayX0 = (x * 400) / 160;
+	const int displayX1 = ((x + width) * 400) / 160;
+	const int displayY0 = ((y + _renderStartVisualOffsetY) * 240) / 200;
+	const int displayY1 = ((y + _renderStartVisualOffsetY + height) * 240) / 200;
 
-	uint32 offsetVisual = SCRIPT_WIDTH * y + x;
-	uint16 lookupOffset = (y * 2) & 0x07;
+	for (int displayY = displayY0; displayY < displayY1 && displayY < _displayScreenHeight; ++displayY) {
+		// Map display Y to AGI Y
+		const int agiY = ((displayY * 200) / 240) - _renderStartVisualOffsetY;
+		if (agiY < 0 || agiY >= SCRIPT_HEIGHT)
+			continue;
 
-	for (int16 row = 0; row < height; ++row) {
-		const int displayY = (y + row) + baseY;
-		if (displayY >= _displayScreenHeight)
-			break;
+		// Pattern row - direct modulo on display coordinate for native tiling
+		const int patternRow = displayY & 0x07;
 
-		uint32 displayPos = displayY * _displayScreenWidth + x * xScale;
-		uint16 lookup = lookupOffset & 0x07;
-		bool getUpperNibble = (x & 1) ? false : true;
+		byte *displayRow = _displayScreen + displayY * _displayScreenWidth;
+		const byte *agiRow = _activeScreen + agiY * SCRIPT_WIDTH;
 
-		for (int16 col = 0; col < width; ++col) {
-			const byte color = _activeScreen[offsetVisual++] & 0x0F;
+		for (int displayX = displayX0; displayX < displayX1 && displayX < _displayScreenWidth; ++displayX) {
+			// Map display X to AGI X
+			const int agiX = (displayX * 160) / 400;
+			if (agiX < 0 || agiX >= SCRIPT_WIDTH)
+				continue;
 
-			byte pat = getUpperNibble ? (herculesColorMapping[color * 8 + lookup] & 0x0F)
-			                          : (herculesColorMapping[color * 8 + lookup] >> 4);
-			getUpperNibble ^= true;
+			// Get AGI color
+			const byte color = agiRow[agiX] & 0x0F;
 
-			const byte p0 = (pat & 0x0C) ? 1 : 0;
-			const byte p1 = (pat & 0x03) ? 1 : 0;
+			// Get the pattern byte for this color and row
+			const byte patternByte = playdatePatterns[color * 8 + patternRow];
 
-			const int displayX = col * xScale;
-			_displayScreen[displayPos + displayX] = p0;
-			if (displayX + 1 < _displayScreenWidth)
-				_displayScreen[displayPos + displayX + 1] = p1;
+			// Pattern column - direct modulo on display coordinate for native tiling
+			const int bitPos = 7 - (displayX & 0x07);
+			const byte pixel = (patternByte >> bitPos) & 1;
+
+			displayRow[displayX] = pixel;
 		}
-
-		offsetVisual += SCRIPT_WIDTH - width;
-		lookupOffset = (lookupOffset + 2) & 0x07;
 	}
 }
 
 void GfxMgr::drawDisplayRectPlaydate(int16 x, int16 y, int16 width, int16 height, byte color) {
-	const uint8 luma = _playdateLuma[color & 0x0F];
+	// Draw a filled rectangle using native Playdate dither patterns.
+	// Display coordinates are in Playdate space (400x240).
+	// Patterns tile at native dot pitch - no scaling.
+
+	const byte colorIdx = color & 0x0F;
 
 	for (int16 row = 0; row < height; ++row) {
 		const int displayY = y + row;
-		uint32 displayPos = (y + row) * _displayScreenWidth + x;
+		if (displayY < 0 || displayY >= _displayScreenHeight)
+			continue;
+
+		// Pattern row - direct modulo for native tiling
+		const int patternRow = displayY & 0x07;
+
+		byte *displayRow = _displayScreen + displayY * _displayScreenWidth;
 
 		for (int16 col = 0; col < width; ++col) {
 			const int displayX = x + col;
-			_displayScreen[displayPos + col] = playdateDither(luma, displayX, displayY);
+			if (displayX < 0 || displayX >= _displayScreenWidth)
+				continue;
+
+			// Get pattern byte and extract bit - native tiling
+			const byte patternByte = playdatePatterns[colorIdx * 8 + patternRow];
+			const int bitPos = 7 - (displayX & 0x07);
+			const byte pixel = (patternByte >> bitPos) & 1;
+
+			displayRow[displayX] = pixel;
 		}
 	}
 }

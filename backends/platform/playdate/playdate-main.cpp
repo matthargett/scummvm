@@ -174,34 +174,33 @@ static int update(void *userdata) {
 	}
 
 	// Blit the shared backbuffer to the Playdate framebuffer
+	// Source is native 400x240 with Hercules dither patterns sampled at Playdate resolution
 	if (g_pd && g_pd->graphics && playdateConsumeDirtyFlag()) {
 		const Common::Array<uint8_t> &src = playdateBackBuffer();
 		uint8_t *dst = g_pd->graphics->getFrame();
-		const int srcW = playdateBackBufferWidth() ? playdateBackBufferWidth() : 320;
-		const int srcH = playdateBackBufferHeight() ? playdateBackBufferHeight() : 200;
-
-		// Scale entire backbuffer to the Playdate screen; overlays (word list) are already drawn into the backbuffer.
-		// Copy backbuffer 1:1 (no scaling) to preserve Playdate renderer dithering.
-		const int destW = MIN(srcW, 400);
-		const int destH = MIN(srcH, 240);
-		const int offsetX = 0;
-		const int offsetY = 0;
+		const int srcW = playdateBackBufferWidth() ? playdateBackBufferWidth() : 400;
+		const int srcH = playdateBackBufferHeight() ? playdateBackBufferHeight() : 240;
 
 		// Playdate framebuffer stride is 52 bytes (400 bits padded to 32-bit boundaries)
 		const int stride = 52;
 
-		// Clear to black each frame; we set bits for white pixels
+		// Clear to black each frame
 		std::memset(dst, 0, stride * 240);
 
-		for (int y = 0; y < destH; ++y) {
+		// Direct 1:1 copy - no scaling or offset needed
+		const int copyW = MIN(srcW, 400);
+		const int copyH = MIN(srcH, 240);
+
+		for (int y = 0; y < copyH; ++y) {
 			const uint8_t *srcRow = src.data() + y * srcW;
-			uint8_t *row = dst + (y + offsetY) * stride;
-			for (int x = 0; x < destW; ++x) {
-				const int destX = x + offsetX;
-				const int byteIndex = destX / 8;
-				const int bitIndex = 7 - (destX % 8); // MSB-first packing
-				if (srcRow[x])
-					row[byteIndex] |= (1 << bitIndex);
+			uint8_t *dstRow = dst + y * stride;
+
+			for (int x = 0; x < copyW; ++x) {
+				if (srcRow[x]) {
+					const int byteIndex = x / 8;
+					const int bitIndex = 7 - (x % 8);  // MSB-first packing
+					dstRow[byteIndex] |= (1 << bitIndex);
+				}
 			}
 		}
 
