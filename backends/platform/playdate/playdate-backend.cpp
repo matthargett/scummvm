@@ -34,7 +34,7 @@ static Common::Array<uint8_t> g_playdateBackBuffer;
 static bool g_backBufferDirty = false;
 static int g_backBufferW = 0;
 static int g_backBufferH = 0;
-static int g_reservedRight = 80;
+static int g_reservedRight = 0;  // No longer reserving space for word list panel
 static int g_reservedBottom = 0;
 
 const Common::Array<uint8_t> &playdateBackBuffer() { return g_playdateBackBuffer; }

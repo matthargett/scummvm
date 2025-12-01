@@ -151,13 +151,14 @@ void GfxMgr::initVideo() {
 	case Common::kRenderPlaydate:
 		// Playdate: 400x240 display, native patterns at full resolution
 		// Scale: 160 AGI → 400 display (2.5x), 200 visual → 240 display (1.2x)
-		// Font: 10x10 for readability (40 columns × 10 = 400)
+		// Font: 10x10 grid for text positioning (40 columns × 10 = 400, ~24 rows × 10 = 240)
+		// Actual font is 8x8 pixels, with 2px horizontal spacing between characters
 		initPalette(_paletteGfxMode, PALETTE_HERCULES_GREEN, 2, 8);
 		_upscaledHires = DISPLAY_UPSCALED_DISABLED;
 		_displayScreenWidth = 400;
 		_displayScreenHeight = 240;
-		_displayFontWidth = 10;  // 40 columns × 10 pixels = 400
-		_displayFontHeight = 10;
+		_displayFontWidth = 10;   // 40 columns × 10 = 400
+		_displayFontHeight = 10;  // ~24 rows × 10 = 240
 		_displayWidthMulAdjust = 0;
 		_displayHeightMulAdjust = 0;
 		break;
@@ -166,7 +167,8 @@ void GfxMgr::initVideo() {
 		break;
 	}
 
-	if (_font->isFontHires() || forceHires) {
+	// Playdate uses its own fixed resolution, skip hires upscaling
+	if (_vm->_renderMode != Common::kRenderPlaydate && (_font->isFontHires() || forceHires)) {
 		// Upscaling enable
 		_upscaledHires = DISPLAY_UPSCALED_640x400;
 		_displayScreenWidth = 640;
@@ -253,7 +255,12 @@ void GfxMgr::setRenderStartOffset(uint16 offsetY) {
 		error("invalid render start offset");
 
 	_renderStartVisualOffsetY = offsetY;
-	_renderStartDisplayOffsetY = offsetY * (1 + _displayHeightMulAdjust);
+	if (_vm->_renderMode == Common::kRenderPlaydate) {
+		// Playdate: scale offset by 1.2x (240/200)
+		_renderStartDisplayOffsetY = (offsetY * 240) / 200;
+	} else {
+		_renderStartDisplayOffsetY = offsetY * (1 + _displayHeightMulAdjust);
+	}
 }
 
 uint16 GfxMgr::getRenderStartDisplayOffsetY() const {
@@ -310,8 +317,9 @@ void GfxMgr::translateDisplayPosToGameScreen(int16 &x, int16 &y) const {
 // Translates dimension from visual screen to display screen
 void GfxMgr::translateVisualDimensionToDisplayScreen(int16 &width, int16 &height) const {
 	if (_vm->_renderMode == Common::kRenderPlaydate) {
-		width = (width * 400) / 160;
-		height = (height * 240) / 200;
+		// Use ceiling division to ensure we cover the full scaled area
+		width = (width * 400 + 159) / 160;
+		height = (height * 240 + 199) / 200;
 	} else {
 		width = width * (2 + _displayWidthMulAdjust);
 		height = height * (1 + _displayHeightMulAdjust);
@@ -1109,7 +1117,8 @@ void GfxMgr::block_restore(int16 x, int16 y, int16 width, int16 height, byte *bu
  * Sierra passed the lower left. We change that to make upscaling easier.
  */
 void GfxMgr::drawBox(int16 x, int16 y, int16 width, int16 height, byte backgroundColor, byte lineColor) {
-	const int16 minY = 0 - _renderStartDisplayOffsetY;
+	// Clip uses visual coordinates, so minY should use visual offset, not display offset
+	const int16 minY = 0 - _renderStartVisualOffsetY;
 	if (!render_Clip(x, y, width, height, minY, VISUAL_WIDTH, VISUAL_HEIGHT - _renderStartVisualOffsetY)) {
 		warning("drawBox ignored by clipping. x: %d, y: %d, w: %d, h: %d", x, y, width, height);
 		return;
@@ -1139,6 +1148,13 @@ void GfxMgr::drawBox(int16 x, int16 y, int16 width, int16 height, byte backgroun
 		drawDisplayRect(x + width, -2, y, +1, 0, 1, height, -2, 0);
 		drawDisplayRect(x, +1, y + height, -2, width, -2, 0, 1, 0);
 		drawDisplayRect(x, +1, y, +1, 0, 1, height, -2, 0);
+		break;
+	case Common::kRenderPlaydate:
+		// Playdate: black frame lines, 1 pixel wide
+		drawDisplayRect(x, +2, y, +1, width, -4, 0, 1, 0);
+		drawDisplayRect(x + width, -3, y, +2, 0, 1, height, -4, 0);
+		drawDisplayRect(x, +2, y + height, -2, width, -4, 0, 1, 0);
+		drawDisplayRect(x, +2, y, +2, 0, 1, height, -4, 0);
 		break;
 	case Common::kRenderHercA:
 	case Common::kRenderHercG:
@@ -1705,10 +1721,11 @@ void GfxMgr::render_BlockPlaydate(int16 x, int16 y, int16 width, int16 height) {
 	// Calculate the display area for this AGI block
 	// Scale: 160 AGI → 400 display (2.5x horizontal)
 	// Scale: 200 visual → 240 display (1.2x vertical)
+	// Use floor for start and ceiling for end to ensure full coverage
 	const int displayX0 = (x * 400) / 160;
-	const int displayX1 = ((x + width) * 400) / 160;
+	const int displayX1 = ((x + width) * 400 + 159) / 160;  // ceiling division
 	const int displayY0 = ((y + _renderStartVisualOffsetY) * 240) / 200;
-	const int displayY1 = ((y + _renderStartVisualOffsetY + height) * 240) / 200;
+	const int displayY1 = ((y + _renderStartVisualOffsetY + height) * 240 + 199) / 200;  // ceiling division
 
 	for (int displayY = displayY0; displayY < displayY1 && displayY < _displayScreenHeight; ++displayY) {
 		// Map display Y to AGI Y
