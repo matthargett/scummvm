@@ -1731,12 +1731,14 @@ static const uint8 playdatePatterns[] = {
 	// . . . . . . . .    0x00
 	0xAA, 0x00, 0xAA, 0x00, 0xAA, 0x00, 0xAA, 0x00,
 
-	// Color 4: Vertical stripes (~25%) - alternating columns
-	// . . X . . . X .    0x22
-	// X . . . X . . .    0x88
-	// . . X . . . X .    0x22
-	// X . . . X . . .    0x88
-	0x22, 0x88, 0x22, 0x88, 0x22, 0x88, 0x22, 0x88,
+	// Color 4: Vertical stripes (~25%) - true vertical columns
+	// Herc original: 0x22/0x88 alternating, but that's needed for Color 8
+	// Playdate: use actual vertical stripes (same cols every row)
+	// . X . . . X . .    0x44
+	// . X . . . X . .    0x44
+	// . X . . . X . .    0x44
+	// . X . . . X . .    0x44
+	0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44,
 
 	// Color 5: Sparse grid (~12%) - regular dot grid, sparser than color 1
 	// X . . . X . . .    0x88
@@ -1757,18 +1759,14 @@ static const uint8 playdatePatterns[] = {
 	// X . X . X . X .    0xAA
 	0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA,
 
-	// Color 8: Staggered dots (~25%) - Herc brick offset, uses all columns
-	// Herc original: 0x22, 0x00, 0x88, 0x00 (brick offset pattern)
-	// Playdate: 2-row groups, offset by 2 pixels, uses all 8 columns
-	// . . X . . . X .    0x24
-	// . . X . . . X .    0x24
-	// X . . . X . . .    0x90
-	// X . . . X . . .    0x90
-	// . . X . . . X .    0x24
-	// . . X . . . X .    0x24
-	// X . . . X . . X    0x91
-	// X . . . X . . X    0x91
-	0x24, 0x24, 0x90, 0x90, 0x24, 0x24, 0x91, 0x91,
+	// Color 8: Staggered dots (~25%) - Herc brick offset pattern
+	// Herc original: 0x22, 0x00, 0x88, 0x00 (brick offset with empty rows)
+	// Playdate: same pattern without empty rows (Color 4 now differs)
+	// . . X . . . X .    0x22 - cols 2, 6
+	// X . . . X . . .    0x88 - cols 0, 4
+	// . . X . . . X .    0x22 - cols 2, 6
+	// X . . . X . . .    0x88 - cols 0, 4
+	0x22, 0x88, 0x22, 0x88, 0x22, 0x88, 0x22, 0x88,
 
 	// Color 9: Dense fill (~91%) - matches Herc light blue pattern
 	// X X . X . X X X    0xD7
