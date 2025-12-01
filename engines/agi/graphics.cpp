@@ -317,7 +317,7 @@ void GfxMgr::translateDisplayPosToGameScreen(int16 &x, int16 &y) const {
 // Translates dimension from visual screen to display screen
 void GfxMgr::translateVisualDimensionToDisplayScreen(int16 &width, int16 &height) const {
 	if (_vm->_renderMode == Common::kRenderPlaydate) {
-		// Use ceiling division to ensure we cover the full scaled area
+		// Use ceiling division to ensure full coverage
 		width = (width * 400 + 159) / 160;
 		height = (height * 240 + 199) / 200;
 	} else {
@@ -417,8 +417,15 @@ void GfxMgr::copyDisplayToScreen() {
 }
 
 void GfxMgr::translateFontPosToDisplayScreen(int16 &x, int16 &y) const {
-	x *= _displayFontWidth;
-	y *= _displayFontHeight;
+	if (_vm->_renderMode == Common::kRenderPlaydate) {
+		// Playdate: scale font positions using the same ratios as visual coords
+		// This keeps text aligned with dialog boxes which use visual coordinates
+		x = (x * FONT_VISUAL_WIDTH * 400) / 160;   // col * 4 * 2.5 = col * 10
+		y = (y * FONT_VISUAL_HEIGHT * 240) / 200;  // row * 8 * 1.2 = row * 9.6
+	} else {
+		x *= _displayFontWidth;
+		y *= _displayFontHeight;
+	}
 }
 
 void GfxMgr::translateDisplayPosToFontScreen(int16 &x, int16 &y) const {
@@ -427,8 +434,14 @@ void GfxMgr::translateDisplayPosToFontScreen(int16 &x, int16 &y) const {
 }
 
 void GfxMgr::translateFontDimensionToDisplayScreen(int16 &width, int16 &height) const {
-	width *= _displayFontWidth;
-	height *= _displayFontHeight;
+	if (_vm->_renderMode == Common::kRenderPlaydate) {
+		// Playdate: use ceiling division for dimensions to ensure full coverage
+		width = (width * FONT_VISUAL_WIDTH * 400 + 159) / 160;
+		height = (height * FONT_VISUAL_HEIGHT * 240 + 199) / 200;
+	} else {
+		width *= _displayFontWidth;
+		height *= _displayFontHeight;
+	}
 }
 
 void GfxMgr::translateFontRectToDisplayScreen(int16 &x, int16 &y, int16 &width, int16 &height) const {
@@ -634,7 +647,17 @@ void GfxMgr::render_Block(int16 x, int16 y, int16 width, int16 height, bool copy
 		break;
 	case Common::kRenderPlaydate:
 		render_BlockPlaydate(x, y, width, height);
-		break;
+		if (copyToScreen) {
+			// For Playdate, compute display rect exactly as render_BlockPlaydate does
+			// to ensure the copy matches the rendered area precisely
+			const int displayX = (x * 400) / 160;
+			const int displayY = ((y + _renderStartVisualOffsetY) * 240) / 200;
+			const int displayW = ((x + width) * 400 + 159) / 160 - displayX;
+			const int displayH = ((y + _renderStartVisualOffsetY + height) * 240 + 199) / 200 - displayY;
+			_vm->_system->copyRectToScreen(_displayScreen + displayY * _displayScreenWidth + displayX,
+				_displayScreenWidth, displayX, displayY, displayW, displayH);
+		}
+		return;  // Early return for Playdate since we handled copy above
 	case Common::kRenderCGA:
 		render_BlockCGA(x, y, width, height);
 		break;
