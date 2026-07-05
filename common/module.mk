@@ -49,12 +49,16 @@ MODULE_OBJS := \
 	xpfloat.o \
 	zip-set.o \
 	std/std.o \
+	inspector/breakpoints.o \
+	inspector/discovery.o \
 	inspector/protocol.o \
+	inspector/session.o \
 	inspector/regex.o \
 	inspector/registry.o \
 	inspector/remoteobject.o \
 	inspector/sha1.o \
 	inspector/sourcemap.o \
+	inspector/stepping.o \
 	inspector/websocket.o
 
 ifdef ENABLE_EVENTRECORDER
