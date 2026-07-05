@@ -226,13 +226,19 @@ bool PlaydateMenu::handleEvent(const Common::Event &event) {
 
 	switch (event.type) {
 	case Common::EVENT_WHEELDOWN:
+		if (_listWords.empty())
+			return false;
 		moveSelection(1);
 		return true;
 	case Common::EVENT_WHEELUP:
+		if (_listWords.empty())
+			return false;
 		moveSelection(-1);
 		return true;
 	case Common::EVENT_KEYDOWN:
-		if (event.kbd.keycode == Common::KEYCODE_RETURN) {
+		// Only claim keys when there is something to act on; title
+		// screens and cutscenes wait for ENTER themselves.
+		if (event.kbd.keycode == Common::KEYCODE_RETURN && !_listWords.empty()) {
 			select();
 			return true;
 		}

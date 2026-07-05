@@ -58,6 +58,7 @@ GfxMgr::GfxMgr(AgiBase *vm, GfxFont *font) : _vm(vm), _font(font) {
 	_upscaledHires = DISPLAY_UPSCALED_DISABLED;
 	_displayScreenWidth = DISPLAY_DEFAULT_WIDTH;
 	_displayScreenHeight = DISPLAY_DEFAULT_HEIGHT;
+	_playdateGameWidth = 320;
 	_displayFontWidth = 8;
 	_displayFontHeight = 8;
 
@@ -149,16 +150,18 @@ void GfxMgr::initVideo() {
 		}
 		break;
 	case Common::kRenderPlaydate:
-		// Playdate: 400x240 display, native patterns at full resolution
-		// Scale: 160 AGI → 400 display (2.5x), 200 visual → 240 display (1.2x)
-		// Font: 10x10 grid for text positioning (40 columns × 10 = 400, ~24 rows × 10 = 240)
-		// Actual font is 8x8 pixels, with 2px horizontal spacing between characters
+		// Playdate: 400x240 display, native Hercules patterns at full
+		// resolution. Parser (AGI) games render into the left 320
+		// pixels and leave the right 80 for the word picker; preAGI
+		// games have no parser and use the full 400. Vertical scale is
+		// always 200 visual -> 240 display (1.2x).
 		initPalette(_paletteGfxMode, PALETTE_HERCULES_GREEN, 2, 8);
 		_upscaledHires = DISPLAY_UPSCALED_DISABLED;
 		_displayScreenWidth = 400;
 		_displayScreenHeight = 240;
-		_displayFontWidth = 10;   // 40 columns × 10 = 400
-		_displayFontHeight = 10;  // ~24 rows × 10 = 240
+		_playdateGameWidth = (_vm->getGameType() == GType_PreAGI) ? 400 : 320;
+		_displayFontWidth = 10;
+		_displayFontHeight = 10;
 		_displayWidthMulAdjust = 0;
 		_displayHeightMulAdjust = 0;
 		break;
@@ -273,7 +276,7 @@ uint16 GfxMgr::getRenderStartDisplayOffsetY() const {
 // Game screen to 400x240 (Playdate) -> x * 2.5, y * 1.2 + renderStart
 void GfxMgr::translateGamePosToDisplayScreen(int16 &x, int16 &y) const {
 	if (_vm->_renderMode == Common::kRenderPlaydate) {
-		x = (x * 320) / 160;
+		x = (x * _playdateGameWidth) / 160;
 		y = ((y + _renderStartVisualOffsetY) * 240) / 200;
 	} else {
 		x = x * (2 + _displayWidthMulAdjust);
@@ -287,7 +290,7 @@ void GfxMgr::translateGamePosToDisplayScreen(int16 &x, int16 &y) const {
 // Visual to 400x240 (Playdate) -> x * 2.5, y * 1.2
 void GfxMgr::translateVisualPosToDisplayScreen(int16 &x, int16 &y) const {
 	if (_vm->_renderMode == Common::kRenderPlaydate) {
-		x = (x * 320) / 160;
+		x = (x * _playdateGameWidth) / 160;
 		y = (y * 240) / 200;
 	} else {
 		x = x * (2 + _displayWidthMulAdjust);
@@ -301,7 +304,7 @@ void GfxMgr::translateVisualPosToDisplayScreen(int16 &x, int16 &y) const {
 // Display screen to 400x240 (Playdate) -> x / 2.5, y / 1.2 - renderStart
 void GfxMgr::translateDisplayPosToGameScreen(int16 &x, int16 &y) const {
 	if (_vm->_renderMode == Common::kRenderPlaydate) {
-		x = (x * 160) / 320;
+		x = (x * 160) / _playdateGameWidth;
 		y = (y * 200) / 240 - _renderStartVisualOffsetY;
 	} else {
 		y -= _renderStartDisplayOffsetY; // remove status bar line
@@ -318,7 +321,7 @@ void GfxMgr::translateDisplayPosToGameScreen(int16 &x, int16 &y) const {
 void GfxMgr::translateVisualDimensionToDisplayScreen(int16 &width, int16 &height) const {
 	if (_vm->_renderMode == Common::kRenderPlaydate) {
 		// Use ceiling division to ensure full coverage
-		width = (width * 320 + 159) / 160;
+		width = (width * _playdateGameWidth + 159) / 160;
 		height = (height * 240 + 199) / 200;
 	} else {
 		width = width * (2 + _displayWidthMulAdjust);
@@ -329,7 +332,7 @@ void GfxMgr::translateVisualDimensionToDisplayScreen(int16 &width, int16 &height
 // Translates dimension from display screen to visual screen
 void GfxMgr::translateDisplayDimensionToVisualScreen(int16 &width, int16 &height) const {
 	if (_vm->_renderMode == Common::kRenderPlaydate) {
-		width = (width * 160) / 320;
+		width = (width * 160) / _playdateGameWidth;
 		height = (height * 200) / 240;
 	} else {
 		width = width / (2 + _displayWidthMulAdjust);
@@ -420,7 +423,7 @@ void GfxMgr::translateFontPosToDisplayScreen(int16 &x, int16 &y) const {
 	if (_vm->_renderMode == Common::kRenderPlaydate) {
 		// Playdate: scale font positions using the same ratios as visual coords
 		// This keeps text aligned with dialog boxes which use visual coordinates
-		x = (x * FONT_VISUAL_WIDTH * 320) / 160;   // col * 4 * 2.5 = col * 10
+		x = (x * FONT_VISUAL_WIDTH * _playdateGameWidth) / 160;   // col * 4 * 2.5 = col * 10
 		y = (y * FONT_VISUAL_HEIGHT * 240) / 200;  // row * 8 * 1.2 = row * 9.6
 	} else {
 		x *= _displayFontWidth;
@@ -436,7 +439,7 @@ void GfxMgr::translateDisplayPosToFontScreen(int16 &x, int16 &y) const {
 void GfxMgr::translateFontDimensionToDisplayScreen(int16 &width, int16 &height) const {
 	if (_vm->_renderMode == Common::kRenderPlaydate) {
 		// Playdate: use ceiling division for dimensions to ensure full coverage
-		width = (width * FONT_VISUAL_WIDTH * 320 + 159) / 160;
+		width = (width * FONT_VISUAL_WIDTH * _playdateGameWidth + 159) / 160;
 		height = (height * FONT_VISUAL_HEIGHT * 240 + 199) / 200;
 	} else {
 		width *= _displayFontWidth;
@@ -650,9 +653,9 @@ void GfxMgr::render_Block(int16 x, int16 y, int16 width, int16 height, bool copy
 		if (copyToScreen) {
 			// For Playdate, compute display rect exactly as render_BlockPlaydate does
 			// to ensure the copy matches the rendered area precisely
-			const int displayX = (x * 320) / 160;
+			const int displayX = (x * _playdateGameWidth) / 160;
 			const int displayY = ((y + _renderStartVisualOffsetY) * 240) / 200;
-			const int displayW = ((x + width) * 320 + 159) / 160 - displayX;
+			const int displayW = ((x + width) * _playdateGameWidth + 159) / 160 - displayX;
 			const int displayH = ((y + _renderStartVisualOffsetY + height) * 240 + 199) / 200 - displayY;
 			_vm->_system->copyRectToScreen(_displayScreen + displayY * _displayScreenWidth + displayX,
 				_displayScreenWidth, displayX, displayY, displayW, displayH);
@@ -1413,6 +1416,14 @@ void GfxMgr::updateScreen() {
 #ifdef PLAYDATE
 	if (_vm->_playdateMenu && _vm->_playdateMenu->isVisible()) {
 		_vm->_playdateMenu->draw();
+		// The picker draws into _displayScreen directly; push its
+		// column (everything right of the game area) to the backend.
+		if (_displayScreenWidth > _playdateGameWidth) {
+			const int16 menuX = _playdateGameWidth;
+			const int16 menuWidth = _displayScreenWidth - _playdateGameWidth;
+			_vm->_system->copyRectToScreen(_displayScreen + menuX, _displayScreenWidth,
+			                               menuX, 0, menuWidth, _displayScreenHeight);
+		}
 	}
 #endif
 	_vm->_system->updateScreen();
@@ -1831,8 +1842,8 @@ void GfxMgr::render_BlockPlaydate(int16 x, int16 y, int16 width, int16 height) {
 	// Scale: 160 AGI → 400 display (2.5x horizontal)
 	// Scale: 200 visual → 240 display (1.2x vertical)
 	// Use floor for start and ceiling for end to ensure full coverage
-	const int displayX0 = (x * 320) / 160;
-	const int displayX1 = ((x + width) * 320 + 159) / 160;  // ceiling division
+	const int displayX0 = (x * _playdateGameWidth) / 160;
+	const int displayX1 = ((x + width) * _playdateGameWidth + 159) / 160;  // ceiling division
 	const int displayY0 = ((y + _renderStartVisualOffsetY) * 240) / 200;
 	const int displayY1 = ((y + _renderStartVisualOffsetY + height) * 240 + 199) / 200;  // ceiling division
 
@@ -1850,7 +1861,7 @@ void GfxMgr::render_BlockPlaydate(int16 x, int16 y, int16 width, int16 height) {
 
 		for (int displayX = displayX0; displayX < displayX1 && displayX < _displayScreenWidth; ++displayX) {
 			// Map display X to AGI X
-			const int agiX = (displayX * 160) / 320;
+			const int agiX = (displayX * 160) / _playdateGameWidth;
 			if (agiX < 0 || agiX >= SCRIPT_WIDTH)
 				continue;
 

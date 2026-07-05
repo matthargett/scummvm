@@ -357,6 +357,11 @@ AgiBase::AgiBase(OSystem *syst, const AGIGameDescription *gameDesc) : Engine(sys
 	_rnd = new Common::RandomSource("agi");
 	_sound = nullptr;
 
+#ifdef PLAYDATE
+	// Only created by AgiEngine (parser games); stays null for preAGI.
+	_playdateMenu = nullptr;
+#endif
+
 	initFeatures();
 	initVersion();
 }
@@ -471,9 +476,6 @@ AgiEngine::AgiEngine(OSystem *syst, const AGIGameDescription *gameDesc) : AgiBas
 	_text = nullptr;
 	_loader = nullptr;
 	_menu = nullptr;
-#ifdef PLAYDATE
-	_playdateMenu = nullptr;
-#endif
 	_systemUI = nullptr;
 	_inventory = nullptr;
 	_logFile = nullptr;

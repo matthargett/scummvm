@@ -191,6 +191,7 @@ void TextMgr::charAttrib_Set(byte foreground, byte background) {
 			break;
 		case Common::kRenderHercA:
 		case Common::kRenderHercG:
+		case Common::kRenderPlaydate:
 			if (background) {
 				_textAttrib.combinedForeground = 0;
 				_textAttrib.combinedBackground = 1;
