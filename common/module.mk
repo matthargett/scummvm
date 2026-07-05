@@ -48,7 +48,9 @@ MODULE_OBJS := \
 	util.o \
 	xpfloat.o \
 	zip-set.o \
-	std/std.o
+	std/std.o \
+	inspector/sha1.o \
+	inspector/websocket.o
 
 ifdef ENABLE_EVENTRECORDER
 MODULE_OBJS += \
