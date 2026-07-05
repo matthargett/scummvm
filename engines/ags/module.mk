@@ -6,6 +6,7 @@ MODULE_OBJS = \
 	events.o \
 	game_scanner.o \
 	globals.o \
+	inspector-agent.o \
 	metaengine.o \
 	music.o \
 	console.o \

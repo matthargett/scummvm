@@ -49,6 +49,7 @@
 #include "scumm/file_nes.h"
 #include "scumm/imuse/imuse.h"
 #include "scumm/imuse_digi/dimuse_engine.h"
+#include "scumm/inspector-agent.h"
 #include "scumm/smush/smush_player.h"
 #include "scumm/smush/rebel/smush_player_ra1.h"
 #include "scumm/smush/rebel/smush_player_ra2.h"
@@ -465,6 +466,12 @@ ScummEngine::ScummEngine(OSystem *syst, const DetectorResult &dr)
 
 
 ScummEngine::~ScummEngine() {
+	if (_inspector) {
+		_inspector->shutdown();
+		delete _inspector;
+		_inspector = nullptr;
+	}
+
 	delete _musicEngine;
 
 	// Delete the sound object earlier than the actors
@@ -1522,6 +1529,14 @@ Common::Error ScummEngine::init() {
 
 	// Create the debugger now that _numVariables has been set
 	setDebugger(new ScummDebugger(this));
+
+	// Remote script debugger (only active with inspector_enable set).
+	_inspector = new ScummInspectorAgent(this);
+	_inspector->init();
+	if (!_inspector->active()) {
+		delete _inspector;
+		_inspector = nullptr;
+	}
 
 	Common::Keymapper *keymapper = _system->getEventManager()->getKeymapper();
 	_insaneKeymap = keymapper->getKeymap(insaneKeymapId);
@@ -3097,6 +3112,10 @@ void ScummEngine_v0::scummLoop(int delta) {
 }
 
 void ScummEngine::scummLoop(int delta) {
+	// Remote script debugger: apply queued client messages once per frame.
+	if (_inspector)
+		_inspector->transportTick();
+
 	// Notify the script about how much time has passed, in jiffies
 	if (VAR_TIMER != 0xFF)
 		VAR(VAR_TIMER) = delta;

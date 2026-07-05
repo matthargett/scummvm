@@ -26,6 +26,7 @@
 #include "sci/sci.h"
 #include "sci/event.h"
 #include "sci/console.h"
+#include "sci/inspector-agent.h"
 #include "sci/engine/state.h"
 #include "sci/engine/kernel.h"
 #include "sci/graphics/drivers/gfxdriver.h"
@@ -449,6 +450,13 @@ SciEvent EventManager::getSciEvent(SciEventType mask) {
 #else
 	SciEvent event = { kSciEventNone, kSciKeyModNone, 0, Common::Point() };
 #endif
+
+	// Remote script debugger: pump the inspector transport once per event
+	// poll. Every game cycle passes through here (kGetEvent polls input
+	// each doit cycle, and SciEngine::sleep polls during kWait/throttle
+	// waits), so this is the once-per-cycle engine-thread spot.
+	if (g_sci && g_sci->_inspector)
+		g_sci->_inspector->transportTick();
 
 	if (getSciVersion() < SCI_VERSION_2) {
 		updateScreen();

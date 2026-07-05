@@ -20,6 +20,7 @@
  */
 
 #include "common/config-manager.h"
+#include "common/inspector/session.h"
 #include "common/system.h"
 
 #include "scumm/actor.h"
@@ -27,6 +28,7 @@
 #include "scumm/charset.h"
 #include "scumm/file.h"
 #include "scumm/imuse_digi/dimuse_engine.h"
+#include "scumm/inspector-agent.h"
 #include "scumm/object.h"
 #include "scumm/resource.h"
 #include "scumm/scumm_v8.h"
@@ -311,6 +313,10 @@ void ScummEngine_v8::writeVar(uint var, int value) {
 		}
 
 		_scummVars[var] = value;
+
+		// Remote script debugger: GameScript watchpoints on globals.
+		if (_inspector && Inspector::g_session && Inspector::g_session->watchArmed())
+			_inspector->onVariableWrite(var, value);
 
 		if ((_varwatch == (int)var) || (_varwatch == 0)) {
 			if (_currentScript == 0xFF)

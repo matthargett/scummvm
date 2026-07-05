@@ -20,6 +20,7 @@
  */
 
 #include "kyra/kyra_v1.h"
+#include "kyra/inspector-agent.h"
 #include "kyra/sound/sound_intern.h"
 #include "kyra/resource/resource.h"
 #include "kyra/engine/timer.h"
@@ -39,6 +40,7 @@ KyraEngine_v1::KyraEngine_v1(OSystem *system, const GameFlags &flags)
 	_staticres = nullptr;
 	_timer = nullptr;
 	_emc = nullptr;
+	_inspector = nullptr;
 
 	_configRenderMode = Common::kRenderDefault;
 	_configNullSound = false;
@@ -189,10 +191,26 @@ Common::Error KyraEngine_v1::init() {
 
 	setupKeyMap();
 
+	// Remote script debugger (only active with inspector_enable set).
+	// Created before any game code loads its first EMC script, so
+	// EMCInterpreter::load() can register every script at load time.
+	_inspector = new KyraInspectorAgent(this);
+	_inspector->init();
+	if (!_inspector->active()) {
+		delete _inspector;
+		_inspector = nullptr;
+	}
+
 	return Common::kNoError;
 }
 
 KyraEngine_v1::~KyraEngine_v1() {
+	if (_inspector) {
+		_inspector->shutdown();
+		delete _inspector;
+		_inspector = nullptr;
+	}
+
 	for (Common::Array<const Opcode *>::iterator i = _opcodes.begin(); i != _opcodes.end(); ++i)
 		delete *i;
 	_opcodes.clear();
@@ -440,6 +458,11 @@ void KyraEngine_v1::setupKeyMap() {
 }
 
 void KyraEngine_v1::updateInput() {
+	// Remote script debugger: per-frame transport pump. updateInput() is
+	// the one spot every game variant's main/delay loop passes through.
+	if (_inspector)
+		_inspector->transportTick();
+
 	Common::Event event;
 
 	bool updateScreen = false;
@@ -516,17 +539,24 @@ void KyraEngine_v1::resetSkipFlag(bool removeEvent) {
 int KyraEngine_v1::setGameFlag(int flag) {
 	assert((flag >> 3) >= 0 && (flag >> 3) <= ARRAYSIZE(_flagsTable));
 	_flagsTable[flag >> 3] |= (1 << (flag & 7));
+	if (_inspector)
+		_inspector->onGameFlagAccess(flag, true, true);
 	return 1;
 }
 
 int KyraEngine_v1::queryGameFlag(int flag) const {
 	assert((flag >> 3) >= 0 && (flag >> 3) <= ARRAYSIZE(_flagsTable));
-	return ((_flagsTable[flag >> 3] >> (flag & 7)) & 1);
+	const int value = ((_flagsTable[flag >> 3] >> (flag & 7)) & 1);
+	if (_inspector)
+		_inspector->onGameFlagAccess(flag, false, value != 0);
+	return value;
 }
 
 int KyraEngine_v1::resetGameFlag(int flag) {
 	assert((flag >> 3) >= 0 && (flag >> 3) <= ARRAYSIZE(_flagsTable));
 	_flagsTable[flag >> 3] &= ~(1 << (flag & 7));
+	if (_inspector)
+		_inspector->onGameFlagAccess(flag, true, false);
 	return 0;
 }
 

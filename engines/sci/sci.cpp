@@ -31,6 +31,7 @@
 #include "sci/debug.h"
 #include "sci/console.h"
 #include "sci/event.h"
+#include "sci/inspector-agent.h"
 
 #include "sci/engine/features.h"
 #include "sci/engine/guest_additions.h"
@@ -123,6 +124,7 @@ SciEngine::SciEngine(OSystem *syst, const ADGameDescription *desc, SciGameId gam
 	_opcode_formats(nullptr),
 	_debugState(),
 	_speedThrottleDelay(kSpeedThrottleDefaultDelay),
+	_inspector(nullptr),
 	_gameDescription(desc),
 	_gameId(gameId),
 	_resMan(nullptr),
@@ -218,6 +220,12 @@ SciEngine::SciEngine(OSystem *syst, const ADGameDescription *desc, SciGameId gam
 }
 
 SciEngine::~SciEngine() {
+	if (_inspector) {
+		_inspector->shutdown();
+		delete _inspector;
+		_inspector = nullptr;
+	}
+
 #ifdef ENABLE_SCI32
 	delete _gfxControls32;
 	delete _gfxPaint32;
@@ -383,6 +391,16 @@ Common::Error SciEngine::run() {
 
 	// Must be called after game_init(), as they use _features
 	_kernel->loadKernelNames(_features);
+
+	// Remote script debugger (only active with inspector_enable set).
+	// Needs _opcode_formats and the kernel names for its disassembly
+	// listings, so it comes right after both are ready.
+	_inspector = new SciInspectorAgent(this);
+	_inspector->init();
+	if (!_inspector->active()) {
+		delete _inspector;
+		_inspector = nullptr;
+	}
 
 	// Initialize all graphics related subsystems
 	initGraphics();

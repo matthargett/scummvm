@@ -26,6 +26,7 @@
 #include "director/director.h"
 #include "director/cast.h"
 #include "director/debugger.h"
+#include "director/inspector-agent.h"
 #include "director/frame.h"
 #include "director/movie.h"
 #include "director/picture.h"
@@ -656,6 +657,12 @@ bool Lingo::execute(int targetFrame) {
 		// process events every so often
 		if (localCounter > 0 && localCounter % 100 == 0) {
 			_vm->processSysEvents();
+
+			// Keep the remote script debugger attachable while a
+			// long-running handler never returns to the main loop.
+			if (_vm->_inspector)
+				_vm->_inspector->transportTick();
+
 			// Also process update widgets!
 			Movie *movie = g_director->getCurrentMovie();
 			Score *score = movie->getScore();
@@ -685,6 +692,12 @@ bool Lingo::execute(int targetFrame) {
 		}
 
 		g_debugger->stepHook();
+
+		// Remote script debugger: _state->pc still indexes the instruction
+		// about to execute (a statement start); onInstruction() registers
+		// unseen scripts and re-checks Inspector::g_session->armed().
+		if (_vm->_inspector)
+			_vm->_inspector->onInstruction();
 
 		if (_state->script == nullptr) {
 			debugC(1, kDebugLingoExec, "Lingo::execute(): PANIC: No script to execute (1)");

@@ -19,8 +19,11 @@
  *
  */
 
+#include "common/inspector/session.h"
+
 #include "scumm/actor.h"
 #include "scumm/charset.h"
+#include "scumm/inspector-agent.h"
 #include "scumm/object.h"
 #include "scumm/resource.h"
 #include "scumm/scumm_v2.h"
@@ -486,6 +489,10 @@ void ScummEngine_v2::writeVar(uint var, int value) {
 	}
 
 	_scummVars[var] = value;
+
+	// Remote script debugger: GameScript watchpoints on globals.
+	if (_inspector && Inspector::g_session && Inspector::g_session->watchArmed())
+		_inspector->onVariableWrite(var, value);
 }
 
 void ScummEngine_v2::getResultPosIndirect() {

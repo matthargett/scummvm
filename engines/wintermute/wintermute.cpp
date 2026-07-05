@@ -35,6 +35,7 @@
 #include "engines/wintermute/ad/ad_game.h"
 #include "engines/wintermute/wintermute.h"
 #include "engines/wintermute/debugger.h"
+#include "engines/wintermute/inspector-agent.h"
 #include "engines/wintermute/platform_osystem.h"
 #include "engines/wintermute/base/base_engine.h"
 #include "engines/wintermute/detection.h"
@@ -65,6 +66,7 @@ WintermuteEngine::WintermuteEngine(OSystem *syst, const WMEGameDescription *desc
 	_game = nullptr;
 	_debugger = nullptr;
 	_dbgController = nullptr;
+	_inspector = nullptr;
 }
 
 WintermuteEngine::~WintermuteEngine() {
@@ -191,6 +193,15 @@ int WintermuteEngine::init() {
 	instance.setGameRef(_game);
 	BasePlatform::initialize(this, _game, 0, nullptr);
 
+	// Remote script debugger (only active with inspector_enable set);
+	// created before any game script gets a chance to run.
+	_inspector = new WintermuteInspectorAgent(_game);
+	_inspector->init();
+	if (!_inspector->active()) {
+		delete _inspector;
+		_inspector = nullptr;
+	}
+
 	_game->initConfManSettings();
 
 	_game->_accessTTSEnabled = ConfMan.getBool("tts_enabled");
@@ -287,6 +298,12 @@ int WintermuteEngine::messageLoop() {
 			BasePlatform::handleEvent(&event);
 		}
 
+		// Remote script debugger: apply queued client messages and
+		// register any newly created scripts, once per frame.
+		if (_inspector) {
+			_inspector->transportTick();
+		}
+
 		if (_game && _game->_renderer->_active && _game->_renderer->isReady()) {
 			_game->displayContent();
 			_game->displayQuickMsg();
@@ -319,6 +336,11 @@ int WintermuteEngine::messageLoop() {
 }
 
 void WintermuteEngine::deinit() {
+	if (_inspector) {
+		_inspector->shutdown();
+		delete _inspector;
+		_inspector = nullptr;
+	}
 	BaseEngine::destroy();
 	BasePlatform::deinit();
 }

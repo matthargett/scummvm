@@ -56,6 +56,7 @@ class Archive;
 class MacArchive;
 class Cast;
 class Debugger;
+class DirectorInspectorAgent;
 class DirectorSound;
 class Lingo;
 class Movie;
@@ -343,6 +344,12 @@ public:
 	bool _noFatalLingoError = false;
 
 	bool _firstMovie = true;
+
+	/**
+	 * Script-inspector adapter (common/inspector); non-null only when
+	 * the user enabled the remote debugger (inspector_enable).
+	 */
+	DirectorInspectorAgent *_inspector = nullptr;
 };
 
 // An extension of MacPlotData for interfacing with inks and patterns without

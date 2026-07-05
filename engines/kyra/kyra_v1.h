@@ -120,6 +120,7 @@ class StaticResource;
 class TimerManager;
 class Debugger;
 class GUI;
+class KyraInspectorAgent;
 
 struct Button;
 
@@ -190,6 +191,13 @@ public:
 	virtual void delayUntil(uint32 timestamp, bool updateGameTimers = false, bool update = false, bool isMainLoop = false);
 	virtual void delay(uint32 millis, bool update = false, bool isMainLoop = false);
 	virtual void delayWithTicks(int ticks);
+
+	/**
+	 * Script-inspector adapter (common/inspector); non-null only when
+	 * the user enabled the remote debugger (inspector_enable). Hooked
+	 * from EMCInterpreter and the game flag accessors.
+	 */
+	KyraInspectorAgent *_inspector;
 
 protected:
 	// Engine APIs

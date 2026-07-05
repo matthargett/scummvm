@@ -20,10 +20,12 @@
  */
 
 #include "kyra/script/script.h"
+#include "kyra/inspector-agent.h"
 #include "kyra/kyra_v1.h"
 #include "kyra/resource/resource.h"
 
 #include "common/endian.h"
+#include "common/inspector/session.h"
 
 namespace Kyra {
 EMCInterpreter::EMCInterpreter(KyraEngine_v1 *vm) : _vm(vm), _scriptData(nullptr), _filename(nullptr), _parameter(0) {
@@ -127,6 +129,10 @@ bool EMCInterpreter::load(const char *filename, EMCData *scriptData, const Commo
 
 	Common::strlcpy(_scriptData->filename, filename, 13);
 
+	// Remote script debugger: announce the freshly loaded script.
+	if (_vm->_inspector)
+		_vm->_inspector->onScriptLoaded(_scriptData);
+
 	_scriptData = nullptr;
 	_filename = nullptr;
 
@@ -136,6 +142,10 @@ bool EMCInterpreter::load(const char *filename, EMCData *scriptData, const Commo
 void EMCInterpreter::unload(EMCData *data) {
 	if (!data)
 		return;
+
+	// Remote script debugger: drop the (data -> script handle) mapping.
+	if (_vm->_inspector)
+		_vm->_inspector->onScriptUnloaded(data);
 
 	delete[] data->text;
 	delete[] data->ordr;
@@ -197,6 +207,13 @@ bool EMCInterpreter::run(EMCState *script) {
 		error("Attempt to execute out of bounds: 0x%.08X out of 0x%.08X",
 		      instOffset, script->dataPtr->dataSize);
 	}
+
+	// Remote script debugger (common/inspector): ip still points at the
+	// instruction about to be decoded, i.e. a statement start; may block
+	// here on a breakpoint/step.
+	if (_vm->_inspector && Inspector::g_session && Inspector::g_session->armed())
+		_vm->_inspector->onInstruction(script, instOffset);
+
 	int16 code = *script->ip++;
 	int16 opcode = (code >> 8) & 0x1F;
 
@@ -217,6 +234,11 @@ bool EMCInterpreter::run(EMCState *script) {
 		debugC(5, kDebugLevelScript, "[0x%.08X] EMCInterpreter::%s([%d/%u])", instOffset, _opcodes[opcode].desc, _parameter, (uint)_parameter);
 		(this->*(_opcodes[opcode].proc))(script);
 	}
+
+	// Remote script debugger: close the liveness window opened by the
+	// hooks above (script may be a stack-allocated activation).
+	if (_vm->_inspector)
+		_vm->_inspector->onInstructionDone(script);
 
 	return (script->ip != nullptr);
 }
@@ -255,6 +277,8 @@ void EMCInterpreter::op_push(EMCState *script) {
 }
 
 void EMCInterpreter::op_pushReg(EMCState *script) {
+	if (_vm->_inspector && Inspector::g_session && Inspector::g_session->watchArmed())
+		_vm->_inspector->onRegisterRead(script, _parameter, script->regs[_parameter]);
 	script->stack[--script->sp] = script->regs[_parameter];
 }
 
@@ -288,6 +312,8 @@ void EMCInterpreter::op_popRetOrPos(EMCState *script) {
 
 void EMCInterpreter::op_popReg(EMCState *script) {
 	script->regs[_parameter] = script->stack[script->sp++];
+	if (_vm->_inspector && Inspector::g_session && Inspector::g_session->watchArmed())
+		_vm->_inspector->onRegisterWrite(script, _parameter, script->regs[_parameter]);
 }
 
 void EMCInterpreter::op_popBPNeg(EMCState *script) {

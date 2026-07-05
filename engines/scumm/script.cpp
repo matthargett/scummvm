@@ -20,10 +20,12 @@
  */
 
 #include "common/config-manager.h"
+#include "common/inspector/session.h"
 #include "common/util.h"
 #include "common/system.h"
 
 #include "scumm/actor.h"
+#include "scumm/inspector-agent.h"
 #include "scumm/object.h"
 #include "scumm/resource.h"
 #include "scumm/util.h"
@@ -493,6 +495,12 @@ void ScummEngine::refreshScriptPointer() {
 /** Execute a script - Read opcode, and execute it from the table */
 void ScummEngine::executeScript() {
 	int c;
+
+	// Remote script debugger: register the activated script (lazy, keyed
+	// on its containing resource) so breakpoints can bind to it.
+	if (_inspector)
+		_inspector->onScriptActivated();
+
 	while (_currentScript != 0xFF) {
 
 		if (_showStack == 1) {
@@ -502,6 +510,13 @@ void ScummEngine::executeScript() {
 			}
 			debugN("\n");
 		}
+
+		// Remote script debugger: pre-instruction hook. _scriptPointer
+		// still points at the opcode byte here (the fetch below advances
+		// it), so the reported offset is the instruction start.
+		if (_inspector && Inspector::g_session && Inspector::g_session->armed())
+			_inspector->onInstruction();
+
 		_opcode = fetchScriptByte();
 		if (_game.version > 2) // V0-V2 games didn't use the didexec flag
 			vm.slot[_currentScript].didexec = true;
@@ -791,6 +806,10 @@ void ScummEngine::writeVar(uint var, int value) {
 		}
 
 		_scummVars[var] = value;
+
+		// Remote script debugger: GameScript watchpoints on globals.
+		if (_inspector && Inspector::g_session && Inspector::g_session->watchArmed())
+			_inspector->onVariableWrite(var, value);
 
 		if ((_varwatch == (int)var || _varwatch == 0) && _currentScript < NUM_SCRIPT_SLOT) {
 			if (vm.slot[_currentScript].number < 100)

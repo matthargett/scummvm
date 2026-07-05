@@ -141,6 +141,7 @@ MODULE_OBJS := \
 	video/video_subtitler.o \
 	video/video_theora_player.o \
 	debugger.o \
+	inspector-agent.o \
 	wintermute.o \
 	persistent.o
 

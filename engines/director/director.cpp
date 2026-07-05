@@ -31,6 +31,7 @@
 
 #include "director/director.h"
 #include "director/debugger.h"
+#include "director/inspector-agent.h"
 #include "director/archive.h"
 #include "director/cast.h"
 #include "director/movie.h"
@@ -156,6 +157,12 @@ DirectorEngine::DirectorEngine(OSystem *syst, const DirectorGameDescription *gam
 }
 
 DirectorEngine::~DirectorEngine() {
+	if (_inspector) {
+		_inspector->shutdown();
+		delete _inspector;
+		_inspector = nullptr;
+	}
+
 	delete _lingo;
 
 	clearPalettes();
@@ -327,6 +334,16 @@ Common::Error DirectorEngine::run() {
 	_lingo = new Lingo(this);
 	_lingo->switchStateFromWindow();
 
+	// Remote script debugger (only active with inspector_enable set);
+	// created before the initial movie loads so inspector_wait can hold
+	// the very first Lingo instruction.
+	_inspector = new DirectorInspectorAgent(this);
+	_inspector->init();
+	if (!_inspector->active()) {
+		delete _inspector;
+		_inspector = nullptr;
+	}
+
 	if (getGameGID() == GID_TEST) {
 		_currentWindow->runTests();
 		return Common::kNoError;
@@ -363,6 +380,10 @@ Common::Error DirectorEngine::run() {
 	bool loop = true;
 
 	while (loop) {
+		// Remote script debugger transport (cheap no-op without a client).
+		if (_inspector)
+			_inspector->transportTick();
+
 		if (_stage->getCurrentMovie())
 			processSysEvents();
 

@@ -53,6 +53,7 @@
 #include "ags/engine/media/audio/audio_system.h"
 #include "ags/globals.h"
 #include "ags/ags.h"
+#include "ags/inspector-agent.h"
 
 namespace AGS3 {
 
@@ -168,6 +169,14 @@ void quit(const char *quitmsg) {
 }
 
 void quit_free() {
+	// Shut down the remote script inspector (and restore any chained
+	// debug hook) before the game and its script instances are unloaded.
+	if (g_inspectorAgent) {
+		g_inspectorAgent->shutdown();
+		delete g_inspectorAgent;
+		g_inspectorAgent = nullptr;
+	}
+
 	if (strlen(_G(quit_message)) == 0)
 		Common::strcpy_s(_G(quit_message), "|bye!");
 

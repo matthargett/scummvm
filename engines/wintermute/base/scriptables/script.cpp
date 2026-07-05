@@ -34,6 +34,7 @@
 #include "engines/wintermute/base/gfx/base_renderer.h"
 #include "engines/wintermute/ext/externals.h"
 #include "engines/wintermute/dcgf.h"
+#include "engines/wintermute/inspector-agent.h"
 
 #include "common/memstream.h"
 
@@ -384,6 +385,12 @@ bool ScScript::createMethodThread(ScScript *original, const char *methodName) {
 
 //////////////////////////////////////////////////////////////////////////
 void ScScript::cleanup() {
+	// Remote script debugger (common/inspector): this object's identity
+	// (pointer, buffer, filename) is going away or about to be reused.
+	if (WintermuteInspectorAgent::g_agent) {
+		WintermuteInspectorAgent::g_agent->onScriptCleanup(this);
+	}
+
 	if (_buffer) {
 		delete[] _buffer;
 	}
@@ -531,6 +538,13 @@ uint32 ScScript::decodeAltOpcodes(uint32 inst) {
 
 //////////////////////////////////////////////////////////////////////////
 bool ScScript::executeInstruction() {
+	// Remote script debugger (common/inspector): the hook must run before
+	// the opcode fetch, while _iP still holds the instruction start (the
+	// offsets in the registered listings). One branch when disarmed.
+	if (WintermuteInspectorAgent::g_agent && Inspector::g_session && Inspector::g_session->armed()) {
+		WintermuteInspectorAgent::g_agent->onInstruction(this);
+	}
+
 	bool ret = STATUS_OK;
 
 	uint32 dw;
@@ -1287,6 +1301,11 @@ void ScScript::runtimeError(const char *fmt, ...) {
 
 	warning("Runtime error. Script '%s', line %d", _filename, _currentLine);
 	warning("  %s", buff);
+
+	// Remote script debugger (common/inspector): surface as an exception.
+	if (WintermuteInspectorAgent::g_agent) {
+		WintermuteInspectorAgent::g_agent->onRuntimeError(this, buff);
+	}
 
 	if (!_game->_suppressScriptErrors) {
 		_game->quickMessage("Script runtime error. View log for details.");

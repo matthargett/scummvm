@@ -166,6 +166,16 @@ void script_commands_free() {
 	delete g_commands;
 }
 
+bool script_commands_get_info(int code, const char *&name, int &arg_count, const bool *&arg_is_reg) {
+	if (!g_commands || code < 0 || code >= CC_NUM_SCCMDS)
+		return false;
+	const ScriptCommandInfo &info = (*g_commands)[code];
+	name = info.CmdName;
+	arg_count = info.ArgCount;
+	arg_is_reg = info.ArgIsReg;
+	return true;
+}
+
 const char *regnames[] = { "null", "sp", "mar", "ax", "bx", "cx", "op", "dx" };
 const char *fixupnames[] = { "null", "fix_gldata", "fix_func", "fix_string", "fix_import", "fix_datadata", "fix_stack" };
 

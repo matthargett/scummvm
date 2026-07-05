@@ -46,6 +46,7 @@
 #include "ags/engine/script/script.h"
 #include "ags/ags.h"
 #include "ags/globals.h"
+#include "ags/inspector-agent.h"
 
 namespace AGS3 {
 
@@ -121,6 +122,20 @@ void initialize_start_and_play_game(int override_start_room, int loadSave) {
 
 	if (_G(editor_debugging_enabled))
 		start_game_init_editor_debugging();
+
+	// Remote script inspector (only kept when the user enabled it with
+	// the inspector_enable config key). Installed after the editor
+	// debugger so its new-line hook chains to any hook set above, and
+	// before the first scripts run so inspector_wait can hold the very
+	// first executed statement.
+	if (!g_inspectorAgent) {
+		g_inspectorAgent = new AGSInspectorAgent();
+		g_inspectorAgent->init();
+		if (!g_inspectorAgent->active()) {
+			delete g_inspectorAgent;
+			g_inspectorAgent = nullptr;
+		}
+	}
 
 	start_game_load_savegame_on_startup(loadSave);
 

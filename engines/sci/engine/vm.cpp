@@ -22,9 +22,11 @@
 #include "common/config-manager.h"
 #include "common/debug.h"
 #include "common/debug-channels.h"
+#include "common/inspector/session.h"
 
 #include "sci/sci.h"
 #include "sci/console.h"
+#include "sci/inspector-agent.h"
 #include "sci/engine/features.h"
 #include "sci/engine/guest_additions.h"
 #include "sci/engine/state.h"
@@ -158,6 +160,11 @@ static reg_t read_var(EngineState *s, int type, int index) {
 				break;
 			}
 		}
+
+		// Remote script debugger: GameScript watchpoints (read).
+		if (g_sci->_inspector)
+			g_sci->_inspector->onVariableRead(type, index, s->variables[type][index]);
+
 		return s->variables[type][index];
 	} else
 		return s->r_acc;
@@ -176,6 +183,10 @@ static void write_var(EngineState *s, int type, int index, reg_t value) {
 		s->variables[type][index] = value;
 
 		g_sci->_guestAdditions->writeVarHook(type, index, value);
+
+		// Remote script debugger: GameScript watchpoints (write).
+		if (g_sci->_inspector)
+			g_sci->_inspector->onVariableWrite(type, index, value);
 	}
 }
 
@@ -603,6 +614,13 @@ void run_vm(EngineState *s) {
 			}
 			s->variables[VAR_TEMP] = s->xs->fp;
 			s->variables[VAR_PARAM] = s->xs->variables_argp;
+
+			// Remote script debugger: the pc entered a (possibly new)
+			// script segment; register it lazily. Runs on frame changes
+			// only and is not gated on armed(), so URL breakpoints on
+			// not-yet-seen scripts can bind while the debugger is idle.
+			if (g_sci->_inspector)
+				g_sci->_inspector->onScriptEntered(scr);
 		}
 
 		g_sci->checkAddressBreakpoint(s->xs->addr.pc);
@@ -615,6 +633,11 @@ void run_vm(EngineState *s) {
 		}
 		Console *con = g_sci->getSciDebugger();
 		con->onFrame();
+
+		// Remote script debugger: fires before the instruction executes,
+		// while xs->addr.pc still points at the instruction start.
+		if (g_sci->_inspector && Inspector::g_session && Inspector::g_session->armed())
+			g_sci->_inspector->onInstruction();
 
 		if (s->xs->sp < s->xs->fp)
 			error("run_vm(): stack underflow, sp: %04x:%04x, fp: %04x:%04x",

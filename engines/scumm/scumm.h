@@ -97,6 +97,7 @@ class MusicEngine;
 class Player_Towns;
 class ScummEngine;
 class ScummDebugger;
+class ScummInspectorAgent;
 class Sound;
 class Localizer;
 class GlyphRenderer_v7;
@@ -523,6 +524,7 @@ extern const char *const insaneKeymapId;
  */
 class ScummEngine : public Engine, public Common::Serializable {
 	friend class ScummDebugger;
+	friend class ScummInspectorAgent;
 	friend class CharsetRenderer;
 	friend class CharsetRendererClassic;
 	friend class CharsetRendererTownsClassic;
@@ -571,6 +573,12 @@ public:
 	bool _enableHECompetitiveOnlineMods = false;
 
 	Common::Keymap *_insaneKeymap;
+
+	/**
+	 * Script-inspector adapter (common/inspector); non-null only when
+	 * the user enabled the remote debugger (inspector_enable).
+	 */
+	ScummInspectorAgent *_inspector = nullptr;
 
 protected:
 	VirtualMachineState vm;

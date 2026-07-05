@@ -56,6 +56,7 @@ class SoundCommandParser;
 class EventManager;
 class SegManager;
 class ScriptPatcher;
+class SciInspectorAgent;
 class Sync;
 
 class GfxAnimate;
@@ -339,6 +340,12 @@ public:
 
 	DebugState _debugState;
 	uint32 _speedThrottleDelay; // kGameIsRestarting maximum delay
+
+	/**
+	 * Script-inspector adapter (common/inspector); non-null only when
+	 * the user enabled the remote debugger (inspector_enable).
+	 */
+	SciInspectorAgent *_inspector;
 
 	Common::MacResManager *getMacExecutable() { return &_macExecutable; }
 

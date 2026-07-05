@@ -237,6 +237,11 @@ private:
 
 extern void script_commands_init();
 extern void script_commands_free();
+// Read-only access to one entry of the script command table (mnemonic,
+// fixed argument count, which args name registers). Used by the script
+// inspector (ags/inspector-agent.h) to build static bytecode listings.
+// Returns false for out-of-range opcodes.
+extern bool script_commands_get_info(int code, const char *&name, int &arg_count, const bool *&arg_is_reg);
 
 } // namespace AGS3
 

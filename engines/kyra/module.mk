@@ -44,6 +44,7 @@ MODULE_OBJS := \
 	gui/saveload_lok.o \
 	gui/saveload_hof.o \
 	gui/saveload_mr.o \
+	inspector-agent.o \
 	metaengine.o \
 	resource/resource.o \
 	resource/resource_intern.o \

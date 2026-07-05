@@ -27,6 +27,7 @@
 #include "director/cast.h"
 #include "director/channel.h"
 #include "director/frame.h"
+#include "director/inspector-agent.h"
 #include "director/movie.h"
 #include "director/score.h"
 #include "director/types.h"
@@ -1359,6 +1360,9 @@ void Debugger::propWriteHook(const Common::String &name) {
 void Debugger::varReadHook(const Common::String &name) {
 	if (name.empty())
 		return;
+	// Remote script debugger watchpoints (GameScript.setWatchpoint).
+	if (g_director->_inspector)
+		g_director->_inspector->onVariableRead(name);
 	if (_bpCheckVarRead) {
 		for (auto &it : g_lingo->getBreakpoints()) {
 			if (it.type == kBreakpointVariable && it.varRead && it.varName.equalsIgnoreCase(name)) {
@@ -1376,6 +1380,9 @@ void Debugger::varReadHook(const Common::String &name) {
 void Debugger::varWriteHook(const Common::String &name) {
 	if (name.empty())
 		return;
+	// Remote script debugger watchpoints (GameScript.setWatchpoint).
+	if (g_director->_inspector)
+		g_director->_inspector->onVariableWrite(name);
 	if (_bpCheckVarWrite) {
 		for (auto &it : g_lingo->getBreakpoints()) {
 			if (it.type == kBreakpointVariable && it.varWrite && it.varName.equalsIgnoreCase(name)) {

@@ -72,6 +72,7 @@
 #include "ags/engine/script/script_runtime.h"
 #include "ags/events.h"
 #include "ags/globals.h"
+#include "ags/inspector-agent.h"
 
 namespace AGS3 {
 
@@ -786,6 +787,12 @@ void UpdateGameOnce(bool checkControls, IDriverDependantBitmap *extraBitmap, int
 	int res;
 
 	sys_evt_process_pending();
+
+	// Remote script inspector: apply queued debugger messages once per
+	// frame (this also runs during blocking waits, which call
+	// UpdateGameOnce() from their inner loops).
+	if (g_inspectorAgent)
+		g_inspectorAgent->transportTick();
 
 	_G(numEventsAtStartOfFunction) = _GP(events).size();
 

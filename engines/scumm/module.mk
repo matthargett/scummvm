@@ -41,6 +41,7 @@ MODULE_OBJS := \
 	imuse/drivers/macintosh.o \
 	imuse/drivers/pcspk.o \
 	input.o \
+	inspector-agent.o \
 	ks_check.o \
 	macgui/macgui.o \
 	macgui/macgui_dialogwindow.o \

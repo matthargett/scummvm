@@ -108,6 +108,13 @@ public:
 	uint32 getScriptSize() const { return _script.size(); }
 	uint32 getHeapSize() const { return _heap.size(); }
 	uint32 getBufSize() const { return _buf->size(); }
+
+	/**
+	 * Offset of the VM code block as recorded by identifyOffsets()
+	 * (SCI1.1+ layouts; stays 0 for SCI0/SCI1, whose code lives in
+	 * SCI_OBJ_CODE blocks). Used by the script inspector.
+	 */
+	uint32 getCodeBlockOffset() const { return (uint32)_codeOffset; }
 	inline uint32 getHeapOffset() const {
 		if (getSciVersion() >= SCI_VERSION_1_1 && getSciVersion() <= SCI_VERSION_2_1_LATE) {
 			return _script.size();

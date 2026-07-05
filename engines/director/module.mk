@@ -14,6 +14,7 @@ MODULE_OBJS = \
 	game-quirks.o \
 	graphics.o \
 	images.o \
+	inspector-agent.o \
 	metaengine.o \
 	movie.o \
 	picture.o \

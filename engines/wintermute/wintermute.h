@@ -33,6 +33,7 @@ class Console;
 class BaseGame;
 class SystemClassRegistry;
 class DebuggerController;
+class WintermuteInspectorAgent;
 
 const int INT_MAX_VALUE  = 0x7fffffff;
 const int INT_MIN_VALUE  = -INT_MAX_VALUE - 1;
@@ -73,6 +74,11 @@ private:
 	Wintermute::Console *_debugger;
 	BaseGame *_game;
 	Wintermute::DebuggerController *_dbgController;
+	/**
+	 * Script-inspector adapter (common/inspector); non-null only when
+	 * the user enabled the remote debugger (inspector_enable).
+	 */
+	WintermuteInspectorAgent *_inspector;
 	const WMEGameDescription *_gameDescription;
 	bool _savingEnabled{};
 
