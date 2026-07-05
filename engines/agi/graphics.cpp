@@ -159,7 +159,9 @@ void GfxMgr::initVideo() {
 		_upscaledHires = DISPLAY_UPSCALED_DISABLED;
 		_displayScreenWidth = 400;
 		_displayScreenHeight = 240;
-		_playdateGameWidth = (_vm->getGameType() == GType_PreAGI) ? 400 : 320;
+		// Start full width; parser games narrow to 320 for the picker
+		// once updateScreen() sees the parser is in use (see updateScreen).
+		_playdateGameWidth = 400;
 		_displayFontWidth = 10;
 		_displayFontHeight = 10;
 		_displayWidthMulAdjust = 0;
@@ -1414,11 +1416,22 @@ void GfxMgr::shakeScreen(int16 repeatCount) {
 
 void GfxMgr::updateScreen() {
 #ifdef PLAYDATE
-	if (_vm->_playdateMenu && _vm->_playdateMenu->isVisible()) {
-		_vm->_playdateMenu->draw();
-		// The picker draws into _displayScreen directly; push its
-		// column (everything right of the game area) to the backend.
-		if (_displayScreenWidth > _playdateGameWidth) {
+	if (_vm->_renderMode == Common::kRenderPlaydate && _vm->_playdateMenu) {
+		// The picker only claims screen space once the game is known to
+		// use the parser. Until then (menu/pointer games, and the title
+		// sequence of parser games) the game keeps the full width. When
+		// this flips, re-render the whole display at the new scale.
+		const uint16 wantWidth = _vm->_playdateMenu->isVisible() ? 320 : _displayScreenWidth;
+		if (wantWidth != _playdateGameWidth) {
+			_playdateGameWidth = wantWidth;
+			// _playdateMenu is only created by AgiEngine (parser games).
+			((AgiEngine *)_vm)->redrawScreen();
+		}
+
+		if (_vm->_playdateMenu->isVisible()) {
+			_vm->_playdateMenu->draw();
+			// The picker draws into _displayScreen directly; push its
+			// column (everything right of the game area) to the backend.
 			const int16 menuX = _playdateGameWidth;
 			const int16 menuWidth = _displayScreenWidth - _playdateGameWidth;
 			_vm->_system->copyRectToScreen(_displayScreen + menuX, _displayScreenWidth,

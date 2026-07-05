@@ -53,6 +53,14 @@ public:
 	void hide();
 	bool isVisible() const;
 
+	/**
+	 * True once the game has been seen to use the parser (any said()
+	 * test). Menu- and pointer-driven games (Donald Duck's Playground,
+	 * Mixed-Up Mother Goose, ...) never set this, so the picker stays
+	 * hidden and the game keeps the full width of the screen.
+	 */
+	bool isParserGame() const { return _parserGame; }
+
 	/** Clears the recorded room vocabulary. Called on room changes. */
 	void resetContextWords();
 
@@ -82,6 +90,7 @@ private:
 
 	AgiEngine *_vm;
 	bool _visible;
+	bool _parserGame; // sticky: set once any said() phrase is recorded
 
 	// Recorded room vocabulary. Each phrase is a said() word-group id
 	// sequence with the verb first; wildcard ids (anyword / rest-of-line)

@@ -339,8 +339,11 @@ bool AgiEngine::testSaid(uint8 nwords, uint8 *cc) {
 #ifdef PLAYDATE
 	// Record this room's said() phrases for the Playdate word picker.
 	// The phrase order (verb first, then nouns) is preserved so the
-	// picker can offer verb-scoped nouns.
-	if (_playdateMenu && cc && nwords) {
+	// picker can offer verb-scoped nouns. said() tests in logic 0 (the
+	// global logic that runs in every room) are skipped, so the picker
+	// shows room-specific verbs rather than global commands like the
+	// speed controls (fast/normal/slow) many games add there.
+	if (_playdateMenu && cc && nwords && _game.curLogicNr != 0) {
 		Common::Array<uint16> saidIds;
 		const uint8 *scan = cc;
 		for (uint i = 0; i < nwords; ++i)

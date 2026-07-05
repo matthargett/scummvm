@@ -28,7 +28,7 @@
 namespace Agi {
 
 PlaydateMenu::PlaydateMenu(AgiEngine *vm) :
-	_vm(vm), _visible(true), _mode(kModeVerb), _verbId(0),
+	_vm(vm), _visible(true), _parserGame(false), _mode(kModeVerb), _verbId(0),
 	_selectedIndex(0), _scrollOffset(0),
 	_marqueeStart(0), _marqueeDir(1), _marqueeNextMs(0) {
 }
@@ -45,7 +45,8 @@ void PlaydateMenu::hide() {
 }
 
 bool PlaydateMenu::isVisible() const {
-	return _visible;
+	// Only parser games show the picker (and reserve space for it).
+	return _visible && _parserGame;
 }
 
 void PlaydateMenu::resetContextWords() {
@@ -81,6 +82,10 @@ void PlaydateMenu::addSaidPhrase(const uint16 *ids, uint count) {
 	}
 
 	_phrases.push_back(phrase);
+
+	// Seeing any said() phrase proves this game uses the parser, so the
+	// picker becomes active for the rest of the session.
+	_parserGame = true;
 
 	// A newly seen verb should appear in the verb list right away.
 	if (_mode == kModeVerb)
