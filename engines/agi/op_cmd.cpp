@@ -21,7 +21,10 @@
 
 #include "base/version.h"
 
+#include "common/inspector/session.h"
+
 #include "agi/agi.h"
+#include "agi/inspector-agent.h"
 #include "agi/inv.h"
 #include "agi/sprite.h"
 #include "agi/text.h"
@@ -2431,6 +2434,12 @@ int AgiEngine::runLogic(int16 logicNr) {
 
 	_game._curLogic->cIP = _game._curLogic->sIP;
 
+	if (_inspector) {
+		_inspector->ensureLogicRegistered(logicNr);
+		if (logicNr == 0)
+			_inspector->transportTick();
+	}
+
 	while (state->_curLogic->cIP < _game.logics[logicNr].size && !(shouldQuit() || _restartGame)) {
 		processScummVMEvents();
 
@@ -2457,6 +2466,11 @@ int AgiEngine::runLogic(int16 logicNr) {
 		_instructionCounter++;
 
 		_game.execStack.back().curIP = state->_curLogic->cIP;
+
+		// Remote script debugger: cIP still points at the instruction
+		// about to be fetched, i.e. a statement start.
+		if (_inspector && Inspector::g_session && Inspector::g_session->armed())
+			_inspector->onInstruction();
 
 		char st[101];
 		int sz = MIN(_game.execStack.size(), 100u);

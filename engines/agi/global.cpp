@@ -24,6 +24,7 @@
 
 #include "agi/agi.h"
 #include "agi/graphics.h"
+#include "agi/inspector-agent.h"
 
 namespace Agi {
 
@@ -66,6 +67,9 @@ void AgiEngine::setVar(int16 varNr, byte newValue) {
 	byte oldValue = _game.vars[varNr];
 	_game.vars[varNr] = newValue;
 
+	if (_inspector)
+		_inspector->onVariableWrite(varNr, newValue);
+
 	switch (varNr) {
 	case VM_VAR_SECONDS:
 		setVarSecondsTrigger(newValue);
@@ -103,6 +107,10 @@ byte AgiEngine::getVar(int16 varNr) {
 	default:
 		break;
 	}
+
+	if (_inspector)
+		_inspector->onVariableRead(varNr, _game.vars[varNr]);
+
 	return _game.vars[varNr];
 }
 

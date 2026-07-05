@@ -543,6 +543,7 @@ struct AgiGame {
 };
 
 class AgiLoader;
+class AgiInspectorAgent;
 class GfxFont;
 class GfxMgr;
 class SpritesMgr;
@@ -972,6 +973,13 @@ private:
 
 public:
 	const AgiOpCodeEntry *getOpCodesTable() { return _opCodes; }
+	const AgiOpCodeEntry *getOpCodesCondTable() { return _opCodesCond; }
+
+	/**
+	 * Script-inspector adapter (common/inspector); non-null only when
+	 * the user enabled the remote debugger (inspector_enable).
+	 */
+	AgiInspectorAgent *_inspector;
 
 private:
 	void goldRushClockTimeWorkaround_OnReadVar();

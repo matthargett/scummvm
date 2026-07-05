@@ -38,6 +38,7 @@
 #include "audio/mididrv.h"
 
 #include "agi/agi.h"
+#include "agi/inspector-agent.h"
 #include "agi/detection.h"
 #include "agi/font.h"
 #include "agi/graphics.h"
@@ -416,6 +417,7 @@ AgiEngine::AgiEngine(OSystem *syst, const AGIGameDescription *gameDesc) : AgiBas
 	syncSoundSettings();
 
 	memset(&_debug, 0, sizeof(struct AgiDebug));
+	_inspector = nullptr;
 
 	_game.mouseEnabled = ConfMan.getBool("mousesupport");
 	_game.mouseHidden = !_game.mouseEnabled;
@@ -574,6 +576,14 @@ void AgiEngine::initialize() {
 		break;
 	}
 #endif
+
+	// Remote script debugger (only active with inspector_enable set).
+	_inspector = new AgiInspectorAgent(this);
+	_inspector->init();
+	if (!_inspector->active()) {
+		delete _inspector;
+		_inspector = nullptr;
+	}
 }
 
 bool AgiEngine::promptIsEnabled() {
@@ -591,6 +601,11 @@ void AgiEngine::redrawScreen() {
 }
 
 AgiEngine::~AgiEngine() {
+	if (_inspector) {
+		_inspector->shutdown();
+		delete _inspector;
+		_inspector = nullptr;
+	}
 	agiDeinit();
 	delete _loader;
 	if (_gfx) {
