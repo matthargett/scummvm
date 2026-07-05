@@ -506,6 +506,16 @@ MODULE_OBJS += \
 	graphics/openpandora/op-graphics.o
 endif
 
+ifeq ($(BACKEND),playdate)
+MODULE_OBJS += \
+	events/playdate/playdate-events.o \
+	fs/playdate/playdate-fs.o \
+	fs/playdate/playdate-fs-factory.o \
+	fs/playdate/playdate-stream.o \
+	graphics/playdate/playdate-graphics.o \
+	mixer/playdate/playdate-mixer.o
+endif
+
 ifeq ($(BACKEND),psp)
 MODULE_OBJS += \
 	fs/psp/psp-fs.o \

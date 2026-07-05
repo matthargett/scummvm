@@ -34,6 +34,7 @@ const RenderModeDescription g_renderModes[] = {
 	{ "hercGreen", _s("Hercules Green"), kRenderHercG },
 	// I18N: Hercules is a graphics card name, Amber is color
 	{ "hercAmber", _s("Hercules Amber"), kRenderHercA },
+	{ "playdate", "Playdate 1-bit", kRenderPlaydate },
 	{ "cga", "CGA", kRenderCGA },
 	// I18N: Composite is a video mode of RGB composite channels
 	{ "cgaComp", "CGA Composite", kRenderCGAComp },

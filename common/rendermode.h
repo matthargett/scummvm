@@ -68,7 +68,8 @@ enum RenderMode {
 	kRenderVGAGrey = 19,
 	kRenderPC98_8c = 20,
 	kRenderWin256c = 21,
-	kRenderWin16c = 22
+	kRenderWin16c = 22,
+	kRenderPlaydate = 23
 };
 
 struct RenderModeDescription {

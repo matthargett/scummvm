@@ -22,17 +22,17 @@
 #ifndef AGI_AGI_H
 #define AGI_AGI_H
 
-#include "common/scummsys.h"
 #include "common/error.h"
-#include "common/util.h"
 #include "common/file.h"
 #include "common/keyboard.h"
+#include "common/md5.h"
 #include "common/rect.h"
 #include "common/rendermode.h"
+#include "common/scummsys.h"
 #include "common/stack.h"
-#include "common/str.h"
 #include "common/system.h"
 #include "common/text-to-speech.h"
+#include "common/util.h"
 
 #include "engines/engine.h"
 
@@ -40,10 +40,10 @@
 
 // AGI resources
 #include "agi/console.h"
-#include "agi/view.h"
-#include "agi/picture.h"
 #include "agi/logic.h"
+#include "agi/picture.h"
 #include "agi/sound.h"
+#include "agi/view.h"
 
 namespace Common {
 class RandomSource;
@@ -63,48 +63,48 @@ class RandomSource;
  */
 namespace Agi {
 
-#define TITLE       "AGI engine"
+#define TITLE "AGI engine"
 
-#define DIR_        "dir"
-#define LOGDIR      "logdir"
-#define PICDIR      "picdir"
-#define VIEWDIR     "viewdir"
-#define SNDDIR      "snddir"
-#define OBJECTS     "object"
-#define WORDS       "words.tok"
+#define DIR_ "dir"
+#define LOGDIR "logdir"
+#define PICDIR "picdir"
+#define VIEWDIR "viewdir"
+#define SNDDIR "snddir"
+#define OBJECTS "object"
+#define WORDS "words.tok"
 
-#define MAX_DIRECTORY_ENTRIES      256
-#define MAX_CONTROLLERS            256
-#define MAX_VARS                   256
-#define MAX_FLAGS                  (256 >> 3)
-#define SCREENOBJECTS_MAX          255        // KQ3 uses o255!
-#define SCREENOBJECTS_EGO_ENTRY    0          // first entry is ego
-#define MAX_WORDS                  20
-#define MAX_STRINGS                24         // MAX_STRINGS + 1 used for get.num
-#define MAX_STRINGLEN              40
+#define MAX_DIRECTORY_ENTRIES 256
+#define MAX_CONTROLLERS 256
+#define MAX_VARS 256
+#define MAX_FLAGS (256 >> 3)
+#define SCREENOBJECTS_MAX 255     // KQ3 uses o255!
+#define SCREENOBJECTS_EGO_ENTRY 0 // first entry is ego
+#define MAX_WORDS 20
+#define MAX_STRINGS 24 // MAX_STRINGS + 1 used for get.num
+#define MAX_STRINGLEN 40
 #define MAX_CONTROLLER_KEYMAPPINGS 39
 
 #define SAVEDGAME_DESCRIPTION_LEN 30
 
-#define _EMPTY       0xfffff
-#define EGO_OWNED    0xff
+#define _EMPTY 0xfffff
+#define EGO_OWNED 0xff
 #define EGO_OWNED_V1 0xf9
 
-#define CRYPT_KEY_SIERRA    "Avis Durgan"
-#define CRYPT_KEY_AGDS      "Alex Simkin"
+#define CRYPT_KEY_SIERRA "Avis Durgan"
+#define CRYPT_KEY_AGDS "Alex Simkin"
 
-#define ADD_PIC  1
+#define ADD_PIC 1
 #define ADD_VIEW 2
 
 #define CMD_BSIZE 12
 
 enum AgiGameType {
 	GType_PreAGI = 0,
-	GType_V1     = 1,
-	GType_V2     = 2,
-	GType_V3     = 3,
-	GType_A2     = 4,
-	GType_GAL    = 5
+	GType_V1 = 1,
+	GType_V2 = 2,
+	GType_V3 = 3,
+	GType_A2 = 4,
+	GType_GAL = 5
 };
 
 enum AgiGameFeatures {
@@ -119,14 +119,14 @@ enum AgiGameID {
 	GID_AGIDEMO,
 	GID_BC,
 	GID_DDP,
-	GID_GOLDRUSH,	// V3
+	GID_GOLDRUSH, // V3
 	GID_KQ1,
 	GID_KQ2,
 	GID_KQ3,
 	GID_KQ4,
 	GID_LSL1,
-	GID_MH1,		// V3
-	GID_MH2,		// V3
+	GID_MH1, // V3
+	GID_MH2, // V3
 	GID_MIXEDUP,
 	GID_PQ1,
 	GID_SQ1,
@@ -175,10 +175,10 @@ enum {
 };
 
 enum {
-	RES_LOADED                 = 0x01,
-	RES_COMPRESSED             = 0x40,
-	RES_PICTURE_V3_NIBBLE_PARM = 0x80  // Flag that gets set for picture resources,
-	                                   // which use a nibble instead of a byte as F0+F2 parameters
+	RES_LOADED = 0x01,
+	RES_COMPRESSED = 0x40,
+	RES_PICTURE_V3_NIBBLE_PARM = 0x80 // Flag that gets set for picture resources,
+									  // which use a nibble instead of a byte as F0+F2 parameters
 };
 
 enum {
@@ -251,10 +251,10 @@ enum {
  */
 enum AgiMonitorType {
 	kAgiMonitorCga = 0,
-	//kAgiMonitorTandy = 1, // Not sure about this
+	// kAgiMonitorTandy = 1, // Not sure about this
 	kAgiMonitorHercules = 2,
 	kAgiMonitorEga = 3
-	//kAgiMonitorVga = 4 // Not sure about this
+	// kAgiMonitorVga = 4 // Not sure about this
 };
 
 /**
@@ -279,28 +279,28 @@ enum AgiSoundType {
  * AGI flags
  */
 enum {
-	VM_FLAG_EGO_WATER = 0,  // 0
+	VM_FLAG_EGO_WATER = 0, // 0
 	VM_FLAG_EGO_INVISIBLE,
 	VM_FLAG_ENTERED_CLI,
 	VM_FLAG_EGO_TOUCHED_P2,
 	VM_FLAG_SAID_ACCEPTED_INPUT,
-	VM_FLAG_NEW_ROOM_EXEC,  // 5
+	VM_FLAG_NEW_ROOM_EXEC, // 5
 	VM_FLAG_RESTART_GAME,
 	VM_FLAG_SCRIPT_BLOCKED,
 	VM_FLAG_JOY_SENSITIVITY,
 	VM_FLAG_SOUND_ON,
-	VM_FLAG_DEBUGGER_ON,        // 10
+	VM_FLAG_DEBUGGER_ON, // 10
 	VM_FLAG_LOGIC_ZERO_FIRST_TIME,
 	VM_FLAG_RESTORE_JUST_RAN,
 	VM_FLAG_STATUS_SELECTS_ITEMS,
 	VM_FLAG_MENUS_ACCESSIBLE,
-	VM_FLAG_OUTPUT_MODE,        // 15
+	VM_FLAG_OUTPUT_MODE, // 15
 	VM_FLAG_AUTO_RESTART
 };
 
 struct AgiControllerKeyMapping {
 	uint16 keycode;
-	byte   controllerSlot;
+	byte controllerSlot;
 
 	AgiControllerKeyMapping() : keycode(0), controllerSlot(0) {}
 };
@@ -373,23 +373,23 @@ struct AgiGame {
 
 	// TODO: Check whether adjMouseX and adjMouseY must be saved and loaded when using savegames.
 	//       If they must be then loading and saving is partially broken at the moment.
-	int adjMouseX;  /**< last given adj.ego.move.to.x.y-command's 1st parameter */
-	int adjMouseY;  /**< last given adj.ego.move.to.x.y-command's 2nd parameter */
+	int adjMouseX; /**< last given adj.ego.move.to.x.y-command's 1st parameter */
+	int adjMouseY; /**< last given adj.ego.move.to.x.y-command's 2nd parameter */
 
-	char id[8];     /**< game id */
-	uint32 crc;     /**< game CRC */
+	char id[8]; /**< game id */
+	uint32 crc; /**< game CRC */
 
 	// game flags and variables
 	uint8 flags[MAX_FLAGS]; /**< 256 1-bit flags combined into a total of 32 bytes */
 	uint8 vars[MAX_VARS];   /**< 256 variables */
 
 	// internal variables
-	int16 horizon;          /**< horizon y coordinate */
+	int16 horizon; /**< horizon y coordinate */
 
-	bool  cycleInnerLoopActive;
+	bool cycleInnerLoopActive;
 	int16 cycleInnerLoopType;
 
-	int16 curLogicNr;               /**< current logic number */
+	int16 curLogicNr; /**< current logic number */
 	Common::Array<ScriptPos> execStack;
 
 	// internal flags
@@ -405,7 +405,7 @@ struct AgiGame {
 
 	unsigned int numObjects;
 
-	bool controllerOccurred[MAX_CONTROLLERS];  /**< keyboard keypress events */
+	bool controllerOccurred[MAX_CONTROLLERS]; /**< keyboard keypress events */
 	AgiControllerKeyMapping controllerKeyMapping[MAX_CONTROLLER_KEYMAPPINGS];
 
 	char strings[MAX_STRINGS + 1][MAX_STRINGLEN]; /**< strings */
@@ -429,7 +429,7 @@ struct AgiGame {
 
 	ScreenObjEntry addToPicView;
 
-	bool automaticSave;             /**< set by CmdSetSimple() */
+	bool automaticSave; /**< set by CmdSetSimple() */
 	char automaticSaveDescription[SAVEDGAME_DESCRIPTION_LEN + 1];
 
 	Common::Rect mouseFence;        /**< rectangle set by fence.mouse command */
@@ -538,17 +538,22 @@ struct AgiGame {
 
 		speedLevel = 2; // normal speed
 
-		appleIIgsSpeedControllerSlot = 0xffff;	// we didn't add yet speed menu
+		appleIIgsSpeedControllerSlot = 0xffff; // we didn't add yet speed menu
 	}
 };
 
+class AgiEngine;
 class AgiLoader;
 class GfxFont;
 class GfxMgr;
+class SoundMgr;
 class SpritesMgr;
 class InventoryMgr;
 class TextMgr;
 class GfxMenu;
+#ifdef PLAYDATE
+class PlaydateMenu;
+#endif
 class SystemUI;
 class Words;
 struct AGIGameDescription;
@@ -592,7 +597,7 @@ public:
 	Words *_words;
 
 	GfxFont *_font;
-	GfxMgr  *_gfx;
+	GfxMgr *_gfx;
 
 	Common::RenderMode _renderMode;
 	AgiDebug _debug;
@@ -604,6 +609,12 @@ public:
 	Mouse _mouse;
 
 	bool _noSaveLoadAllowed;
+
+#ifdef PLAYDATE
+	// Owned by AgiEngine (created in agiInit), but declared here so the
+	// graphics manager, which only knows AgiBase, can draw the picker.
+	PlaydateMenu *_playdateMenu;
+#endif
 
 	virtual bool promptIsEnabled() {
 		return false;
@@ -618,9 +629,9 @@ public:
 
 	virtual void clearImageStack() = 0;
 	virtual void recordImageStackCall(uint8 type, int16 p1, int16 p2, int16 p3,
-	                                  int16 p4, int16 p5, int16 p6, int16 p7) = 0;
+									  int16 p4, int16 p5, int16 p6, int16 p7) = 0;
 	virtual void replayImageStackCall(uint8 type, int16 p1, int16 p2, int16 p3,
-	                                  int16 p4, int16 p5, int16 p6, int16 p7) = 0;
+									  int16 p4, int16 p5, int16 p6, int16 p7) = 0;
 	virtual void releaseImageStack() = 0;
 
 	int _soundemu;
@@ -687,7 +698,7 @@ struct AgiOpCodeEntry {
 	const char *name;
 	const char *parameters;
 	AgiOpCodeFunction functionPtr;
-	uint16     parameterSize;
+	uint16 parameterSize;
 };
 
 struct AgiOpCodeDefinitionEntry {
@@ -697,6 +708,8 @@ struct AgiOpCodeDefinitionEntry {
 };
 
 class AgiEngine : public AgiBase {
+	friend class PlaydateMenu;
+
 protected:
 	// Engine APIs
 	Common::Error go() override;
@@ -726,7 +739,7 @@ private:
 	int _firstSlot;
 
 public:
-	Common::Array<AgiObject> _objects;    // objects in the game
+	Common::Array<AgiObject> _objects; // objects in the game
 
 	SavedGameSlotIdArray getSavegameSlotIds();
 	bool getSavegameInformation(int16 slotId, Common::String &saveDescription, uint32 &saveDate, uint32 &saveTime, bool &saveIsValid);
@@ -767,9 +780,9 @@ public:
 
 	void clearImageStack() override;
 	void recordImageStackCall(uint8 type, int16 p1, int16 p2, int16 p3,
-	                          int16 p4, int16 p5, int16 p6, int16 p7) override;
+							  int16 p4, int16 p5, int16 p6, int16 p7) override;
 	void replayImageStackCall(uint8 type, int16 p1, int16 p2, int16 p3,
-	                          int16 p4, int16 p5, int16 p6, int16 p7) override;
+							  int16 p4, int16 p5, int16 p6, int16 p7) override;
 	void releaseImageStack() override;
 
 	void wait(uint32 msec, bool busy = false);
@@ -797,7 +810,7 @@ public:
 	void syncSoundSettings() override;
 
 #ifdef USE_TTS
-	void sayText(const Common::String &text, Common::TextToSpeechManager::Action action = Common::TextToSpeechManager::QUEUE, 
+	void sayText(const Common::String &text, Common::TextToSpeechManager::Action action = Common::TextToSpeechManager::QUEUE,
 				 bool checkPreviousSaid = true);
 	void stopTextToSpeech(bool clearPreviousSaid = true);
 #endif
@@ -828,6 +841,7 @@ public:
 	const char *objectName(uint16 objectNr);
 	int objectGetLocation(uint16 objectNr);
 	void objectSetLocation(uint16 objectNr, int location);
+
 private:
 	int decodeObjects(uint8 *mem, uint32 flen);
 
@@ -842,14 +856,14 @@ public:
 
 private:
 	bool _veryFirstInitialCycle; /**< signals, that currently the very first cycle is executed (restarts, etc. do not count!) */
-	uint32 _instructionCounter; /**< counts every instruction, that got executed, can wrap around */
+	uint32 _instructionCounter;  /**< counts every instruction, that got executed, can wrap around */
 
 	bool _setVolumeBrokenFangame;
 
 	void resetGetVarSecondsHeuristic();
 	void getVarSecondsHeuristicTrigger();
 	uint32 _getVarSecondsHeuristicLastInstructionCounter; /**< last time VM_VAR_SECONDS were read */
-	uint16 _getVarSecondsHeuristicCounter; /**< how many times heuristic was triggered */
+	uint16 _getVarSecondsHeuristicCounter;                /**< how many times heuristic was triggered */
 
 	uint32 _playTimeInSecondsAdjust; /**< milliseconds to adjust for calculating current play time in seconds, see setVarSecondsTrigger() */
 
@@ -960,9 +974,9 @@ public:
 	void inGameTimerUpdate();
 
 private:
-	uint32 _lastUsedPlayTimeInCycles; // 40 per second
+	uint32 _lastUsedPlayTimeInCycles;  // 40 per second
 	uint32 _lastUsedPlayTimeInSeconds; // actual seconds
-	uint32 _passedPlayTimeCycles; // increased by 1 every time we passed a cycle
+	uint32 _passedPlayTimeCycles;      // increased by 1 every time we passed a cycle
 
 private:
 	AgiOpCodeEntry _opCodes[256]; // always keep those at 256, so that there is no way for invalid memory access

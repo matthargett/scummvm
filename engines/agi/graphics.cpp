@@ -28,10 +28,12 @@
 #include "graphics/paletteman.h"
 
 #include "agi/agi.h"
+#include "agi/font.h"
 #include "agi/graphics.h"
 #include "agi/mouse_cursor.h"
 #include "agi/palette.h"
 #include "agi/picture.h"
+#include "agi/playdate_menu.h"
 #include "agi/text.h"
 
 namespace Agi {
@@ -59,7 +61,7 @@ GfxMgr::GfxMgr(AgiBase *vm, GfxFont *font) : _vm(vm), _font(font) {
 	_displayFontWidth = 8;
 	_displayFontHeight = 8;
 
-	_displayWidthMulAdjust = 0; // visualPos * (2+0) = displayPos
+	_displayWidthMulAdjust = 0;  // visualPos * (2+0) = displayPos
 	_displayHeightMulAdjust = 0; // visualPos * (1+0) = displayPos
 
 	_pixels = 0;
@@ -146,12 +148,27 @@ void GfxMgr::initVideo() {
 			break;
 		}
 		break;
+	case Common::kRenderPlaydate:
+		// Playdate: 400x240 display, native patterns at full resolution
+		// Scale: 160 AGI → 400 display (2.5x), 200 visual → 240 display (1.2x)
+		// Font: 10x10 grid for text positioning (40 columns × 10 = 400, ~24 rows × 10 = 240)
+		// Actual font is 8x8 pixels, with 2px horizontal spacing between characters
+		initPalette(_paletteGfxMode, PALETTE_HERCULES_GREEN, 2, 8);
+		_upscaledHires = DISPLAY_UPSCALED_DISABLED;
+		_displayScreenWidth = 400;
+		_displayScreenHeight = 240;
+		_displayFontWidth = 10;   // 40 columns × 10 = 400
+		_displayFontHeight = 10;  // ~24 rows × 10 = 240
+		_displayWidthMulAdjust = 0;
+		_displayHeightMulAdjust = 0;
+		break;
 	default:
 		error("initVideo: unsupported render mode: %d", _vm->_renderMode);
 		break;
 	}
 
-	if (_font->isFontHires() || forceHires) {
+	// Playdate uses its own fixed resolution, skip hires upscaling
+	if (_vm->_renderMode != Common::kRenderPlaydate && (_font->isFontHires() || forceHires)) {
 		// Upscaling enable
 		_upscaledHires = DISPLAY_UPSCALED_640x400;
 		_displayScreenWidth = 640;
@@ -191,6 +208,11 @@ void GfxMgr::initVideo() {
 		// TODO: Verify by checking actual hardware
 		initMouseCursor(&_mouseCursor, MOUSECURSOR_ATARI_ST, 11, 16, 0, 0);
 		initMouseCursor(&_mouseCursorBusy, MOUSECURSOR_MACINTOSH_BUSY, 10, 14, 7, 8);
+		break;
+	case Common::kRenderPlaydate:
+		// Use standard cursor for now, maybe invert colors later
+		initMouseCursor(&_mouseCursor, MOUSECURSOR_SCI, 11, 16, 0, 0);
+		initMouseCursor(&_mouseCursorBusy, MOUSECURSOR_SCI_BUSY, 15, 16, 7, 8);
 		break;
 	default:
 		error("initVideo: unsupported render mode: %d", _vm->_renderMode);
@@ -233,7 +255,12 @@ void GfxMgr::setRenderStartOffset(uint16 offsetY) {
 		error("invalid render start offset");
 
 	_renderStartVisualOffsetY = offsetY;
-	_renderStartDisplayOffsetY = offsetY * (1 + _displayHeightMulAdjust);
+	if (_vm->_renderMode == Common::kRenderPlaydate) {
+		// Playdate: scale offset by 1.2x (240/200)
+		_renderStartDisplayOffsetY = (offsetY * 240) / 200;
+	} else {
+		_renderStartDisplayOffsetY = offsetY * (1 + _displayHeightMulAdjust);
+	}
 }
 
 uint16 GfxMgr::getRenderStartDisplayOffsetY() const {
@@ -243,26 +270,44 @@ uint16 GfxMgr::getRenderStartDisplayOffsetY() const {
 // Translates a game screen coordinate to a display screen coordinate
 // Game screen to 320x200 -> x * 2, y + renderStart
 // Game screen to 640x400 -> x * 4, (y * 2) + renderStart
+// Game screen to 400x240 (Playdate) -> x * 2.5, y * 1.2 + renderStart
 void GfxMgr::translateGamePosToDisplayScreen(int16 &x, int16 &y) const {
-	x = x * (2 + _displayWidthMulAdjust);
-	y = y * (1 + _displayHeightMulAdjust) + _renderStartDisplayOffsetY;
+	if (_vm->_renderMode == Common::kRenderPlaydate) {
+		x = (x * 320) / 160;
+		y = ((y + _renderStartVisualOffsetY) * 240) / 200;
+	} else {
+		x = x * (2 + _displayWidthMulAdjust);
+		y = y * (1 + _displayHeightMulAdjust) + _renderStartDisplayOffsetY;
+	}
 }
 
 // Translates a visual coordinate to a display screen coordinate
 // Visual to 320x200 -> x * 2, y
 // Visual to 640x400 -> x * 4, y * 2
+// Visual to 400x240 (Playdate) -> x * 2.5, y * 1.2
 void GfxMgr::translateVisualPosToDisplayScreen(int16 &x, int16 &y) const {
-	x = x * (2 + _displayWidthMulAdjust);
-	y = y * (1 + _displayHeightMulAdjust);
+	if (_vm->_renderMode == Common::kRenderPlaydate) {
+		x = (x * 320) / 160;
+		y = (y * 240) / 200;
+	} else {
+		x = x * (2 + _displayWidthMulAdjust);
+		y = y * (1 + _displayHeightMulAdjust);
+	}
 }
 
 // Translates a display screen coordinate to a game screen coordinate
 // Display screen to 320x200 -> x / 2, y - renderStart
 // Display screen to 640x400 -> x / 4, (y / 2) - renderStart
+// Display screen to 400x240 (Playdate) -> x / 2.5, y / 1.2 - renderStart
 void GfxMgr::translateDisplayPosToGameScreen(int16 &x, int16 &y) const {
-	y -= _renderStartDisplayOffsetY; // remove status bar line
-	x = x / (2 + _displayWidthMulAdjust);
-	y = y / (1 + _displayHeightMulAdjust);
+	if (_vm->_renderMode == Common::kRenderPlaydate) {
+		x = (x * 160) / 320;
+		y = (y * 200) / 240 - _renderStartVisualOffsetY;
+	} else {
+		y -= _renderStartDisplayOffsetY; // remove status bar line
+		x = x / (2 + _displayWidthMulAdjust);
+		y = y / (1 + _displayHeightMulAdjust);
+	}
 	if (y < 0)
 		y = 0;
 	if (y >= SCRIPT_HEIGHT)
@@ -271,14 +316,25 @@ void GfxMgr::translateDisplayPosToGameScreen(int16 &x, int16 &y) const {
 
 // Translates dimension from visual screen to display screen
 void GfxMgr::translateVisualDimensionToDisplayScreen(int16 &width, int16 &height) const {
-	width = width * (2 + _displayWidthMulAdjust);
-	height = height * (1 + _displayHeightMulAdjust);
+	if (_vm->_renderMode == Common::kRenderPlaydate) {
+		// Use ceiling division to ensure full coverage
+		width = (width * 320 + 159) / 160;
+		height = (height * 240 + 199) / 200;
+	} else {
+		width = width * (2 + _displayWidthMulAdjust);
+		height = height * (1 + _displayHeightMulAdjust);
+	}
 }
 
 // Translates dimension from display screen to visual screen
 void GfxMgr::translateDisplayDimensionToVisualScreen(int16 &width, int16 &height) const {
-	width = width / (2 + _displayWidthMulAdjust);
-	height = height / (1 + _displayHeightMulAdjust);
+	if (_vm->_renderMode == Common::kRenderPlaydate) {
+		width = (width * 160) / 320;
+		height = (height * 200) / 240;
+	} else {
+		width = width / (2 + _displayWidthMulAdjust);
+		height = height / (1 + _displayHeightMulAdjust);
+	}
 }
 
 // Translates a rect from game screen to display screen
@@ -309,8 +365,8 @@ void GfxMgr::copyDisplayRectToScreen(int16 x, int16 y, int16 width, int16 height
 	// FIXME: Add warnings / debug of clamping?
 	width = CLIP<int16>(width, 0, _displayScreenWidth);
 	height = CLIP<int16>(height, 0, _displayScreenHeight);
-	x = CLIP<int16>(x, 0, _displayScreenWidth-width);
-	y = CLIP<int16>(y, 0, _displayScreenHeight-height);
+	x = CLIP<int16>(x, 0, _displayScreenWidth - width);
+	y = CLIP<int16>(y, 0, _displayScreenHeight - height);
 
 	_vm->_system->copyRectToScreen(_displayScreen + y * _displayScreenWidth + x, _displayScreenWidth, x, y, width, height);
 }
@@ -320,15 +376,19 @@ void GfxMgr::copyDisplayRectToScreen(int16 x, int16 adjX, int16 y, int16 adjY, i
 	case DISPLAY_UPSCALED_DISABLED:
 		break;
 	case DISPLAY_UPSCALED_640x400:
-		adjX *= 2; adjY *= 2;
-		adjWidth *= 2; adjHeight *= 2;
+		adjX *= 2;
+		adjY *= 2;
+		adjWidth *= 2;
+		adjHeight *= 2;
 		break;
 	default:
 		assert(0);
 		break;
 	}
-	x += adjX; y += adjY;
-	width += adjWidth; height += adjHeight;
+	x += adjX;
+	y += adjY;
+	width += adjWidth;
+	height += adjHeight;
 	_vm->_system->copyRectToScreen(_displayScreen + y * _displayScreenWidth + x, _displayScreenWidth, x, y, width, height);
 }
 
@@ -343,12 +403,29 @@ void GfxMgr::copyDisplayRectToScreenUsingVisualPos(int16 x, int16 y, int16 width
 }
 
 void GfxMgr::copyDisplayToScreen() {
+	// Debug: dump first row before blit to backend
+	static int copyLogCount = 0;
+	if (copyLogCount < 3) {
+		Common::String rowDump = "copyDisplay row0:";
+		for (int i = 0; i < 16 && i < _displayScreenWidth; ++i)
+			rowDump += Common::String::format(" %d", _displayScreen[i]);
+		warning("%s", rowDump.c_str());
+		++copyLogCount;
+	}
+
 	_vm->_system->copyRectToScreen(_displayScreen, _displayScreenWidth, 0, 0, _displayScreenWidth, _displayScreenHeight);
 }
 
 void GfxMgr::translateFontPosToDisplayScreen(int16 &x, int16 &y) const {
-	x *= _displayFontWidth;
-	y *= _displayFontHeight;
+	if (_vm->_renderMode == Common::kRenderPlaydate) {
+		// Playdate: scale font positions using the same ratios as visual coords
+		// This keeps text aligned with dialog boxes which use visual coordinates
+		x = (x * FONT_VISUAL_WIDTH * 320) / 160;   // col * 4 * 2.5 = col * 10
+		y = (y * FONT_VISUAL_HEIGHT * 240) / 200;  // row * 8 * 1.2 = row * 9.6
+	} else {
+		x *= _displayFontWidth;
+		y *= _displayFontHeight;
+	}
 }
 
 void GfxMgr::translateDisplayPosToFontScreen(int16 &x, int16 &y) const {
@@ -357,8 +434,14 @@ void GfxMgr::translateDisplayPosToFontScreen(int16 &x, int16 &y) const {
 }
 
 void GfxMgr::translateFontDimensionToDisplayScreen(int16 &width, int16 &height) const {
-	width *= _displayFontWidth;
-	height *= _displayFontHeight;
+	if (_vm->_renderMode == Common::kRenderPlaydate) {
+		// Playdate: use ceiling division for dimensions to ensure full coverage
+		width = (width * FONT_VISUAL_WIDTH * 320 + 159) / 160;
+		height = (height * FONT_VISUAL_HEIGHT * 240 + 199) / 200;
+	} else {
+		width *= _displayFontWidth;
+		height *= _displayFontHeight;
+	}
 }
 
 void GfxMgr::translateFontRectToDisplayScreen(int16 &x, int16 &y, int16 &width, int16 &height) const {
@@ -455,7 +538,8 @@ void GfxMgr::putPixelOnDisplay(int16 x, int16 adjX, int16 y, int16 adjY, byte co
 	case DISPLAY_UPSCALED_DISABLED:
 		break;
 	case DISPLAY_UPSCALED_640x400:
-		adjX *= 2; adjY *= 2;
+		adjX *= 2;
+		adjY *= 2;
 		break;
 	default:
 		assert(0);
@@ -533,13 +617,12 @@ bool GfxMgr::checkControlPixel(int16 x, int16 y, byte viewPriority) const {
 	}
 	if (curPriority <= viewPriority)
 		return true; // view priority is higher, draw
-	return false; // view priority is lower, don't draw
+	return false;    // view priority is lower, don't draw
 }
 
 static const byte CGA_MixtureColorTable[] = {
 	0x00, 0x08, 0x04, 0x0C, 0x01, 0x09, 0x02, 0x05,
-	0x0A, 0x0D, 0x06, 0x0E, 0x0B, 0x03, 0x07, 0x0F
-};
+	0x0A, 0x0D, 0x06, 0x0E, 0x0B, 0x03, 0x07, 0x0F};
 
 byte GfxMgr::getCGAMixtureColor(byte color) const {
 	return CGA_MixtureColorTable[color & 0x0F];
@@ -562,6 +645,19 @@ void GfxMgr::render_Block(int16 x, int16 y, int16 width, int16 height, bool copy
 	case Common::kRenderHercA:
 		render_BlockHercules(x, y, width, height);
 		break;
+	case Common::kRenderPlaydate:
+		render_BlockPlaydate(x, y, width, height);
+		if (copyToScreen) {
+			// For Playdate, compute display rect exactly as render_BlockPlaydate does
+			// to ensure the copy matches the rendered area precisely
+			const int displayX = (x * 320) / 160;
+			const int displayY = ((y + _renderStartVisualOffsetY) * 240) / 200;
+			const int displayW = ((x + width) * 320 + 159) / 160 - displayX;
+			const int displayH = ((y + _renderStartVisualOffsetY + height) * 240 + 199) / 200 - displayY;
+			_vm->_system->copyRectToScreen(_displayScreen + displayY * _displayScreenWidth + displayX,
+				_displayScreenWidth, displayX, displayY, displayW, displayH);
+		}
+		return;  // Early return for Playdate since we handled copy above
 	case Common::kRenderCGA:
 		render_BlockCGA(x, y, width, height);
 		break;
@@ -582,7 +678,7 @@ void GfxMgr::render_Block(int16 x, int16 y, int16 width, int16 height, bool copy
 // coordinates so that the entire drawing operation can be rejected?
 bool GfxMgr::render_Clip(int16 &x, int16 &y, int16 &width, int16 &height, const int16 minY, const int16 clipAgainstWidth, const int16 clipAgainstHeight) {
 	if ((x >= clipAgainstWidth) || ((x + width - 1) < 0) ||
-	        (y < minY) || ((y + (height - 1)) >= clipAgainstHeight)) {
+		(y < minY) || ((y + (height - 1)) >= clipAgainstHeight)) {
 		return false;
 	}
 
@@ -737,8 +833,7 @@ static const uint8 herculesColorMapping[] = {
 	0xAA, 0xFF, 0xAA, 0xFF, 0xAA, 0xFF, 0xAA, 0xFF,
 	0x77, 0xBB, 0xDD, 0xEE, 0x77, 0xBB, 0xDD, 0xEE,
 	0x77, 0xFF, 0xFF, 0xFF, 0xDD, 0xFF, 0xFF, 0xFF,
-	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
-};
+	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
 // Sierra actually seems to have rendered the whole screen all the time
 void GfxMgr::render_BlockHercules(int16 x, int16 y, int16 width, int16 height) {
@@ -752,9 +847,9 @@ void GfxMgr::render_BlockHercules(int16 x, int16 y, int16 width, int16 height) {
 
 	uint16 lookupOffset1 = (y * 2 & 0x07);
 	uint16 lookupOffset2 = 0;
-	bool   getUpperNibble = false;
-	byte   herculesColors1 = 0;
-	byte   herculesColors2 = 0;
+	bool getUpperNibble = false;
+	byte herculesColors1 = 0;
+	byte herculesColors2 = 0;
 
 	while (remainingHeight) {
 		int16 remainingWidth = width;
@@ -797,6 +892,22 @@ void GfxMgr::render_BlockHercules(int16 x, int16 y, int16 width, int16 height) {
 
 		remainingHeight--;
 	}
+
+	// Debug: dump first few bytes to see if Hercules render produced pixels
+	static int hercLogCount = 0;
+	if (hercLogCount < 3) {
+		Common::String dump = Common::String::format("Herc render y=%d h=%d w=%d dispW=%d", y, height, width, _displayScreenWidth);
+		warning("%s", dump.c_str());
+		const uint32 screenSize = _displayScreenWidth * _displayScreenHeight;
+		for (int sampleY = y; sampleY < y + 2 && sampleY < _displayScreenHeight; ++sampleY) {
+			Common::String rowDump = Common::String::format("HercRow %d:", sampleY);
+			uint32 base = getDisplayOffsetToGameScreenPos(x, sampleY);
+			for (int i = 0; i < 16 && (base + i) < screenSize; ++i)
+				rowDump += Common::String::format(" %d", _displayScreen[base + i]);
+			warning("%s", rowDump.c_str());
+		}
+		++hercLogCount;
+	}
 }
 
 // Table used for at least Manhunter 2, it renders 2 lines -> 3 lines instead of 4
@@ -823,8 +934,8 @@ static const uint8 herculesColorMapping[] = {
 void GfxMgr::transition_Amiga() {
 	uint16 screenPos = 1;
 	uint32 screenStepPos = 1;
-	int16  posY = 0, posX = 0;
-	int16  stepCount = 0;
+	int16 posY = 0, posX = 0;
+	int16 stepCount = 0;
 
 	// disable mouse while transition is taking place
 	if ((_vm->_game.mouseEnabled) && (!_vm->_game.mouseHidden)) {
@@ -890,8 +1001,8 @@ void GfxMgr::transition_Amiga() {
 void GfxMgr::transition_AtariSt() {
 	uint16 screenPos = 1;
 	uint32 screenStepPos = 1;
-	int16  posY = 0, posX = 0;
-	int16  stepCount = 0;
+	int16 posY = 0, posX = 0;
+	int16 stepCount = 0;
 
 	// disable mouse while transition is taking place
 	if ((_vm->_game.mouseEnabled) && (!_vm->_game.mouseHidden)) {
@@ -921,7 +1032,8 @@ void GfxMgr::transition_AtariSt() {
 				}
 				break;
 			case DISPLAY_UPSCALED_640x400:
-				posX *= 2; posY *= 2;
+				posX *= 2;
+				posY *= 2;
 				posY += _renderStartDisplayOffsetY; // adjust to only update the main area, not the status bar
 				for (int16 multiPixel = 0; multiPixel < 8; multiPixel++) {
 					screenStepPos = (posY * _displayScreenWidth) + posX;
@@ -963,7 +1075,7 @@ void GfxMgr::block_save(int16 x, int16 y, int16 width, int16 height, byte *buffe
 	int16 remainingHeight = height;
 	byte *curBufferPtr = bufferPtr;
 
-	//warning("block_save: %d, %d -> %d, %d", x, y, width, height);
+	// warning("block_save: %d, %d -> %d, %d", x, y, width, height);
 
 	while (remainingHeight) {
 		memcpy(curBufferPtr, _gameScreen + offset, width);
@@ -992,7 +1104,7 @@ void GfxMgr::block_restore(int16 x, int16 y, int16 width, int16 height, byte *bu
 	int16 remainingHeight = height;
 	byte *curBufferPtr = bufferPtr;
 
-	//warning("block_restore: %d, %d -> %d, %d", x, y, width, height);
+	// warning("block_restore: %d, %d -> %d, %d", x, y, width, height);
 
 	while (remainingHeight) {
 		memcpy(_gameScreen + offset, curBufferPtr, width);
@@ -1028,7 +1140,8 @@ void GfxMgr::block_restore(int16 x, int16 y, int16 width, int16 height, byte *bu
  * Sierra passed the lower left. We change that to make upscaling easier.
  */
 void GfxMgr::drawBox(int16 x, int16 y, int16 width, int16 height, byte backgroundColor, byte lineColor) {
-	const int16 minY = 0 - _renderStartDisplayOffsetY;
+	// Clip uses visual coordinates, so minY should use visual offset, not display offset
+	const int16 minY = 0 - _renderStartVisualOffsetY;
 	if (!render_Clip(x, y, width, height, minY, VISUAL_WIDTH, VISUAL_HEIGHT - _renderStartVisualOffsetY)) {
 		warning("drawBox ignored by clipping. x: %d, y: %d, w: %d, h: %d", x, y, width, height);
 		return;
@@ -1037,7 +1150,7 @@ void GfxMgr::drawBox(int16 x, int16 y, int16 width, int16 height, byte backgroun
 	// coordinate translation: visual-screen -> display-screen
 	translateVisualRectToDisplayScreen(x, y, width, height);
 
-	y = y + _renderStartDisplayOffsetY;	// drawDisplayRect paints anywhere on the whole screen, our coordinate is within playscreen
+	y = y + _renderStartDisplayOffsetY; // drawDisplayRect paints anywhere on the whole screen, our coordinate is within playscreen
 
 	// draw box background
 	drawDisplayRect(x, y, width, height, backgroundColor);
@@ -1059,10 +1172,17 @@ void GfxMgr::drawBox(int16 x, int16 y, int16 width, int16 height, byte backgroun
 		drawDisplayRect(x, +1, y + height, -2, width, -2, 0, 1, 0);
 		drawDisplayRect(x, +1, y, +1, 0, 1, height, -2, 0);
 		break;
+	case Common::kRenderPlaydate:
+		// Playdate: black frame lines, 1 pixel wide
+		drawDisplayRect(x, +2, y, +1, width, -4, 0, 1, 0);
+		drawDisplayRect(x + width, -3, y, +2, 0, 1, height, -4, 0);
+		drawDisplayRect(x, +2, y + height, -2, width, -4, 0, 1, 0);
+		drawDisplayRect(x, +2, y, +2, 0, 1, height, -4, 0);
+		break;
 	case Common::kRenderHercA:
 	case Common::kRenderHercG:
 		lineColor = 0; // change linecolor to black
-		// fall through
+					   // fall through
 	case Common::kRenderCGA:
 	case Common::kRenderEGA:
 	case Common::kRenderVGA:
@@ -1084,11 +1204,14 @@ void GfxMgr::drawDisplayRect(int16 x, int16 y, int16 width, int16 height, byte c
 	case Common::kRenderCGA:
 		drawDisplayRectCGA(x, y, width, height, color);
 		break;
+	case Common::kRenderPlaydate:
+		drawDisplayRectPlaydate(x, y, width, height, color);
+		break;
 	case Common::kRenderHercG:
 	case Common::kRenderHercA:
 		if (color)
 			color = 1; // change any color except black to green/amber
-		// fall through
+					   // fall through
 	case Common::kRenderEGA:
 	default:
 		drawDisplayRectEGA(x, y, width, height, color);
@@ -1102,12 +1225,16 @@ void GfxMgr::drawDisplayRect(int16 x, int16 y, int16 width, int16 height, byte c
 void GfxMgr::drawDisplayRect(int16 x, int16 adjX, int16 y, int16 adjY, int16 width, int16 adjWidth, int16 height, int16 adjHeight, byte color, bool copyToScreen) {
 	switch (_upscaledHires) {
 	case DISPLAY_UPSCALED_DISABLED:
-		x += adjX; y += adjY;
-		width += adjWidth; height += adjHeight;
+		x += adjX;
+		y += adjY;
+		width += adjWidth;
+		height += adjHeight;
 		break;
 	case DISPLAY_UPSCALED_640x400:
-		x += adjX * 2; y += adjY * 2;
-		width += adjWidth * 2; height += adjHeight * 2;
+		x += adjX * 2;
+		y += adjY * 2;
+		width += adjWidth * 2;
+		height += adjHeight * 2;
 		break;
 	default:
 		assert(0);
@@ -1160,8 +1287,8 @@ void GfxMgr::drawDisplayRectCGA(int16 x, int16 y, int16 width, int16 height, byt
 void GfxMgr::drawCharacter(int16 row, int16 column, byte character, byte foreground, byte background, bool disabledLook) {
 	int16 x = column;
 	int16 y = row;
-	byte  transformXOR = 0;
-	byte  transformOR = 0;
+	byte transformXOR = 0;
+	byte transformOR = 0;
 
 	translateFontPosToDisplayScreen(x, y);
 
@@ -1217,14 +1344,14 @@ void GfxMgr::drawStringOnDisplay(int16 x, int16 adjX, int16 y, int16 adjY, const
  * Draw a character to the display screen using text row and column coordinates
  */
 void GfxMgr::drawCharacterOnDisplay(int16 x, int16 y, const byte character, byte foreground, byte background, byte transformXOR, byte transformOR) {
-	int16       curX, curY;
+	int16 curX, curY;
 	const byte *fontData;
-	bool        fontIsHires = _font->isFontHires();
-	int16       fontHeight = fontIsHires ? 16 : FONT_DISPLAY_HEIGHT;
-	int16       fontWidth = fontIsHires ? 16 : FONT_DISPLAY_WIDTH;
-	int16       fontBytesPerCharacter = fontIsHires ? 32 : FONT_BYTES_PER_CHARACTER;
-	byte        curByte = 0;
-	uint16      curBit;
+	bool fontIsHires = _font->isFontHires();
+	int16 fontHeight = fontIsHires ? 16 : FONT_DISPLAY_HEIGHT;
+	int16 fontWidth = fontIsHires ? 16 : FONT_DISPLAY_WIDTH;
+	int16 fontBytesPerCharacter = fontIsHires ? 32 : FONT_BYTES_PER_CHARACTER;
+	byte curByte = 0;
+	uint16 curBit;
 
 	// get font data of specified character
 	fontData = _font->getFontData() + character * fontBytesPerCharacter;
@@ -1238,7 +1365,7 @@ void GfxMgr::drawCharacterOnDisplay(int16 x, int16 y, const byte character, byte
 				curByte ^= transformXOR;
 				curByte |= transformOR;
 				fontData++;
-				curBit  = 0x80;
+				curBit = 0x80;
 			}
 			if (curByte & curBit) {
 				putFontPixelOnDisplay(x, y, curX, curY, foreground, fontIsHires);
@@ -1283,6 +1410,11 @@ void GfxMgr::shakeScreen(int16 repeatCount) {
 }
 
 void GfxMgr::updateScreen() {
+#ifdef PLAYDATE
+	if (_vm->_playdateMenu && _vm->_playdateMenu->isVisible()) {
+		_vm->_playdateMenu->draw();
+	}
+#endif
 	_vm->_system->updateScreen();
 }
 
@@ -1391,7 +1523,6 @@ int16 GfxMgr::priorityFromY(int16 yPos) const {
 	return _priorityTable[yPos];
 }
 
-
 /**
  * Initialize the color palette
  * This function initializes the color palette using the specified
@@ -1402,7 +1533,7 @@ int16 GfxMgr::priorityFromY(int16 yPos) const {
  * @param toBits      Bits per destination color component.
  */
 void GfxMgr::initPalette(uint8 *destPalette, const uint8 *paletteData, uint colorCount, uint fromBits, uint toBits) {
-	const uint srcMax  = (1 << fromBits) - 1;
+	const uint srcMax = (1 << fromBits) - 1;
 	const uint destMax = (1 << toBits) - 1;
 	for (uint colorNr = 0; colorNr < colorCount; colorNr++) {
 		for (uint componentNr = 0; componentNr < 3; componentNr++) { // Convert RGB components
@@ -1431,9 +1562,9 @@ void GfxMgr::setPalette(bool gfxModePalette) {
 	}
 }
 
-//Gets AGIPAL Data
+// Gets AGIPAL Data
 void GfxMgr::setAGIPal(int p0) {
-	//If 0 from savefile, do not use
+	// If 0 from savefile, do not use
 	if (p0 == 0)
 		return;
 
@@ -1446,18 +1577,18 @@ void GfxMgr::setAGIPal(int p0) {
 		return; // Needed at least by Naturette 3 which uses AGIPAL but provides no palette files
 	}
 
-	//Chunk0 holds colors 0-7
+	// Chunk0 holds colors 0-7
 	agipal.read(&_agipalPalette[0], 24);
 
-	//Chunk1 is the same as the chunk0
+	// Chunk1 is the same as the chunk0
 
-	//Chunk2 chunk holds colors 8-15
+	// Chunk2 chunk holds colors 8-15
 	agipal.seek(24, SEEK_CUR);
 	agipal.read(&_agipalPalette[24], 24);
 
-	//Chunk3 is the same as the chunk2
+	// Chunk3 is the same as the chunk2
 
-	//Chunks4-7 are duplicates of chunks0-3
+	// Chunks4-7 are duplicates of chunks0-3
 
 	if (agipal.eos() || agipal.err()) {
 		warning("Couldn't read AGIPAL palette from '%s'. Not changing palette", filename);
@@ -1566,5 +1697,234 @@ void GfxMgr::setCursorPalette(bool amigaStyleCursor) {
 	}
 }
 #endif
+// Native Playdate dither patterns - 8x8 tiles designed for 400x240 native resolution.
+// Playdate has lower pixel density than Hercules, so patterns are adjusted for
+// equivalent perceived contrast. Each pattern must be visually distinct from others.
+// Format: 16 colors × 8 rows = 128 bytes
+// Bit layout: 0x80=bit7(left), 0x01=bit0(right), 1=white pixel, 0=black pixel
+static const uint8 playdatePatterns[] = {
+	// Color 0: Black (0%) - solid black
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+
+	// Color 1: Very sparse (~12%) - dots with 2 empty rows (denser for Playdate)
+	// X . . . X . . .    0x88
+	// . . . . . . . .    0x00
+	// . . X . . . X .    0x22
+	// . . . . . . . .    0x00
+	0x88, 0x00, 0x22, 0x00, 0x88, 0x00, 0x22, 0x00,
+
+	// Color 2: Sparse diagonal (~16%) - Herc pattern plus extra dots for density
+	// X . . . . . . .    0x80
+	// . . . . X . . .    0x10
+	// . . . . . . X .    0x02
+	// . . X . . . . X    0x21
+	// . . . . . . . X    0x01
+	// . . . X . . . .    0x08
+	// . X . . . . . .    0x40
+	// X . . . . X . .    0x84
+	0x80, 0x10, 0x02, 0x21, 0x01, 0x08, 0x40, 0x84,
+
+	// Color 3: Horizontal lines (~25%) - dashed horizontal
+	// X . X . X . X .    0xAA
+	// . . . . . . . .    0x00
+	// X . X . X . X .    0xAA
+	// . . . . . . . .    0x00
+	0xAA, 0x00, 0xAA, 0x00, 0xAA, 0x00, 0xAA, 0x00,
+
+	// Color 4: Vertical stripes (~25%) - true vertical columns
+	// Herc original: 0x22/0x88 alternating, but that's needed for Color 8
+	// Playdate: use actual vertical stripes (same cols every row)
+	// . X . . . X . .    0x44
+	// . X . . . X . .    0x44
+	// . X . . . X . .    0x44
+	// . X . . . X . .    0x44
+	0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44,
+
+	// Color 5: Sparse grid (~12%) - regular dot grid, sparser than color 1
+	// X . . . X . . .    0x88
+	// . . . . . . . .    0x00
+	// . . . . . . . .    0x00
+	// . . . . . . . .    0x00
+	0x88, 0x00, 0x00, 0x00, 0x88, 0x00, 0x00, 0x00,
+
+	// Color 6: Diagonal lines / (~25%) - single pixel diagonal (matches Herc)
+	// . . . X . . . X    0x11
+	// . . X . . . X .    0x22
+	// . X . . . X . .    0x44
+	// X . . . X . . .    0x88
+	0x11, 0x22, 0x44, 0x88, 0x11, 0x22, 0x44, 0x88,
+
+	// Color 7: Checkerboard (~50%) - classic 50% dither
+	// . X . X . X . X    0x55
+	// X . X . X . X .    0xAA
+	0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA,
+
+	// Color 8: Staggered dots (~25%) - Herc brick offset pattern
+	// Herc original: 0x22, 0x00, 0x88, 0x00 (brick offset with empty rows)
+	// Playdate: same pattern without empty rows (Color 4 now differs)
+	// . . X . . . X .    0x22 - cols 2, 6
+	// X . . . X . . .    0x88 - cols 0, 4
+	// . . X . . . X .    0x22 - cols 2, 6
+	// X . . . X . . .    0x88 - cols 0, 4
+	0x22, 0x88, 0x22, 0x88, 0x22, 0x88, 0x22, 0x88,
+
+	// Color 9: Dense fill (~91%) - matches Herc light blue pattern
+	// X X . X . X X X    0xD7
+	// X X X X X X X X    0xFF
+	// . X X X X X . X    0x7D
+	// X X X X X X X X    0xFF
+	0xD7, 0xFF, 0x7D, 0xFF, 0xD7, 0xFF, 0x7D, 0xFF,
+
+	// Color 10: Crosshatch (~50%) - overlapping lines pattern
+	// X X . X X X . X    0xDD
+	// . X . X . X . X    0x55
+	// . X X X . X X X    0x77
+	// X . X . X . X .    0xAA
+	0xDD, 0x55, 0x77, 0xAA, 0xDD, 0x55, 0x77, 0xAA,
+
+	// Color 11: Inverse diagonal (~75%) - dense with diagonal gaps
+	// . X X X X X X X    0x7F
+	// X X X . X X X X    0xEF
+	// X X X X X X . X    0xFD
+	// X X . X X X X X    0xDF
+	// X X X X X X X .    0xFE
+	// X X X X . X X X    0xF7
+	// X . X X X X X X    0xBF
+	// X X X X X . X X    0xFB
+	0x7F, 0xEF, 0xFD, 0xDF, 0xFE, 0xF7, 0xBF, 0xFB,
+
+	// Color 12: Dense horizontal (~75%) - solid rows with gaps
+	// X . X . X . X .    0xAA
+	// X X X X X X X X    0xFF
+	// X . X . X . X .    0xAA
+	// X X X X X X X X    0xFF
+	0xAA, 0xFF, 0xAA, 0xFF, 0xAA, 0xFF, 0xAA, 0xFF,
+
+	// Color 13: Dense diagonal \ (~75%) - thick backslash
+	// . X X X . X X X    0x77
+	// X . X X X . X X    0xBB
+	// X X . X X X . X    0xDD
+	// X X X . X X X .    0xEE
+	0x77, 0xBB, 0xDD, 0xEE, 0x77, 0xBB, 0xDD, 0xEE,
+
+	// Color 14: Nearly solid (~88%) - sparse holes
+	// . X X X X X X X    0x7F
+	// X X X X X X X X    0xFF
+	// X X X X X X X X    0xFF
+	// X X X X . X X X    0xF7
+	// X X X X X X X .    0xFE
+	// X X X X X X X X    0xFF
+	// X X X X X X X X    0xFF
+	// X X . X X X X X    0xDF
+	0x7F, 0xFF, 0xFF, 0xF7, 0xFE, 0xFF, 0xFF, 0xDF,
+
+	// Color 15: White (100%) - solid white
+	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+};
+
+void GfxMgr::render_BlockPlaydate(int16 x, int16 y, int16 width, int16 height) {
+	// Render at native Playdate resolution (400x240) using native patterns.
+	// Patterns are 8x8 tiles that tile across the entire display.
+	// NO downsampling or scaling of patterns - they render at native dot pitch.
+
+	// Calculate the display area for this AGI block
+	// Scale: 160 AGI → 400 display (2.5x horizontal)
+	// Scale: 200 visual → 240 display (1.2x vertical)
+	// Use floor for start and ceiling for end to ensure full coverage
+	const int displayX0 = (x * 320) / 160;
+	const int displayX1 = ((x + width) * 320 + 159) / 160;  // ceiling division
+	const int displayY0 = ((y + _renderStartVisualOffsetY) * 240) / 200;
+	const int displayY1 = ((y + _renderStartVisualOffsetY + height) * 240 + 199) / 200;  // ceiling division
+
+	for (int displayY = displayY0; displayY < displayY1 && displayY < _displayScreenHeight; ++displayY) {
+		// Map display Y to AGI Y
+		const int agiY = ((displayY * 200) / 240) - _renderStartVisualOffsetY;
+		if (agiY < 0 || agiY >= SCRIPT_HEIGHT)
+			continue;
+
+		// Pattern row - direct modulo on display coordinate for native tiling
+		const int patternRow = displayY & 0x07;
+
+		byte *displayRow = _displayScreen + displayY * _displayScreenWidth;
+		const byte *agiRow = _activeScreen + agiY * SCRIPT_WIDTH;
+
+		for (int displayX = displayX0; displayX < displayX1 && displayX < _displayScreenWidth; ++displayX) {
+			// Map display X to AGI X
+			const int agiX = (displayX * 160) / 320;
+			if (agiX < 0 || agiX >= SCRIPT_WIDTH)
+				continue;
+
+			// Get AGI color
+			const byte color = agiRow[agiX] & 0x0F;
+
+			// Get the pattern byte for this color and row
+			const byte patternByte = playdatePatterns[color * 8 + patternRow];
+
+			// Pattern column - direct modulo on display coordinate for native tiling
+			const int bitPos = 7 - (displayX & 0x07);
+			const byte pixel = (patternByte >> bitPos) & 1;
+
+			displayRow[displayX] = pixel;
+		}
+	}
+}
+
+void GfxMgr::drawDisplayRectPlaydate(int16 x, int16 y, int16 width, int16 height, byte color) {
+	// Draw a filled rectangle using native Playdate dither patterns.
+	// Display coordinates are in Playdate space (400x240).
+	// Patterns tile at native dot pitch - no scaling.
+
+	const byte colorIdx = color & 0x0F;
+
+	for (int16 row = 0; row < height; ++row) {
+		const int displayY = y + row;
+		if (displayY < 0 || displayY >= _displayScreenHeight)
+			continue;
+
+		// Pattern row - direct modulo for native tiling
+		const int patternRow = displayY & 0x07;
+
+		byte *displayRow = _displayScreen + displayY * _displayScreenWidth;
+
+		for (int16 col = 0; col < width; ++col) {
+			const int displayX = x + col;
+			if (displayX < 0 || displayX >= _displayScreenWidth)
+				continue;
+
+			// Get pattern byte and extract bit - native tiling
+			const byte patternByte = playdatePatterns[colorIdx * 8 + patternRow];
+			const int bitPos = 7 - (displayX & 0x07);
+			const byte pixel = (patternByte >> bitPos) & 1;
+
+			displayRow[displayX] = pixel;
+		}
+	}
+}
+
+void GfxMgr::drawPlaydateText(int16 x, int16 y, const Common::String &text, bool inverted) {
+	const byte *fontData = _vm->getFontData();
+	if (!fontData)
+		return;
+
+	const byte on = inverted ? 0 : 1;
+	const byte off = inverted ? 1 : 0;
+
+	for (uint i = 0; i < text.size(); ++i) {
+		const byte c = (byte)text[i];
+
+		for (int row = 0; row < 8; ++row) {
+			const byte charRow = fontData[c * 8 + row];
+			uint32 displayPos = (y + row) * _displayScreenWidth + x + (i * 8);
+
+			for (int col = 0; col < 8; ++col) {
+				if ((x + i * 8 + col) >= _displayScreenWidth || (y + row) >= _displayScreenHeight)
+					continue;
+
+				const bool bit = (charRow >> (7 - col)) & 1;
+				_displayScreen[displayPos + col] = bit ? on : off;
+			}
+		}
+	}
+}
 
 } // End of namespace Agi

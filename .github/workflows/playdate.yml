@@ -1,0 +1,65 @@
+name: Playdate
+
+on:
+  push:
+    branches:
+      - 'claude/scummvm-playdate-agi-sci-*'
+  pull_request:
+    paths:
+      - 'backends/platform/playdate/**'
+      - 'backends/events/playdate/**'
+      - 'backends/fs/playdate/**'
+      - 'backends/graphics/playdate/**'
+      - 'backends/mixer/playdate/**'
+      - '.github/workflows/playdate.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        host: [playdate, playdate-simulator]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Playdate SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: ~/PlaydateSDK
+          key: playdate-sdk-3.0.1-linux
+
+      - name: Download Playdate SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
+        run: |
+          wget -q https://download.panic.com/playdate_sdk/Linux/PlaydateSDK-3.0.1.tar.gz -O /tmp/sdk.tar.gz
+          mkdir -p ~/PlaydateSDK
+          tar -xzf /tmp/sdk.tar.gz -C ~/PlaydateSDK --strip-components=1
+
+      - name: Install ARM toolchain
+        if: matrix.host == 'playdate'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-arm-none-eabi binutils-arm-none-eabi libnewlib-arm-none-eabi libstdc++-arm-none-eabi-newlib
+
+      - name: Configure
+        run: |
+          export PLAYDATE_SDK_PATH=$HOME/PlaydateSDK
+          ./configure --host=${{ matrix.host }}
+
+      - name: Build
+        run: |
+          export PLAYDATE_SDK_PATH=$HOME/PlaydateSDK
+          make -j$(nproc)
+
+      - name: Verify pdx bundle
+        run: |
+          test -d scummvm.pdx
+          ls -lah scummvm.pdx/
+
+      - name: Upload pdx
+        uses: actions/upload-artifact@v4
+        with:
+          name: scummvm-${{ matrix.host }}
+          path: scummvm.pdx/

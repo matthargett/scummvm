@@ -1916,6 +1916,24 @@ openpandora)
 	_host_cpu=arm
 	_host_alias=arm-angstrom-linux-gnueabi
 	;;
+playdate)
+	_host_os=playdate
+	_host_cpu=arm
+	_host_alias=arm-none-eabi
+	test "x$prefix" = xNONE && prefix=.
+	datarootdir='${prefix}/data'
+	datadir='${datarootdir}'
+	docdir='${prefix}/doc'
+	;;
+playdate-simulator)
+	# Builds a host shared object (pdex) for the Playdate Simulator
+	_host_os=playdate
+	_host_cpu=`echo $guessed_host | sed 's/^\([^-]*\)-.*$/\1/'`
+	test "x$prefix" = xNONE && prefix=.
+	datarootdir='${prefix}/data'
+	datadir='${datarootdir}'
+	docdir='${prefix}/doc'
+	;;
 ppc-amigaos)
 	_host_os=amigaos
 	_host_cpu=powerpc
@@ -2150,6 +2168,17 @@ n64)
 		exit 1
 	fi
 	;;
+playdate)
+	if test -z "$PLAYDATE_SDK_PATH"; then
+		echo "Please set PLAYDATE_SDK_PATH in your environment. export PLAYDATE_SDK_PATH=<path to Playdate SDK>"
+		exit 1
+	fi
+	if test "$_host" = "playdate"; then
+		# The compiler checks build complete executables: a bare-metal
+		# arm-none-eabi link needs syscall stubs to succeed.
+		append_var LDFLAGS "--specs=nosys.specs"
+	fi
+	;;
 ps3)
 	# shellcheck disable=SC2153 # ignore warning about PS3DEV/PSPDEV variable names being so close
 	if test -z "$PS3DEV"; then
@@ -2328,7 +2357,9 @@ if test -n "$CXX" && test_compiler "$CXX"; then
 else
         # Sailfish is a cross-compile environment but it uses g++ name
         # Yes, it's black magic what they do.
-	if test -n "$_host" && test "$_host" != sailfish ; then
+        # The Playdate Simulator loads a shared object built with the
+        # native compiler, so it does not use a cross-compiler either.
+	if test -n "$_host" && test "$_host" != sailfish && test "$_host" != playdate-simulator ; then
 		compilers="$_host_alias-g++ $_host_alias-c++ $_host_alias-clang++ $_host-g++ $_host-c++ $_host-clang++"
 	else
 		compilers="g++ c++ clang++"
@@ -2546,7 +2577,7 @@ if test "$have_gcc" = yes ; then
 	case $_host_os in
 	# newlib-based system include files suppress non-C89 function
 	# declarations under __STRICT_ANSI__, undefine it
-	3ds | android | gamecube | kolibrios | psp | switch | wii)
+	3ds | android | gamecube | kolibrios | playdate | psp | switch | wii)
 		std_variant=gnu++
 		pedantic=no
 		;;
@@ -4152,6 +4183,105 @@ if test -n "$_host"; then
 			_seq_midi=no
 			_port_mk="backends/platform/openpandora/op-bundle.mk"
 			;;
+		playdate)
+			# Bare-metal ARM Cortex-M7 build for the Playdate handheld.
+			# Compiler and linker flags follow the official SDK build
+			# support files (C_API/buildsupport/common.mk).
+			append_var DEFINES "-DTARGET_PLAYDATE=1"
+			append_var DEFINES "-DTARGET_EXTENSION=1"
+			append_var DEFINES "-DNONSTANDARD_PORT"
+			append_var DEFINES "-DDISABLE_FANCY_THEMES"
+			append_var DEFINES "-DDISABLE_HELP_STRINGS"
+			append_var DEFINES "-DDISABLE_NES_APU"
+			append_var DEFINES "-DREDUCE_MEMORY_USAGE"
+			append_var CXXFLAGS "-mthumb"
+			append_var CXXFLAGS "-mcpu=cortex-m7"
+			append_var CXXFLAGS "-mfloat-abi=hard"
+			append_var CXXFLAGS "-mfpu=fpv5-sp-d16"
+			append_var CXXFLAGS "-D__FPU_USED=1"
+			append_var CXXFLAGS "-falign-functions=16"
+			append_var CXXFLAGS "-fomit-frame-pointer"
+			append_var CXXFLAGS "-ffunction-sections"
+			append_var CXXFLAGS "-fdata-sections"
+			append_var CXXFLAGS "-mword-relocations"
+			append_var CXXFLAGS "-fno-common"
+			append_var CXXFLAGS "-fno-exceptions"
+			append_var CXXFLAGS "-I$PLAYDATE_SDK_PATH/C_API"
+			append_var LDFLAGS "-nostartfiles"
+			append_var LDFLAGS "-mthumb"
+			append_var LDFLAGS "-mcpu=cortex-m7"
+			append_var LDFLAGS "-mfloat-abi=hard"
+			append_var LDFLAGS "-mfpu=fpv5-sp-d16"
+			append_var LDFLAGS "-T$PLAYDATE_SDK_PATH/C_API/buildsupport/link_map.ld"
+			append_var LDFLAGS "-Wl,--gc-sections,--no-warn-mismatch,--emit-relocs"
+			append_var LDFLAGS "-Wl,--entry,eventHandlerShim"
+			# The SDK linker script has no .ARM.exidx output section;
+			# satisfy libgcc's unwinder with an empty table.
+			append_var LDFLAGS "-Wl,--defsym,__exidx_start=0,--defsym,__exidx_end=0"
+			_backend="playdate"
+			_port_mk="backends/platform/playdate/playdate.mk"
+			add_line_to_config_mk "PLAYDATE_SDK_PATH := $PLAYDATE_SDK_PATH"
+			_optimization_level=-O2
+			_build_scalers=no
+			_build_aspect=no
+			_detection_features_full=no
+			_text_console=no
+			_mt32emu=no
+			_nuked_opl=no
+			_tinygl=no
+			_highres=no
+			_vkeybd=no
+			_eventrec=no
+			_translation=no
+			_seq_midi=no
+			_timidity=no
+			_cloud=no
+			_lua=no
+			_tts=no
+			# The Playdate has 16MB of RAM: default to the engines the
+			# port targets. Additional engines can still be enabled at
+			# configure time.
+			engine_disable_all
+			engine_enable agi
+			engine_enable sci
+			engine_disable sci32
+			;;
+		playdate-simulator)
+			# Native shared object loaded by the Playdate Simulator.
+			append_var DEFINES "-DTARGET_SIMULATOR=1"
+			append_var DEFINES "-DTARGET_EXTENSION=1"
+			append_var DEFINES "-DDISABLE_FANCY_THEMES"
+			append_var DEFINES "-DDISABLE_HELP_STRINGS"
+			append_var DEFINES "-DDISABLE_NES_APU"
+			append_var DEFINES "-DREDUCE_MEMORY_USAGE"
+			append_var CXXFLAGS "-fPIC"
+			append_var CXXFLAGS "-I$PLAYDATE_SDK_PATH/C_API"
+			append_var LDFLAGS "-shared"
+			_backend="playdate"
+			_port_mk="backends/platform/playdate/playdate.mk"
+			add_line_to_config_mk "PLAYDATE_SDK_PATH := $PLAYDATE_SDK_PATH"
+			add_line_to_config_mk "PLAYDATE_SIMULATOR = 1"
+			_build_scalers=no
+			_build_aspect=no
+			_detection_features_full=no
+			_text_console=no
+			_mt32emu=no
+			_nuked_opl=no
+			_tinygl=no
+			_highres=no
+			_vkeybd=no
+			_eventrec=no
+			_translation=no
+			_seq_midi=no
+			_timidity=no
+			_cloud=no
+			_lua=no
+			_tts=no
+			engine_disable_all
+			engine_enable agi
+			engine_enable sci
+			engine_disable sci32
+			;;
 		ppc-amigaos)
 			# PPC Linker requires this to fix relocation errors
 			append_var CXXFLAGS "-mlongcall"
@@ -4372,6 +4502,13 @@ case $_backend in
 			append_var DEFINES "-DOP_DEBUG"
 		fi
 		_sdl=auto
+		;;
+	playdate)
+		append_var DEFINES "-D__PLAYDATE__"
+		# Enables the AGI Hercules/Playdate render mode and the crank
+		# word-list menu (engines/agi/playdate_menu.cpp).
+		append_var DEFINES "-DPLAYDATE"
+		append_var INCLUDES '-I$(srcdir)/backends/platform/playdate'
 		;;
 	psp)
 		append_var DEFINES "-D__PSP__"
@@ -4928,7 +5065,7 @@ esac
 #
 echo_n "Checking if host is POSIX compliant... "
 case $_host_os in
-	amigaos* | dreamcast | ds | gamecube | kolibrios | mingw* | morphos | n64 | ps3 | psp2 | psp | riscos | wii)
+	amigaos* | dreamcast | ds | gamecube | kolibrios | mingw* | morphos | n64 | playdate | ps3 | psp2 | psp | riscos | wii)
 		_posix=no
 		;;
 	3ds | android | beos* | bsd* | cygwin* | darwin* | dragonfly* | freebsd* | gnu* | haiku* | hpux* | iphoneos | irix*| k*bsd*-gnu* | linux* | maemo | mint* | netbsd* | openbsd* | redox* | serenity* | solaris* | sunos* | switch | uclinux*)

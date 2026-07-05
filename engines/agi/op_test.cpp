@@ -24,6 +24,9 @@
 #include "agi/graphics.h"
 #include "agi/opcodes.h"
 #include "agi/words.h"
+#ifdef PLAYDATE
+#include "agi/playdate_menu.h"
+#endif
 
 #include "common/endian.h"
 
@@ -332,6 +335,19 @@ bool AgiEngine::testSaid(uint8 nwords, uint8 *cc) {
 	Words *words = vm->_words;
 	int n = words->getEgoWordCount();
 	int z = 0;
+
+#ifdef PLAYDATE
+	// Record this room's said() phrases for the Playdate word picker.
+	// The phrase order (verb first, then nouns) is preserved so the
+	// picker can offer verb-scoped nouns.
+	if (_playdateMenu && cc && nwords) {
+		Common::Array<uint16> saidIds;
+		const uint8 *scan = cc;
+		for (uint i = 0; i < nwords; ++i)
+			saidIds.push_back(READ_LE_UINT16(scan + (i * 2)));
+		_playdateMenu->addSaidPhrase(saidIds.begin(), saidIds.size());
+	}
+#endif
 
 	if (vm->getFlag(VM_FLAG_SAID_ACCEPTED_INPUT) || !vm->getFlag(VM_FLAG_ENTERED_CLI))
 		return false;
