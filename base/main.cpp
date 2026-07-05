@@ -77,6 +77,7 @@
 #include "backends/networking/http/connectionmanager.h"
 #endif
 #ifdef USE_SDL_NET
+#include "backends/networking/sdl_net/inspectorserver.h"
 #include "backends/networking/sdl_net/localwebserver.h"
 #endif
 
@@ -836,6 +837,13 @@ extern "C" int scummvm_main(int argc, const char * const argv[]) {
 			}
 #endif
 
+#ifdef USE_SDL_NET
+			// Bring up the script-inspector CDP server (VS Code /
+			// Chrome DevTools attach) when the user asked for it.
+			if (ConfMan.hasKey("inspector_enable") && ConfMan.getBool("inspector_enable"))
+				Networking::InspectorServer::instance().start();
+#endif
+
 			// Try to run the game
 			result = runGame(enginePlugin, system, game, meDescriptor);
 			if (ttsMan != nullptr) {
@@ -933,6 +941,7 @@ extern "C" int scummvm_main(int argc, const char * const argv[]) {
 		}
 	}
 #ifdef USE_SDL_NET
+	Networking::InspectorServer::destroy();
 	Networking::LocalWebserver::destroy();
 #endif
 #ifdef USE_CLOUD

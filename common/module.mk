@@ -50,7 +50,9 @@ MODULE_OBJS := \
 	zip-set.o \
 	std/std.o \
 	inspector/breakpoints.o \
+	inspector/channel.o \
 	inspector/discovery.o \
+	inspector/inspector.o \
 	inspector/protocol.o \
 	inspector/session.o \
 	inspector/regex.o \

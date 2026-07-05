@@ -135,6 +135,7 @@ MODULE_OBJS += \
 	networking/sdl_net/handlers/resourcehandler.o \
 	networking/sdl_net/handlers/uploadfilehandler.o \
 	networking/sdl_net/handlerutils.o \
+	networking/sdl_net/inspectorserver.o \
 	networking/sdl_net/localwebserver.o \
 	networking/sdl_net/reader.o \
 	networking/sdl_net/uploadfileclienthandler.o

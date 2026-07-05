@@ -346,6 +346,12 @@ void registerDefaults() {
 	ConfMan.registerDefault("enable_unsupported_game_warning", true);
 	ConfMan.registerDefault("enable_unsupported_addon_warning", true);
 
+	// Script inspector (Chrome-DevTools-Protocol debug server; see
+	// common/inspector/DESIGN.md).
+	ConfMan.registerDefault("inspector_enable", false);
+	ConfMan.registerDefault("inspector_wait", false);
+	ConfMan.registerDefault("inspector_port", 9229);
+
 #if defined(USE_FLUIDSYNTH) || defined(USE_FLUIDLITE)
 	ConfMan.registerDefault("soundfont", "Roland_SC-55.sf2");
 #endif
