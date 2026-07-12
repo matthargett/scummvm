@@ -19,6 +19,20 @@
  *
  */
 
+// The simulator build of this file uses the POSIX ucontext routines.
+// macOS declares them only when _XOPEN_SOURCE is defined before any
+// system header is seen, and _DARWIN_C_SOURCE keeps the rest of the
+// Darwin API visible alongside it. Both must precede scummsys.h.
+// (Device builds use arm-none-eabi, which never defines __APPLE__.)
+#ifdef __APPLE__
+	#ifndef _XOPEN_SOURCE
+		#define _XOPEN_SOURCE 600
+	#endif
+	#ifndef _DARWIN_C_SOURCE
+		#define _DARWIN_C_SOURCE 1
+	#endif
+#endif
+
 #include "common/scummsys.h"
 
 #include "backends/platform/playdate/playdate-coroutine.h"
