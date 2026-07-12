@@ -235,17 +235,32 @@ void PlaydateMenu::enterCharMode(bool isNumber) {
 	_listCommands.clear();
 
 	if (isNumber) {
+		// GetNumber accepts digits only.
 		for (char c = '0'; c <= '9'; ++c) {
 			_listIds.push_back((uint16)c);
 			_listWords.push_back(Common::String(c));
 		}
 	} else {
+		// GetString accepts any printable character, so the keyboard must
+		// offer more than letters: names may contain digits, and prompts
+		// like the Leisure Suit Larry phone number ("555-8039") need digits
+		// and a dash. Letters come first (the common case), then digits,
+		// space and a little punctuation.
 		for (char c = 'A'; c <= 'Z'; ++c) {
+			_listIds.push_back((uint16)c);
+			_listWords.push_back(Common::String(c));
+		}
+		for (char c = '0'; c <= '9'; ++c) {
 			_listIds.push_back((uint16)c);
 			_listWords.push_back(Common::String(c));
 		}
 		_listIds.push_back((uint16)' ');
 		_listWords.push_back("Spc");
+		static const char kPunct[] = { '-', '.', '\'' };
+		for (uint i = 0; i < ARRAYSIZE(kPunct); ++i) {
+			_listIds.push_back((uint16)kPunct[i]);
+			_listWords.push_back(Common::String(kPunct[i]));
+		}
 	}
 
 	// Editing and submission entries, common to both modes.
