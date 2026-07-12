@@ -72,7 +72,16 @@ void AgiEngine::processScummVMEvents() {
 		// The word picker owns the crank (wheel) and the A/B buttons
 		// (Return/Escape). Consumed events do not reach the game, so the
 		// d-pad still moves the ego while the picker is up.
-		if (_playdateMenu && _playdateMenu->isVisible() && _playdateMenu->handleEvent(event))
+		//
+		// It may only claim input while the normal command parser is
+		// accepting it: no inner loop is running and the prompt is
+		// enabled. That leaves message boxes and "press a key" cutscenes,
+		// and the GetString/GetNumber inner loops used for things like
+		// player-name entry (Space Quest, Mixed-Up Mother Goose) and the
+		// Leisure Suit Larry age quiz, to receive input normally.
+		if (_playdateMenu && _playdateMenu->isVisible() &&
+		    !cycleInnerLoopIsActive() && _text->promptIsEnabled() &&
+		    _playdateMenu->handleEvent(event))
 			continue;
 #endif
 
