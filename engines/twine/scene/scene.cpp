@@ -20,6 +20,7 @@
  */
 
 #include "twine/scene/scene.h"
+#include "twine/scene/rain.h"
 #include "common/config-manager.h"
 #include "common/file.h"
 #include "common/memstream.h"
@@ -484,6 +485,7 @@ bool Scene::loadScene(int32 index) {
 	if (_engine->isLBA1()) {
 		return loadSceneLBA1();
 	} else if (_engine->isLBA2()) {
+		_engine->_rain->InitRain();
 		return loadSceneLBA2();
 	}
 
@@ -610,6 +612,11 @@ void Scene::changeCube() {
 	}
 
 	_engine->_grid->initGrid(_newCube);
+
+	// LBA2: load per-island palette from XPL data
+	if (_engine->isLBA2()) {
+		_engine->_screens->choicePalette();
+	}
 
 	if (_flagChgCube == ScenePositionType::kZone) {
 		_sceneStart = _zoneHeroPos;

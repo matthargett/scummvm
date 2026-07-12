@@ -69,6 +69,7 @@ public:
 	bool parseFile(const Common::Path &fname);
 	void parseTextAndTags(const Common::String &text, Common::Array<SubtitlePart> &parts) const;
 	const Common::Array<SubtitlePart> *getSubtitleParts(uint32 timestamp) const;
+	bool isSfx() const;
 
 private:
 	Common::Array<SRTEntry *> _entries;
@@ -82,22 +83,36 @@ public:
 	};
 
 	Subtitles();
-	~Subtitles();
+	virtual ~Subtitles();
 
 	void loadSRTFile(const Common::Path &fname);
-	void close() { _loaded = false; _parts = nullptr; _fname.clear(); _srtParser.cleanup(); }
+	void close();
 	void setFont(const char *fontname, int height = 18, FontStyle type = kFontStyleRegular);
 	void setBBox(const Common::Rect &bbox);
 	void setColor(byte r, byte g, byte b);
 	void setPadding(uint16 horizontal, uint16 vertical);
 	bool drawSubtitle(uint32 timestamp, bool force = false, bool showSFX = false) const;
+	bool isSfx() const {
+		if (!_srtParser)
+			return false;
+		return _srtParser->isSfx();
+	}
 	bool isLoaded() const { return _loaded || _subtitleDev; }
+	virtual void clearSubtitle() const;
+
+protected:
+	bool recalculateBoundingBox() const;
+	void renderSubtitle() const;
+	void translateBBox(int16 dx, int16 dy) const { _realBBox.translate(dx, dy); }
+	virtual void updateSubtitleOverlay() const;
+	virtual bool shouldShowSubtitle() const { return true; }
+
+	bool _loaded;
+	mutable const Common::Array<SubtitlePart> *_parts = nullptr;
+	mutable uint16 _splitPartCount = 0;
 
 private:
-	void renderSubtitle() const;
-
-	SRTParser _srtParser;
-	bool _loaded;
+	SRTParser *_srtParser = nullptr;
 	bool _subtitleDev;
 	bool _overlayHasAlpha;
 
@@ -114,7 +129,6 @@ private:
 	mutable int16 _lastOverlayWidth, _lastOverlayHeight;
 
 	Common::Path _fname;
-	mutable const Common::Array<SubtitlePart> *_parts;
 	uint32 _color;
 	uint32 _blackColor;
 	uint32 _transparentColor;

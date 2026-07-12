@@ -58,6 +58,14 @@
 #include <cstring>
 #include <ctime>
 
+// We can't use the common/util.h header here, since create_project
+// is a standalone tool, and may be built individually from the rest
+// of the devtools.
+#ifdef ARRAYSIZE
+#undef ARRAYSIZE
+#endif
+#define ARRAYSIZE(x) ((int)(sizeof(x) / sizeof(x[0])))
+
 namespace {
 /**
  * Converts the given path to only use slashes as
@@ -188,6 +196,10 @@ int main(int argc, char *argv[]) {
 			}
 
 			projectType = kProjectXcode;
+		} else if (!std::strcmp(argv[i], "--ios")) {
+			setup.appleEmbedded = true;
+		} else if (!std::strcmp(argv[i], "--tvos")) {
+			setup.appleEmbedded = true;
 #endif
 
 		} else if (!std::strcmp(argv[i], "--msvc-version")) {
@@ -307,6 +319,8 @@ int main(int argc, char *argv[]) {
 			setup.useSDL = kSDLVersion3;
 		} else if (!std::strcmp(argv[i], "--use-canonical-lib-names")) {
 			// Deprecated: Kept here so it doesn't error
+		} else if (!std::strcmp(argv[i], "--use-slnx")) {
+			setup.useSlnx = true;
 		} else if (!std::strcmp(argv[i], "--use-windows-unicode")) {
 			setup.useWindowsUnicode = true;
 		} else if (!std::strcmp(argv[i], "--use-windows-ansi")) {
@@ -447,14 +461,22 @@ int main(int argc, char *argv[]) {
 
 	if (projectType == kProjectXcode) {
 		setup.defines.push_back("POSIX");
-		// Define both MACOSX, and IPHONE, but only one of them will be associated to the
-		// correct target by the Xcode project provider.
-		// This define will help catching up target-dependent files, like "browser_osx.mm"
-		// The suffix ("_osx", or "_ios") will be used by the project provider to filter out
-		// the files, according to the target.
-		setup.defines.push_back("MACOSX");
-		setup.defines.push_back("IPHONE");
-		setup.defines.push_back("SCUMMVM_NEON");
+		if (setup.appleEmbedded) {
+			setup.defines.push_back("IPHONE");
+			setup.defines.push_back("IPHONE_IOS7");
+			setup.defines.push_back("SCUMMVM_NEON");
+		} else {
+			setup.defines.push_back("MACOSX");
+			// We have two TTS backends, one that is deprecated in macOS 11 and a newer one
+			// that requires macOS 10.14 minimum. Use the new one when compiling for ARM, and
+			// otherwise (PPC, Intel) use the old one. We assume the current arch to compile
+			// create_project is also the one we will be compiling ScummVM for.
+#if !defined(__aarch64__)
+			if (getFeatureBuildState("tts", setup.features)) {
+				setup.defines.push_back("USE_NS_SPEECH_SYNTHESIZER");
+			}
+#endif
+		}
 	} else if (projectType == kProjectMSVC || projectType == kProjectCodeBlocks) {
 		setup.defines.push_back("WIN32");
 		setup.win32 = true;
@@ -480,18 +502,20 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	setup.defines.push_back("SDL_BACKEND");
-	if (setup.useSDL == kSDLVersion1) {
-		cout << "\nBuilding against SDL 1.2\n\n";
-	} else if (setup.useSDL == kSDLVersion2) {
-		cout << "\nBuilding against SDL 2\n\n";
-		setup.defines.push_back("USE_SDL2");
-	} else if (setup.useSDL == kSDLVersion3) {
-		cout << "\nBuilding against SDL 3\n\n";
-		setup.defines.push_back("USE_SDL3");
-	} else {
-		std::cerr << "ERROR: Unsupported SDL version\n";
-		return -1;
+	if (projectType != kProjectXcode || !setup.appleEmbedded) {
+		setup.defines.push_back("SDL_BACKEND");
+		if (setup.useSDL == kSDLVersion1) {
+			cout << "\nBuilding against SDL 1.2\n\n";
+		} else if (setup.useSDL == kSDLVersion2) {
+			cout << "\nBuilding against SDL 2\n\n";
+			setup.defines.push_back("USE_SDL2");
+		} else if (setup.useSDL == kSDLVersion3) {
+			cout << "\nBuilding against SDL 3\n\n";
+			setup.defines.push_back("USE_SDL3");
+		} else {
+			std::cerr << "ERROR: Unsupported SDL version\n";
+			return -1;
+		}
 	}
 
 	if (setup.useStaticDetection) {
@@ -570,6 +594,11 @@ int main(int argc, char *argv[]) {
 		if (!msvc) {
 			std::cerr << "ERROR: Unsupported version: \"" << msvcVersion << "\" passed to \"--msvc-version\"!\n";
 			return -1;
+		}
+
+		if (setup.useSlnx && msvc->version < 17) {
+			std::cerr << "ERROR: Using SLNX solution files requires Visual Studio 2022 17.14 or higher\n";
+			return 1;
 		}
 
 		////////////////////////////////////////////////////////////////////////////
@@ -813,7 +842,9 @@ void displayHelp(const char *exe) {
 	        " --tests                    Create project files for the tests\n"
 	        "                            (ignores --build-events and --installer, as well as engine settings)\n"
 	        "                            (default: false)\n"
-	        " --use-windows-unicode      Use Windows Unicode APIs\n"
+			" --use-slnx                 Use new XML-based Visual Studio solution format\n"
+			"                            (default: false)\n"
+			" --use-windows-unicode      Use Windows Unicode APIs\n"
 	        "                            (default: true)\n"
 	        " --use-windows-ansi         Use Windows ANSI APIs\n"
 	        "                            (default: false)\n"
@@ -823,6 +854,10 @@ void displayHelp(const char *exe) {
 			"                            " LIBS_DEFINE " environment variable\n "
 	        " --vcpkg                    Use vcpkg-provided libraries instead of pre-built libraries\n"
 	        "                            (default: false)\n"
+	        "\n"
+	        "XCode specific settings:\n"
+	        " --ios                      build for iOS or tvOS\n"
+	        " --tvos                     build for iOS or tvOS\n"
 	        "\n"
 	        "Engines settings:\n"
 	        " --list-engines             list all available engines and their default state\n"
@@ -1168,6 +1203,7 @@ const Feature s_features[] = {
 	{    "sdlnet",     "USE_SDL_NET", true, true,  "SDL_net support" },
 	{   "discord",     "USE_DISCORD", true, false, "Discord support" },
 	{ "retrowave",   "USE_RETROWAVE", true, false, "RetroWave OPL3 support" },
+	{       "nFM",         "USE_NFM", true, false, "Nokturnal nFM OPL2/OPL3 support" },
 	{       "a52",         "USE_A52", true, false, "ATSC A/52 support" },
 	{       "mpc",      "USE_MPCDEC", true, false, "Musepack support" },
 
@@ -1194,6 +1230,7 @@ const Feature s_features[] = {
 	{        "translation",               "USE_TRANSLATION", false, true,  "Translation support" },
 	{             "vkeybd",                 "ENABLE_VKEYBD", false, false, "Virtual keyboard support"},
 	{      "eventrecorder",          "ENABLE_EVENTRECORDER", false, false, "Event recorder support"},
+	{           "printing",           "USE_SYSTEM_PRINTING", false, true,  "Printing support"},
 	{            "updates",                   "USE_UPDATES", false, false, "Updates support"},
 	{            "dialogs",                "USE_SYSDIALOGS", false, true,  "System dialogs support"},
 	{         "langdetect",                "USE_DETECTLANG", false, true,  "System language detection support" }, // This feature actually depends on "translation", there
@@ -1272,7 +1309,7 @@ std::string getMSVCConfigName(MSVC_Architecture arch) {
 }
 
 FeatureList getAllFeatures() {
-	const size_t featureCount = sizeof(s_features) / sizeof(s_features[0]);
+	const size_t featureCount = ARRAYSIZE(s_features);
 
 	FeatureList features;
 	for (size_t i = 0; i < featureCount; ++i)
@@ -1287,6 +1324,18 @@ FeatureList getAllFeatures() {
  * This means disabling conflicting features, enabling meta-features, ...
  */
 static void fixupFeatures(ProjectType projectType, BuildSetup &setup) {
+#ifdef ENABLE_XCODE
+	// IMGUI and NASM are not available on Xcode
+	if (projectType == kProjectXcode) {
+		setFeatureBuildState("imgui", setup.features, false);
+		setFeatureBuildState("nasm", setup.features, false);
+	}
+	// OpenGL classic is not available on iOS/tvOS
+	if (projectType == kProjectXcode && setup.appleEmbedded) {
+		setFeatureBuildState("opengl_game_classic", setup.features, false);
+	}
+#endif
+
 	// Vorbis and Tremor can not be enabled simultaneously
 	if (getFeatureBuildState("tremor", setup.features)) {
 		setFeatureBuildState("vorbis", setup.features, false);
@@ -1321,18 +1370,13 @@ static void fixupFeatures(ProjectType projectType, BuildSetup &setup) {
 	}
 
 	// Check IMGUI dependencies
-	if (!getFeatureBuildState("opengl", setup.features) ||
+	if (getFeatureBuildState("imgui", setup.features) && (
+		!getFeatureBuildState("opengl", setup.features) ||
 		!getFeatureBuildState("freetype2", setup.features) ||
-		setup.useSDL == kSDLVersion1) {
+		setup.useSDL == kSDLVersion1)) {
 		std::cerr << "WARNING: imgui requires opengl, freetype2 and sdl2+\n";
 		setFeatureBuildState("imgui", setup.features, false);
 	}
-	// IMGUI is not available on Xcode
-#ifdef ENABLE_XCODE
-	if (projectType == kProjectXcode) {
-		setFeatureBuildState("imgui", setup.features, false);
-	}
-#endif
 
 	// Calculate 3D feature state
 	setFeatureBuildState("3d", setup.features,
@@ -1488,7 +1532,7 @@ BuildSetup removeFeatureFromSetup(BuildSetup setup, const std::string &feature) 
 }
 
 ToolList getAllTools() {
-	const size_t toolCount = sizeof(s_tools) / sizeof(s_tools[0]);
+	const size_t toolCount = ARRAYSIZE(s_tools);
 
 	ToolList tools;
 	for (size_t i = 0; i < toolCount; ++i)
@@ -1498,7 +1542,7 @@ ToolList getAllTools() {
 }
 
 MSVCList getAllMSVCVersions() {
-	const size_t msvcCount = sizeof(s_msvc) / sizeof(s_msvc[0]);
+	const size_t msvcCount = ARRAYSIZE(s_msvc);
 
 	MSVCList msvcVersions;
 	for (size_t i = 0; i < msvcCount; ++i)
@@ -1508,7 +1552,7 @@ MSVCList getAllMSVCVersions() {
 }
 
 const MSVCVersion *getMSVCVersion(int version) {
-	const size_t msvcCount = sizeof(s_msvc) / sizeof(s_msvc[0]);
+	const size_t msvcCount = ARRAYSIZE(s_msvc);
 
 	for (size_t i = 0; i < msvcCount; ++i) {
 		if (s_msvc[i].version == version)
@@ -1873,8 +1917,8 @@ FileNode *scanFiles(const std::string &dir, const StringList &includeList, const
 //////////////////////////////////////////////////////////////////////////
 // Project Provider methods
 //////////////////////////////////////////////////////////////////////////
-ProjectProvider::ProjectProvider(StringList &global_warnings, std::map<std::string, StringList> &project_warnings, StringList &global_errors, const int version)
-	: _version(version), _globalWarnings(global_warnings), _projectWarnings(project_warnings), _globalErrors(global_errors) {
+ProjectProvider::ProjectProvider(StringList &global_warnings, std::map<std::string, StringList> &project_warnings, StringList &global_errors)
+	: _globalWarnings(global_warnings), _projectWarnings(project_warnings), _globalErrors(global_errors) {
 }
 
 void ProjectProvider::createProject(BuildSetup &setup) {
@@ -1960,7 +2004,9 @@ void ProjectProvider::createProject(BuildSetup &setup) {
 		pchEx.clear();
 		// File list for the Project file
 		createModuleList(setup.srcDir + "/backends", setup.defines, setup.testDirs, in, ex, pchDirs, pchEx);
-		createModuleList(setup.srcDir + "/backends/platform/sdl", setup.defines, setup.testDirs, in, ex, pchDirs, pchEx);
+		if (std::find(setup.defines.begin(), setup.defines.end(), "SDL_BACKEND") != setup.defines.end()) {
+			createModuleList(setup.srcDir + "/backends/platform/sdl", setup.defines, setup.testDirs, in, ex, pchDirs, pchEx);
+		}
 		createModuleList(setup.srcDir + "/base", setup.defines, setup.testDirs, in, ex, pchDirs, pchEx);
 		createModuleList(setup.srcDir + "/common", setup.defines, setup.testDirs, in, ex, pchDirs, pchEx);
 		createModuleList(setup.srcDir + "/common/compression", setup.defines, setup.testDirs, in, ex, pchDirs, pchEx);
@@ -2379,47 +2425,53 @@ void ProjectProvider::createModuleList(const std::string &moduleDir, const Strin
 			++i;
 
 			while (i != tokens.end()) {
-				// Read input
-				std::string folder = unifyPath(*i);
+				if (*i == "\\") {
+					std::getline(moduleMk, line);
+					tokens = tokenize(line);
+					i = tokens.begin();
+				} else {
+					// Read input
+					std::string folder = unifyPath(*i);
 
-				// Get include folder
-				const std::string source_dir = "$(srcdir)/";
-				const std::string selector = getLastPathComponent(folder);
-				const std::string module = getLastPathComponent(moduleDir);
+					// Get include folder
+					const std::string source_dir = "$(srcdir)/";
+					const std::string selector = getLastPathComponent(folder);
+					const std::string module = getLastPathComponent(moduleDir);
 
-				folder.replace(folder.find(source_dir), source_dir.length(), "");
-				folder.replace(folder.find(selector), selector.length(), "");
-				folder.replace(folder.find(module), module.length(), moduleDir);
+					folder.replace(folder.find(source_dir), source_dir.length(), "");
+					folder.replace(folder.find(selector), selector.length(), "");
+					folder.replace(folder.find(module), module.length(), moduleDir);
 
-				// Scan all files in the include folder
-				FileList files = listDirectory(folder);
+					// Scan all files in the include folder
+					FileList files = listDirectory(folder);
 
-				// Add to list of test folders
-				if (shouldInclude.top()) {
-					testDirs.push_back(folder);
-				}
-
-				for (FileList::const_iterator f = files.begin(); f != files.end(); ++f) {
-					if (f->isDirectory)
-						continue;
-
-					std::string filename = folder + f->name;
-
+					// Add to list of test folders
 					if (shouldInclude.top()) {
-						// In case we should include a file, we need to make
-						// sure it is not in the exclude list already. If it
-						// is we just drop it from the exclude list.
-						excludeList.remove(filename);
-
-						includeList.push_back(filename);
-					} else if (std::find(includeList.begin(), includeList.end(), filename) == includeList.end()) {
-						// We only add the file to the exclude list in case it
-						// has not yet been added to the include list.
-						excludeList.push_back(filename);
+						testDirs.push_back(folder);
 					}
-				}
 
-				++i;
+					for (FileList::const_iterator f = files.begin(); f != files.end(); ++f) {
+						if (f->isDirectory)
+							continue;
+
+						std::string filename = folder + f->name;
+
+						if (shouldInclude.top()) {
+							// In case we should include a file, we need to make
+							// sure it is not in the exclude list already. If it
+							// is we just drop it from the exclude list.
+							excludeList.remove(filename);
+
+							includeList.push_back(filename);
+						} else if (std::find(includeList.begin(), includeList.end(), filename) == includeList.end()) {
+							// We only add the file to the exclude list in case it
+							// has not yet been added to the include list.
+							excludeList.push_back(filename);
+						}
+					}
+
+					++i;
+				}
 			}
 		} else if (*i == "ifdef") {
 			if (tokens.size() < 2)

@@ -403,7 +403,10 @@ Common::Error EoBCoreEngine::init() {
 
 	_screen = new Screen_EoB(this, _system);
 	assert(_screen);
-	_screen->setResolution();
+
+	Common::Error err = _screen->setResolution();
+	if (err.getCode() != Common::kNoError)
+		return err;
 
 	_res = new Resource(this);
 	assert(_res);
@@ -491,7 +494,7 @@ Common::Error EoBCoreEngine::init() {
 
 	loadFonts();
 
-	Common::Error err = KyraRpgEngine::init();
+	err = KyraRpgEngine::init();
 	if (err.getCode() != Common::kNoError)
 		return err;
 
@@ -520,13 +523,14 @@ Common::Error EoBCoreEngine::init() {
 	memset(&_wllShapeMap[13], -1, 5);
 
 	_wllVcnOffset = (_flags.platform == Common::kPlatformFMTowns) ? 0 : 16;
-	int bpp = (_flags.platform == Common::kPlatformFMTowns) ? 2 : 1;
+	int bpp = _screen->bytesPerPixel();
+	setVcnFormat(bpp);
 
-	_greenFadingTable = new uint8[256 * bpp];
-	_blueFadingTable = new uint8[256 * bpp];
-	_lightBlueFadingTable = new uint8[256 * bpp];
-	_blackFadingTable = new uint8[256 * bpp];
-	_greyFadingTable = new uint8[256 * bpp];
+	_greenFadingTable = new uint8[256 * bpp]();
+	_blueFadingTable = new uint8[256 * bpp]();
+	_lightBlueFadingTable = new uint8[256 * bpp]();
+	_blackFadingTable = new uint8[256 * bpp]();
+	_greyFadingTable = new uint8[256 * bpp]();
 
 	_monsters = new EoBMonsterInPlay[30]();
 

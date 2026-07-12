@@ -21,10 +21,12 @@
 
 #include "engines/advancedDetector.h"
 #include "graphics/scaler.h"
+#include "common/savefile.h"
 #include "common/translation.h"
 
 #include "private/private.h"
 #include "private/detection.h"
+#include "private/savegame.h"
 
 #include "backends/keymapper/action.h"
 #include "backends/keymapper/keymapper.h"
@@ -53,6 +55,17 @@ static const ADExtraGuiOptionsMap optionsList[] = {
 			0
 		}
 	},
+	{
+		GAMEOPTION_READING_MATERIAL_CONTRAST,
+		{
+			_s("Increased contrast for small print"),
+			_s("Enhance small printed paper close-ups for improved readability."),
+			"readingMaterialContrast",
+			false,
+			0,
+			0
+		}
+	},
 	AD_EXTRA_GUI_OPTIONS_TERMINATOR
 };
 
@@ -68,6 +81,7 @@ public:
 
 	Common::Error createInstance(OSystem *syst, Engine **engine, const ADGameDescription *desc) const override;
 	void getSavegameThumbnail(Graphics::Surface &thumb) override;
+	SaveStateDescriptor querySaveMetaInfos(const char *target, int slot) const override;
 	Common::KeymapArray initKeymaps(const char *target) const override;
 };
 
@@ -86,6 +100,35 @@ void PrivateMetaEngine::getSavegameThumbnail(Graphics::Surface &thumb) {
 	if (isNewPalette) {
 		free(palette);
 	}
+}
+
+/**
+ * querySaveMetaInfos override that filters out saves with incompatible formats.
+ *
+ * The Private Eye save format was significantly changed to add more engine state.
+ * Older saves are incompatible, and we might have to change the format again.
+ * Save files now contain a version number in their header so that we can detect
+ * that a save is compatible, and not present incompatible saves to users.
+ */
+SaveStateDescriptor PrivateMetaEngine::querySaveMetaInfos(const char *target, int slot) const {
+	using namespace Private;
+	
+	SaveStateDescriptor desc = MetaEngine::querySaveMetaInfos(target, slot);
+	if (desc.getSaveSlot() == -1) {
+		return desc;
+	}
+
+	// Only saves with compatible metadata headers are allowed.
+	Common::ScopedPtr<Common::InSaveFile> f(g_system->getSavefileManager()->openForLoading(
+		getSavegameFile(slot, target)));
+	if (f) {
+		SavegameMetadata meta;
+		if (!readSavegameMetadata(f.get(), meta)) {
+			return SaveStateDescriptor();
+		}
+	}
+
+	return desc;
 }
 
 Common::KeymapArray PrivateMetaEngine::initKeymaps(const char *target) const {

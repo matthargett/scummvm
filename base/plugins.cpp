@@ -100,7 +100,10 @@ public:
 		// static/dynamic plugin, like it's done for the engines
 		LINK_PLUGIN(AUTO)
 		LINK_PLUGIN(NULL)
-#if defined(WIN32)
+		#if defined(__LIBRETRO__)
+		LINK_PLUGIN(LIBRETRO_MIDI)
+		#else
+		#if defined(WIN32)
 		LINK_PLUGIN(WINDOWS)
 #endif
 #if defined(USE_ALSA)
@@ -126,9 +129,12 @@ public:
 #endif
 #if defined(MACOSX)
 		LINK_PLUGIN(COREAUDIO)
+		#endif
+		#if defined(MACOSX) || defined(IPHONE) && !defined(IPHONE_TVOS)
 		LINK_PLUGIN(COREMIDI)
-#endif
-#ifdef USE_FLUIDSYNTH
+		#endif
+		#endif
+		#ifdef USE_FLUIDSYNTH
 		LINK_PLUGIN(FLUIDSYNTH)
 #endif
 
@@ -311,7 +317,11 @@ void PluginManagerUncached::init() {
 	unloadPluginsExcept(PLUGIN_TYPE_ENGINE, nullptr, false); // empty the engine plugins
 
 #ifndef DETECTION_STATIC
-	Common::String detectPluginName = "detection";
+#ifdef PLUGIN_DETECTION_NAME
+Common::String detectPluginName = PLUGIN_DETECTION_NAME;
+#else
+Common::String detectPluginName = "detection";
+#endif
 #ifdef PLUGIN_SUFFIX
 	detectPluginName += PLUGIN_SUFFIX;
 #endif

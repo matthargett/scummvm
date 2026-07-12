@@ -88,10 +88,11 @@ private:
 	SavedGame *saveGameToRegister();
 	void originalSaveLoadScreen();
 	void loadGame(SavedGame *game);
+	bool autosaveExists();
 
 	RoomFileRegister *readScreenDataFile(Common::SeekableReadStream *screenDataFile);
 	void lookAtObject(byte objectNumber);
-	void useInventoryObjectWithInventoryObject(uint obj1, uint obj2);
+	void useInventoryObjectWithInventoryObject(int16 obj1, int16 obj2);
 	void pickupScreenObject();
 	void useScreenObject();
 	void openScreenObject();
