@@ -19,42 +19,29 @@
  *
  */
 
-#ifndef PLATFORM_PLAYDATE_PORTDEFS_H
-#define PLATFORM_PLAYDATE_PORTDEFS_H
+#ifndef BACKENDS_FS_PLAYDATE_FS_FACTORY_H
+#define BACKENDS_FS_PLAYDATE_FS_FACTORY_H
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdarg.h>
-#include <stddef.h>
-#include <assert.h>
-#include <ctype.h>
+#include "backends/fs/fs-factory.h"
 
-#define __STDC_CONSTANT_MACROS
-#define __STDC_FORMAT_MACROS
-#define __STDC_LIMIT_MACROS
-#include <inttypes.h>
+typedef struct PlaydateAPI PlaydateAPI;
 
-#include <limits.h>
-#include <math.h>
-#include <new>
-#include <limits>
+/**
+ * Creates PlaydateFilesystemNode objects.
+ *
+ * Parts of this class are documented in the base interface class,
+ * FilesystemFactory.
+ */
+class PlaydateFilesystemFactory final : public FilesystemFactory {
+public:
+	explicit PlaydateFilesystemFactory(PlaydateAPI *pd) : _pd(pd) {}
 
-// GCC for arm-none-eabi uses its own <stdint.h>, which does not set
-// __int64_t_defined. Newlib's <inttypes.h> guards the 64-bit format
-// macros with it and therefore leaves them undefined.
-#ifndef PRId64
-#define PRId64 "lld"
-#define PRIi64 "lli"
-#define PRIo64 "llo"
-#define PRIu64 "llu"
-#define PRIx64 "llx"
-#define PRIX64 "llX"
-#define SCNd64 "lld"
-#define SCNi64 "lli"
-#define SCNo64 "llo"
-#define SCNu64 "llu"
-#define SCNx64 "llx"
-#endif
+	AbstractFSNode *makeRootFileNode() const override;
+	AbstractFSNode *makeCurrentDirectoryFileNode() const override;
+	AbstractFSNode *makeFileNodePath(const Common::String &path) const override;
+
+private:
+	PlaydateAPI *_pd;
+};
 
 #endif

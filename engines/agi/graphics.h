@@ -121,6 +121,11 @@ private:
 	uint16 _displayScreenWidth;
 	uint16 _displayScreenHeight;
 
+	// Width of the game area in kRenderPlaydate mode: parser (AGI)
+	// games use 320 pixels and leave the right 80 for the word picker,
+	// preAGI games have no parser and use the full 400.
+	uint16 _playdateGameWidth;
+
 	uint16 _displayFontWidth;
 	uint16 _displayFontHeight;
 

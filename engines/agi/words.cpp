@@ -429,6 +429,23 @@ void Words::collectAllWords(Common::Array<Common::String> &out) const {
 	out.swap(unique);
 }
 
+Common::String Words::firstWordForId(uint16 id) const {
+	Common::String best;
+	for (Common::HashMap<byte, Common::Array<WordEntry>>::const_iterator it = _dictionary.begin(); it != _dictionary.end(); ++it) {
+		const Common::Array<WordEntry> &bucket = it->_value;
+		for (uint i = 0; i < bucket.size(); ++i) {
+			if (bucket[i].id != id)
+				continue;
+			// Prefer the shortest synonym as the canonical form
+			// (e.g. "look" over "examine"); break ties alphabetically.
+			if (best.empty() || bucket[i].word.size() < best.size() ||
+			    (bucket[i].word.size() == best.size() && bucket[i].word.compareToIgnoreCase(best) < 0))
+				best = bucket[i].word;
+		}
+	}
+	return best;
+}
+
 void Words::collectWordsForIds(const Common::Array<uint16> &ids, Common::Array<Common::String> &out) const {
 	out.clear();
 	if (ids.empty())

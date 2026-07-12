@@ -19,22 +19,13 @@
  *
  */
 
-#ifndef PLATFORM_PLAYDATE_FS_H
-#define PLATFORM_PLAYDATE_FS_H
+#ifndef PLATFORM_PLAYDATE_SDK_H
+#define PLATFORM_PLAYDATE_SDK_H
 
-#include "backends/fs/fs-factory.h"
-#include "common/fs.h"
+// The Playdate C API is a plain C header; make sure everything it
+// declares (in particular the eventHandler prototype) gets C linkage.
+extern "C" {
 #include "pd_api.h"
+}
 
-class PlaydateFilesystemFactory : public FilesystemFactory {
-public:
-	PlaydateFilesystemFactory(PlaydateAPI *pd) : _pd(pd) {}
-	virtual AbstractFSNode *makeRootFileNode() const;
-	virtual AbstractFSNode *makeCurrentDirectoryFileNode() const;
-	virtual AbstractFSNode *makeFileNodePath(const Common::String &path) const;
-
-private:
-	PlaydateAPI *_pd;
-};
-
-#endif /* PLATFORM_PLAYDATE_FS_H */
+#endif

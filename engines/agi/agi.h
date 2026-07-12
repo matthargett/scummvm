@@ -112,8 +112,7 @@ enum AgiGameFeatures {
 	GF_AGDS        = (1 << 1), // marks games created with AGDS - all using AGI version 2.440
 	GF_AGI256      = (1 << 2), // marks fanmade AGI-256 games
 	GF_FANMADE     = (1 << 3), // marks fanmade games
-	GF_2GSOLDSOUND = (1 << 5),
-	GF_EXTCHAR     = (1 << 6)  // use WORDS.TOK.EXTENDED
+	GF_2GSOLDSOUND = (1 << 5)
 };
 
 enum AgiGameID {
@@ -612,6 +611,8 @@ public:
 	bool _noSaveLoadAllowed;
 
 #ifdef PLAYDATE
+	// Owned by AgiEngine (created in agiInit), but declared here so the
+	// graphics manager, which only knows AgiBase, can draw the picker.
 	PlaydateMenu *_playdateMenu;
 #endif
 
@@ -762,9 +763,6 @@ public:
 	PictureMgr *_picture;
 	AgiLoader *_loader;
 	GfxMenu *_menu;
-#ifdef PLAYDATE
-	PlaydateMenu *_playdateMenu;
-#endif
 	SystemUI *_systemUI;
 	Common::DumpFile *_logFile; // File used for the log() agi command.
 

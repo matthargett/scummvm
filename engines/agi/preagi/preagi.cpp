@@ -98,6 +98,7 @@ byte PreAgiEngine::getWhite() const {
 		return 3;
 	case Common::kRenderHercA:
 	case Common::kRenderHercG:
+	case Common::kRenderPlaydate:
 		return 1;
 	default:
 		return 15;
@@ -130,6 +131,7 @@ void PreAgiEngine::drawStr(int row, int col, int attr, const char *buffer) {
 		break;
 	case Common::kRenderHercA:
 	case Common::kRenderHercG:
+	case Common::kRenderPlaydate:
 		// Map non-black text to amber/green
 		if (foreground != 0) {
 			foreground = 1;
