@@ -69,6 +69,11 @@ public:
 
 	void draw();
 
+	/** Feeds any buffered picker command into the AGI key queue as space
+	 *  allows. Called once per cycle so a long command never overflows
+	 *  the queue. */
+	void feedPendingInput();
+
 	/** Handles an event; returns true if it was consumed by the picker. */
 	bool handleEvent(const Common::Event &event);
 
@@ -86,26 +91,35 @@ private:
 	void clampSelection();
 	void resetMarquee();
 	void injectCommand(const Common::String &command);
+	Common::String phraseText(const Common::Array<uint16> &ids, uint from) const;
 	Common::String visibleLabel(int index, bool selected);
 
 	AgiEngine *_vm;
 	bool _visible;
 	bool _parserGame; // sticky: set once any said() phrase is recorded
 
-	// Recorded room vocabulary. Each phrase is a said() word-group id
-	// sequence with the verb first; wildcard ids (anyword / rest-of-line)
-	// are dropped.
+	// Recorded room vocabulary. Each phrase is the full said() word-group
+	// id sequence with the verb first. Only phrases the picker can fully
+	// compose are kept: those containing a wildcard (anyword / rest-of-
+	// line), which need a word the keyboard-less picker cannot supply, are
+	// dropped, so every offered command satisfies its said() test.
 	Common::Array<Common::Array<uint16> > _phrases;
 
 	Mode _mode;
 	uint16 _verbId;            // selected verb (in noun mode)
 	Common::String _verbWord;  // its canonical word
 
-	// The list currently shown (verbs or nouns for the chosen verb).
+	// The list currently shown. In verb mode _listIds holds verb ids; in
+	// noun mode _listCommands holds the full command each entry submits.
 	Common::Array<uint16> _listIds;
-	Common::Array<Common::String> _listWords;
+	Common::Array<Common::String> _listWords;    // display labels
+	Common::Array<Common::String> _listCommands; // full commands (noun mode)
 	int _selectedIndex;
 	int _scrollOffset;
+
+	// Command waiting to be fed into the AGI key queue, terminated by a
+	// carriage return that stands in for ENTER.
+	Common::String _pendingInput;
 
 	// Marquee state for the selected long word.
 	int _marqueeStart;

@@ -95,10 +95,6 @@ void TextMgr::configureScreen(uint16 gameRow) {
 
 	// forward data to GfxMgr as well
 	_gfx->setRenderStartOffset(gameRow * FONT_VISUAL_HEIGHT);
-
-	// Set default status/prompt rows to match classic layout if not overridden later.
-	_statusRow = 0;
-	_promptRow = FONT_ROW_CHARACTERS - 1;
 }
 uint16 TextMgr::getWindowRowMin() {
 	return _window_Row_Min;

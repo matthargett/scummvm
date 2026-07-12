@@ -1417,6 +1417,10 @@ void GfxMgr::shakeScreen(int16 repeatCount) {
 void GfxMgr::updateScreen() {
 #ifdef PLAYDATE
 	if (_vm->_renderMode == Common::kRenderPlaydate && _vm->_playdateMenu) {
+		// Drain any command the picker composed into the key queue a
+		// little at a time, so a long command cannot overflow it.
+		_vm->_playdateMenu->feedPendingInput();
+
 		// The picker only claims screen space once the game is known to
 		// use the parser. Until then (menu/pointer games, and the title
 		// sequence of parser games) the game keeps the full width. When

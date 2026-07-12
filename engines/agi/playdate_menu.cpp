@@ -55,13 +55,20 @@ void PlaydateMenu::resetContextWords() {
 }
 
 void PlaydateMenu::addSaidPhrase(const uint16 *ids, uint count) {
-	// Keep only real words, preserving order; the first survivor is the
-	// verb and the rest are nouns. Wildcards (1 = anyword, 9999 =
-	// rest-of-line) carry no word to display.
+	// A said() phrase is "verb noun...". The picker can only offer
+	// commands it can compose in full, so a phrase containing a wildcard
+	// (1 = anyword, 9999 = rest-of-line) is dropped: anyword consumes a
+	// parsed word the keyboard-less picker cannot supply, so offering the
+	// verb alone would submit a command that fails the said() test.
 	Common::Array<uint16> phrase;
 	for (uint i = 0; i < count; ++i) {
-		if (ids[i] != 1 && ids[i] != 9999)
-			phrase.push_back(ids[i]);
+		if (ids[i] == 1 || ids[i] == 9999)
+			return;
+		// Ignore-words (id 0) match nothing and are not stored in the
+		// dictionary, so they cannot be shown or typed; skip them.
+		if (ids[i] == 0)
+			continue;
+		phrase.push_back(ids[i]);
 	}
 	if (phrase.empty())
 		return;
@@ -99,6 +106,7 @@ void PlaydateMenu::enterVerbMode() {
 
 	_listIds.clear();
 	_listWords.clear();
+	_listCommands.clear();
 
 	// Distinct verbs (first id of each phrase), in first-seen order.
 	for (uint i = 0; i < _phrases.size(); ++i) {
@@ -125,6 +133,21 @@ void PlaydateMenu::enterVerbMode() {
 	resetMarquee();
 }
 
+Common::String PlaydateMenu::phraseText(const Common::Array<uint16> &ids, uint from) const {
+	// Joins the words of a phrase (from index `from`) into a command
+	// string. Returns empty if any id has no dictionary word.
+	Common::String out;
+	for (uint k = from; k < ids.size(); ++k) {
+		Common::String word = _vm->_words->firstWordForId(ids[k]);
+		if (word.empty())
+			return Common::String();
+		if (!out.empty())
+			out += ' ';
+		out += word;
+	}
+	return out;
+}
+
 void PlaydateMenu::enterNounMode(uint16 verbId, const Common::String &verbWord) {
 	_mode = kModeNoun;
 	_verbId = verbId;
@@ -132,28 +155,38 @@ void PlaydateMenu::enterNounMode(uint16 verbId, const Common::String &verbWord) 
 
 	_listIds.clear();
 	_listWords.clear();
+	_listCommands.clear();
 
-	// Distinct nouns paired with this verb across the room's phrases.
+	// One entry per complete phrase that starts with this verb. The label
+	// shows the words after the verb (or the verb itself when the phrase
+	// is the verb alone); selecting submits the entire phrase, so
+	// multi-word said() tests like said("put","key","in","lock") are
+	// satisfied in full.
 	for (uint i = 0; i < _phrases.size(); ++i) {
 		if (_phrases[i][0] != verbId)
 			continue;
-		for (uint k = 1; k < _phrases[i].size(); ++k) {
-			const uint16 id = _phrases[i][k];
-			bool present = false;
-			for (uint j = 0; j < _listIds.size(); ++j) {
-				if (_listIds[j] == id) {
-					present = true;
-					break;
-				}
+
+		Common::String command = phraseText(_phrases[i], 0);
+		if (command.empty())
+			continue; // a word is missing from the dictionary
+
+		bool present = false;
+		for (uint j = 0; j < _listCommands.size(); ++j) {
+			if (_listCommands[j] == command) {
+				present = true;
+				break;
 			}
-			if (present)
-				continue;
-			Common::String word = _vm->_words->firstWordForId(id);
-			if (word.empty())
-				continue;
-			_listIds.push_back(id);
-			_listWords.push_back(word);
 		}
+		if (present)
+			continue;
+
+		Common::String label = phraseText(_phrases[i], 1);
+		if (label.empty())
+			label = verbWord; // verb-only phrase
+
+		_listCommands.push_back(command);
+		_listWords.push_back(label);
+		_listIds.push_back(0);
 	}
 
 	_selectedIndex = 0;
@@ -190,32 +223,46 @@ void PlaydateMenu::clampSelection() {
 }
 
 void PlaydateMenu::injectCommand(const Common::String &command) {
-	for (uint i = 0; i < command.size(); ++i) {
-		_vm->_keyQueue[_vm->_keyQueueEnd++] = command[i];
+	// The AGI key queue holds only KEY_QUEUE_SIZE-1 keys, far fewer than a
+	// multi-word command plus ENTER. Buffer the command and let
+	// feedPendingInput() drain it into the queue over as many cycles as it
+	// takes, so it can never wrap and corrupt the queue. '\r' marks ENTER.
+	_pendingInput += command;
+	_pendingInput += '\r';
+}
+
+void PlaydateMenu::feedPendingInput() {
+	while (!_pendingInput.empty()) {
+		const int used = (_vm->_keyQueueEnd - _vm->_keyQueueStart + KEY_QUEUE_SIZE) % KEY_QUEUE_SIZE;
+		if (used >= KEY_QUEUE_SIZE - 1)
+			break; // queue full; resume next cycle
+
+		const char c = _pendingInput[0];
+		_pendingInput.deleteChar(0);
+		_vm->_keyQueue[_vm->_keyQueueEnd++] = (c == '\r') ? AGI_KEY_ENTER : (uint16)(byte)c;
 		_vm->_keyQueueEnd %= KEY_QUEUE_SIZE;
 	}
-	// Submit the line.
-	_vm->_keyQueue[_vm->_keyQueueEnd++] = AGI_KEY_ENTER;
-	_vm->_keyQueueEnd %= KEY_QUEUE_SIZE;
 }
 
 void PlaydateMenu::select() {
-	if (_selectedIndex < 0 || _selectedIndex >= (int)_listWords.size())
-		return;
-
-	const uint16 id = _listIds[_selectedIndex];
-	const Common::String word = _listWords[_selectedIndex];
-
 	if (_mode == kModeVerb) {
-		enterNounMode(id, word);
-		// A verb the room never pairs with a noun is a complete command
-		// on its own (e.g. "look", "inventory").
-		if (_listWords.empty()) {
-			injectCommand(word);
+		if (_selectedIndex < 0 || _selectedIndex >= (int)_listIds.size())
+			return;
+		enterNounMode(_listIds[_selectedIndex], _listWords[_selectedIndex]);
+
+		// If the verb resolves to a single complete command (its only
+		// phrase is the verb alone), submit it directly rather than
+		// showing a one-item noun list.
+		if (_listCommands.size() == 1 && _listCommands[0] == _verbWord) {
+			injectCommand(_listCommands[0]);
 			enterVerbMode();
+		} else if (_listCommands.empty()) {
+			enterVerbMode(); // nothing composable; stay on verbs
 		}
 	} else {
-		injectCommand(_verbWord + " " + word);
+		if (_selectedIndex < 0 || _selectedIndex >= (int)_listCommands.size())
+			return;
+		injectCommand(_listCommands[_selectedIndex]);
 		enterVerbMode();
 	}
 }
