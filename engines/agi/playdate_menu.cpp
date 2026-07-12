@@ -29,7 +29,7 @@ namespace Agi {
 
 PlaydateMenu::PlaydateMenu(AgiEngine *vm) :
 	_vm(vm), _visible(true), _parserGame(false), _mode(kModeVerb), _verbId(0),
-	_selectedIndex(0), _scrollOffset(0),
+	_charIsNumber(false), _selectedIndex(0), _scrollOffset(0),
 	_marqueeStart(0), _marqueeDir(1), _marqueeNextMs(0) {
 }
 
@@ -45,8 +45,40 @@ void PlaydateMenu::hide() {
 }
 
 bool PlaydateMenu::isVisible() const {
-	// Only parser games show the picker (and reserve space for it).
-	return _visible && _parserGame;
+	if (!_visible)
+		return false;
+	// The picker is shown for parser games (word list) and, for any game,
+	// while a GetString/GetNumber prompt is asking for typed input (where
+	// it acts as an on-screen keyboard).
+	bool isNumber;
+	return _parserGame || inCharInputLoop(isNumber);
+}
+
+bool PlaydateMenu::inCharInputLoop(bool &isNumber) const {
+	if (!_vm->_game.cycleInnerLoopActive)
+		return false;
+	switch (_vm->_game.cycleInnerLoopType) {
+	case CYCLE_INNERLOOP_GETSTRING:
+		isNumber = false;
+		return true;
+	case CYCLE_INNERLOOP_GETNUMBER:
+		isNumber = true;
+		return true;
+	default:
+		return false;
+	}
+}
+
+bool PlaydateMenu::claimsInput() const {
+	if (!_visible)
+		return false;
+	bool isNumber;
+	if (inCharInputLoop(isNumber))
+		return true; // on-screen keyboard owns input during text entry
+	// Word picker only takes input for parser games at the command prompt,
+	// never during message boxes, menus or other inner loops.
+	return _parserGame && !_vm->_game.cycleInnerLoopActive &&
+	       _vm->promptIsEnabled();
 }
 
 void PlaydateMenu::resetContextWords() {
@@ -194,6 +226,51 @@ void PlaydateMenu::enterNounMode(uint16 verbId, const Common::String &verbWord) 
 	resetMarquee();
 }
 
+void PlaydateMenu::enterCharMode(bool isNumber) {
+	_mode = kModeChar;
+	_charIsNumber = isNumber;
+
+	_listIds.clear();
+	_listWords.clear();
+	_listCommands.clear();
+
+	if (isNumber) {
+		for (char c = '0'; c <= '9'; ++c) {
+			_listIds.push_back((uint16)c);
+			_listWords.push_back(Common::String(c));
+		}
+	} else {
+		for (char c = 'A'; c <= 'Z'; ++c) {
+			_listIds.push_back((uint16)c);
+			_listWords.push_back(Common::String(c));
+		}
+		_listIds.push_back((uint16)' ');
+		_listWords.push_back("Spc");
+	}
+
+	// Editing and submission entries, common to both modes.
+	_listIds.push_back(AGI_KEY_BACKSPACE);
+	_listWords.push_back("Del");
+	_listIds.push_back(AGI_KEY_ENTER);
+	_listWords.push_back("Ent");
+
+	_selectedIndex = 0;
+	_scrollOffset = 0;
+	resetMarquee();
+}
+
+void PlaydateMenu::syncCharMode() {
+	bool isNumber;
+	if (inCharInputLoop(isNumber)) {
+		// Enter (or re-enter if GetString→GetNumber changed) char mode.
+		if (_mode != kModeChar || _charIsNumber != isNumber)
+			enterCharMode(isNumber);
+	} else if (_mode == kModeChar) {
+		// The text prompt ended; return to the word list.
+		enterVerbMode();
+	}
+}
+
 void PlaydateMenu::resetMarquee() {
 	_marqueeStart = 0;
 	_marqueeDir = 1;
@@ -231,6 +308,13 @@ void PlaydateMenu::injectCommand(const Common::String &command) {
 	_pendingInput += '\r';
 }
 
+void PlaydateMenu::injectKey(uint16 key) {
+	// A single keystroke for the on-screen keyboard. '\r' is the queue's
+	// stand-in for ENTER, so map AGI_KEY_ENTER onto it and pass all other
+	// keys (letters, digits, space, backspace) through verbatim.
+	_pendingInput += (key == AGI_KEY_ENTER) ? '\r' : (char)key;
+}
+
 void PlaydateMenu::feedPendingInput() {
 	while (!_pendingInput.empty()) {
 		const int used = (_vm->_keyQueueEnd - _vm->_keyQueueStart + KEY_QUEUE_SIZE) % KEY_QUEUE_SIZE;
@@ -245,6 +329,12 @@ void PlaydateMenu::feedPendingInput() {
 }
 
 void PlaydateMenu::select() {
+	if (_mode == kModeChar) {
+		if (_selectedIndex < 0 || _selectedIndex >= (int)_listIds.size())
+			return;
+		injectKey(_listIds[_selectedIndex]);
+		return;
+	}
 	if (_mode == kModeVerb) {
 		if (_selectedIndex < 0 || _selectedIndex >= (int)_listIds.size())
 			return;
@@ -275,6 +365,11 @@ void PlaydateMenu::back() {
 bool PlaydateMenu::handleEvent(const Common::Event &event) {
 	if (!_visible)
 		return false;
+
+	// Keep the mode in step with the engine: entering a GetString/GetNumber
+	// loop turns the picker into an on-screen keyboard, leaving it restores
+	// the word list.
+	syncCharMode();
 
 	switch (event.type) {
 	case Common::EVENT_WHEELDOWN:
@@ -340,6 +435,9 @@ Common::String PlaydateMenu::visibleLabel(int index, bool selected) {
 void PlaydateMenu::draw() {
 	if (!_visible)
 		return;
+
+	// Match the picker's contents to the current input mode before drawing.
+	syncCharMode();
 
 	GfxMgr *gfx = _vm->_gfx;
 

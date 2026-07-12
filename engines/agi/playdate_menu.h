@@ -54,6 +54,15 @@ public:
 	bool isVisible() const;
 
 	/**
+	 * True when the picker should receive input this cycle: either a
+	 * parser game with the prompt active, or any game currently inside a
+	 * GetString/GetNumber inner loop (where the picker turns into an
+	 * on-screen keyboard). Used by the keyboard handler to decide whether
+	 * to route events to the picker.
+	 */
+	bool claimsInput() const;
+
+	/**
 	 * True once the game has been seen to use the parser (any said()
 	 * test). Menu- and pointer-driven games (Donald Duck's Playground,
 	 * Mixed-Up Mother Goose, ...) never set this, so the picker stays
@@ -80,19 +89,29 @@ public:
 private:
 	enum Mode {
 		kModeVerb,
-		kModeNoun
+		kModeNoun,
+		kModeChar // on-screen keyboard during GetString/GetNumber
 	};
 
 	void enterVerbMode();
 	void enterNounMode(uint16 verbId, const Common::String &verbWord);
+	void enterCharMode(bool isNumber);
 	void select();
 	void back();
 	void moveSelection(int delta);
 	void clampSelection();
 	void resetMarquee();
 	void injectCommand(const Common::String &command);
+	void injectKey(uint16 key);
 	Common::String phraseText(const Common::Array<uint16> &ids, uint from) const;
 	Common::String visibleLabel(int index, bool selected);
+
+	/** True while the engine is inside a GetString/GetNumber inner loop.
+	 *  Sets isNumber for GetNumber (digits only). */
+	bool inCharInputLoop(bool &isNumber) const;
+
+	/** Enters/leaves char mode to match the current inner-loop state. */
+	void syncCharMode();
 
 	AgiEngine *_vm;
 	bool _visible;
@@ -108,6 +127,7 @@ private:
 	Mode _mode;
 	uint16 _verbId;            // selected verb (in noun mode)
 	Common::String _verbWord;  // its canonical word
+	bool _charIsNumber;        // char mode: digits-only (GetNumber)
 
 	// The list currently shown. In verb mode _listIds holds verb ids; in
 	// noun mode _listCommands holds the full command each entry submits.

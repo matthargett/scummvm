@@ -73,14 +73,14 @@ void AgiEngine::processScummVMEvents() {
 		// (Return/Escape). Consumed events do not reach the game, so the
 		// d-pad still moves the ego while the picker is up.
 		//
-		// It may only claim input while the normal command parser is
-		// accepting it: no inner loop is running and the prompt is
-		// enabled. That leaves message boxes and "press a key" cutscenes,
-		// and the GetString/GetNumber inner loops used for things like
-		// player-name entry (Space Quest, Mixed-Up Mother Goose) and the
-		// Leisure Suit Larry age quiz, to receive input normally.
-		if (_playdateMenu && _playdateMenu->isVisible() &&
-		    !cycleInnerLoopIsActive() && _text->promptIsEnabled() &&
+		// claimsInput() decides when: for a parser game only while the
+		// command prompt is accepting input (no inner loop, prompt
+		// enabled), leaving message boxes and "press a key" cutscenes to
+		// the game; and for any game while a GetString/GetNumber inner
+		// loop is running, where the picker becomes an on-screen keyboard
+		// for player-name entry (Space Quest, Mixed-Up Mother Goose) and
+		// the Leisure Suit Larry age quiz.
+		if (_playdateMenu && _playdateMenu->claimsInput() &&
 		    _playdateMenu->handleEvent(event))
 			continue;
 #endif
