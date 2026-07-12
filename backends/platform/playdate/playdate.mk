@@ -5,7 +5,20 @@ PDX_NAME = scummvm.pdx
 PDX_SOURCE_DIR = pdx-source
 
 ifdef PLAYDATE_SIMULATOR
+# The Simulator loads the native binary by a platform-specific name
+# (mirroring the SDK's own build support): pdex.dylib on macOS,
+# pdex.dll on Windows, pdex.so elsewhere. A wrong name makes the
+# Simulator fall back to Lua and fail with "Couldn't find pdz file
+# main.pdz". The simulator build always runs on the build host, so
+# uname at make time identifies the right platform.
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+PDX_BINARY = $(PDX_SOURCE_DIR)/pdex.dylib
+else ifneq (,$(findstring MINGW,$(UNAME_S))$(findstring MSYS,$(UNAME_S))$(findstring CYGWIN,$(UNAME_S)))
+PDX_BINARY = $(PDX_SOURCE_DIR)/pdex.dll
+else
 PDX_BINARY = $(PDX_SOURCE_DIR)/pdex.so
+endif
 else
 PDX_BINARY = $(PDX_SOURCE_DIR)/pdex.elf
 endif
