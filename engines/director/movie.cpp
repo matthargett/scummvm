@@ -170,12 +170,30 @@ void Movie::loadCastLibMapping(Common::SeekableReadStreamEndian &stream) {
 		int pathSize = stream.readByte();
 		Common::String path = stream.readString('\0', pathSize);
 		stream.readByte(); // null
-		if (pathSize > 1)
-			stream.readUint16();
+		if (pathSize > 1) {
+			// Separator after an external cast path: 1 byte in D7, uint16 in D5/D6.
+			// Not verified for D8+; falls back to the D7 (1-byte) guess with a warning.
+			uint16 ver = g_director->getVersion();
+			if (ver >= 700 && ver < 800) {
+				stream.readByte();
+			} else if (ver >= 800) {
+				warning("STUB: Movie::loadCastLibMapping(): cast-lib path separator width not verified for version v%d", ver);
+				stream.readByte();
+			} else {
+				stream.readUint16();
+			}
+		}
 		uint16 minMember = stream.readUint16();
 		uint16 maxMember = stream.readUint16();
-		stream.readUint16();
-		uint16 libResourceId = stream.readUint16();
+		uint32 libResourceId;
+		if (g_director->getVersion() >= 700) {
+			// D7+: single 32-bit resource id; verified against a D7 specimen
+			// (0x00010402) that a 16-bit read would truncate.
+			libResourceId = stream.readUint32();
+		} else {
+			stream.readUint16(); // unknown/reserved; 0 in tested D5/D6 movies
+			libResourceId = stream.readUint16();
+		}
 		uint16 libId = i + 1;
 		debugC(5, kDebugLoading, "Movie::loadCastLibMapping: name: %s, path: %s, minMember: %d, maxMember: %d, libResourceId: %d, libId: %d", utf8ToPrintable(name).c_str(), utf8ToPrintable(path).c_str(), minMember, maxMember, libResourceId, libId);
 		Common::SharedPtr<Archive> castArchive = _movieArchive;
@@ -191,6 +209,12 @@ void Movie::loadCastLibMapping(Common::SeekableReadStreamEndian &stream) {
 		Cast *cast = nullptr;
 		if (_casts.contains(libId)) {
 			cast = _casts.getVal(libId);
+			// The default internal cast is created before the MCsL is parsed;
+			// adopt the authored resource id and name
+			if (!isExternal) {
+				cast->_libResourceId = libResourceId;
+				cast->setCastName(name);
+			}
 		} else {
 			cast = new Cast(this, libId, false, isExternal, libResourceId);
 			cast->setCastName(name);
@@ -486,7 +510,7 @@ bool Movie::loadCastLibFrom(uint16 libId, Common::Path &filename) {
 		return false;
 	}
 
-	uint16 libResourceId = 1024;
+	uint32 libResourceId = 1024;
 	Common::String name;
 	if (_casts.contains(libId)) {
 		Cast *cast = _casts[libId];
@@ -534,7 +558,7 @@ Cast *Movie::getCast(CastMemberID memberID) {
 	return nullptr;
 }
 
-Cast *Movie::getCastByLibResourceID(int libresourceID) {
+Cast *Movie::getCastByLibResourceID(uint32 libresourceID) {
 	for (auto it : _casts) {
 		if (it._value->_libResourceId == libresourceID) {
 			debugC(3, kDebugSaving, "Movie::getCastByLibResourceID: Found cast with libresourceID: %d", libresourceID);

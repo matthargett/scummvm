@@ -74,12 +74,13 @@ MODULE_OBJS += \
 	cloud/onedrive/onedrivelistdirectoryrequest.o \
 	cloud/onedrive/onedriveuploadrequest.o
 endif
+endif
 
 ifdef USE_SCUMMVMDLC
 MODULE_OBJS += \
 	dlc/scummvmcloud.o
 endif
-endif
+
 
 ifdef USE_DLC
 MODULE_OBJS += \

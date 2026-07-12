@@ -84,7 +84,7 @@ int himem_get_directory_entry(int id) {
 	error_flag = false;
 
 done:
-	return (error_flag);
+	return error_flag;
 }
 
 int himem_put_directory_entry(int id) {
@@ -140,9 +140,7 @@ int himem_resident(const char *filename) {
 	}
 
 	for (count = 0; (count < HIMEM_MAX_RESIDENT) && (id < 0); count++) {
-		if (himem_directory[count].memory_type == MEM_NONE) {
-			if (filename == NULL) id = count;
-		} else {
+		if (himem_directory[count].memory_type != MEM_NONE) {
 			if (scumm_stricmp(mark, himem_directory[count].list) == 0) {
 				id = count;
 			}
@@ -150,8 +148,10 @@ int himem_resident(const char *filename) {
 	}
 
 done:
-	if (id >= 0) himem_get_directory_entry(id);
-	if (himem_xms_directory != NULL) mem_free(himem_xms_directory);
+	if (id >= 0)
+		himem_get_directory_entry(id);
+	if (himem_xms_directory != NULL)
+		mem_free(himem_xms_directory);
 	return id;
 }
 

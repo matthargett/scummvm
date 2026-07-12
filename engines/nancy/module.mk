@@ -29,6 +29,7 @@ MODULE_OBJS = \
   action/puzzle/cubepuzzle.o \
   action/puzzle/cuttingpuzzle.o \
   action/puzzle/dotconnectpuzzle.o \
+  action/puzzle/drivingpuzzle.o \
   action/puzzle/gridmappuzzle.o \
   action/puzzle/hamradiopuzzle.o \
   action/puzzle/leverpuzzle.o \
@@ -53,6 +54,7 @@ MODULE_OBJS = \
   action/puzzle/rotatinglockpuzzle.o \
   action/puzzle/safedialpuzzle.o \
   action/puzzle/setplayerclock.o \
+  action/puzzle/sewingmachinepuzzle.o \
   action/puzzle/sliderpuzzle.o \
   action/puzzle/sortpuzzle.o \
   action/puzzle/soundequalizerpuzzle.o \

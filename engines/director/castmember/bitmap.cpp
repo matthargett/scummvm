@@ -344,8 +344,8 @@ Graphics::MacWidget *BitmapCastMember::createWidget(Common::Rect &bbox, Channel 
 
 	// _ditheredImg should contain a cached copy of the bitmap after any expensive
 	// colourspace transformations (e.g. palette remapping or dithering).
-	// We also want to make sure that
-	if (isModified() || (((srcBpp == 1) || (srcBpp > 1 && dstBpp == 1)) && !previouslyDithered)) {
+
+	if (isModified() || !previouslyDithered) {
 		if (_ditheredImg) {
 			_ditheredImg->free();
 			delete _ditheredImg;
@@ -356,14 +356,7 @@ Graphics::MacWidget *BitmapCastMember::createWidget(Common::Rect &bbox, Channel 
 		if (dstBpp == 1) {
 			// ScummVM using 8-bit video
 
-			if (srcBpp > 1
-			// At least early directors were not remapping 8bpp images. But in case it is
-			// needed, here is the code
-#if 0
-			|| (srcBpp == 1 &&
-				memcmp(g_director->_wm->getPalette(), _img->_palette, _img->_paletteSize))
-#endif
-				) {
+			if (srcBpp > 1) {
 
 				_ditheredImg = _picture->_surface.convertTo(g_director->_wm->_pixelformat, nullptr, 0, g_director->_wm->getPalette(), g_director->_wm->getPaletteSize());
 
@@ -373,12 +366,13 @@ Graphics::MacWidget *BitmapCastMember::createWidget(Common::Rect &bbox, Channel 
 			}
 		} else {
 			// ScummVM using RGB video
-			//if (srcBpp > 1 && srcFmt != dstFmt) {
-				// non-indexed surface, convert to 32-bit
-			//	_ditheredImg = _picture->_surface.convertTo(g_director->_wm->_pixelformat, nullptr, 0, g_director->_wm->getPalette(), g_director->_wm->getPaletteSize());
+			if (srcBpp > 1 && srcFmt != dstFmt) {
+				// non-indexed surface, convert to destination format.
+				// it's important that we check the formats instead of the Bpp;
+				// 16-bit can have 565 and 555 formatted images
+				_ditheredImg = _picture->_surface.convertTo(g_director->_wm->_pixelformat, nullptr, 0, g_director->_wm->getPalette(), g_director->_wm->getPaletteSize());
 
-			//} else
-			if (srcBpp == 1) {
+			} else if (srcBpp == 1) {
 				_ditheredImg = getDitherImg();
 			}
 		}
@@ -477,9 +471,14 @@ Graphics::Surface *BitmapCastMember::getDitherImg() {
 		// Only redither 8-bit images in 8-bit mode if we have the remap palette flag set, or it is external
 		if (targetBpp == 1 && !movie->_remapPalettesWhenNeeded && !_external)
 			break;
-		// If we're in RGB mode, and not in puppet palette mode, then "redither" as well.
-		if (targetBpp != 1 && score->_puppetPalette && !_external)
+		if (targetBpp != 1 && score->_puppetPalette && !_external) {
+			// we're in true colour mode, rendering a paletted image, and the puppet palette has been set
+			// use the score palette
+			const byte *palPtr = currentPalette->palette;
+			int palCount = currentPalette->length;
+			dither = _picture->_surface.convertTo(g_director->_wm->_pixelformat, palPtr, palCount, dstPalette, dstPaletteCount, Graphics::kDitherNaive);
 			break;
+		}
 		if (_external || (targetBpp != 1) || (castPaletteId != currentPaletteId && !isColorCycling)) {
 			const auto pals = g_director->getLoadedPalettes();
 			CastMemberID palIndex = pals.contains(castPaletteId) ? castPaletteId : CastMemberID(kClutSystemMac, -1);

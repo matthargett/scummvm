@@ -104,7 +104,7 @@ struct HotSpot {
 	int16 vocab;                          /* Vocabulary id of hotspot name */
 	int16 verb;                           /* Vocabulary id of default verb */
 
-	static constexpr int SIZE = 6 * 2 + (5 * 1) + 1 + 2 + 2;
+	static constexpr size_t SIZE = 6 * 2 + (5 * 1) + 1 + 2 + 2;
 	void load(Common::SeekableReadStream *src);
 };
 
@@ -117,7 +117,7 @@ struct Rail {
 	int16 x, y;                           /* Screen location of node         */
 	word weight[ROOM_MAX_RAILS + 2];    /* Distance to other nodes in room */
 
-	static constexpr int SIZE = 2 + 2 + 2 * (ROOM_MAX_RAILS + 2);
+	static constexpr size_t SIZE = 2 + 2 + 2 * (ROOM_MAX_RAILS + 2);
 	void load(Common::SeekableReadStream *src);
 };
 
@@ -200,7 +200,7 @@ struct RoomFile {
 
 	ShadowList shadow;               /* Shadow list                   */
 
-	static constexpr int SIZE = 80 + (2 * 10) + 2 + 2 + 2 + (2 + 2) + (2 + 2) + 2 * 16 +
+	static constexpr size_t SIZE = 80 + (2 * 10) + 2 + 2 + 2 + (2 + 2) + (2 + 2) + 2 * 16 +
 		(Rail::SIZE * ROOM_MAX_RAILS) + ShadowList::SIZE;
 	void load(Common::SeekableReadStream *src);
 };
@@ -261,7 +261,6 @@ extern int room_load_variant(int id, int variant, const char *base_path, RoomPtr
 	TileResource *depth_resource, int depth_ems_handle);
 extern void room_dump_attribute(Buffer *depth, Buffer *walk, Buffer *special,
 	TileMapHeader *depth_map);
-extern int room_compile_hotspots(int id, int compression);
 extern HotPtr room_load_hotspots(int id, int *num_spots);
 
 /**

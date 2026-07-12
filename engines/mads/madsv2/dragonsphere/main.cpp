@@ -122,6 +122,7 @@ static void main_cold_data_init() {
 	game_menu_init = global_menu_system_init;
 	game_menu_exit = global_menu_system_shutdown;
 	game_emergency_save = global_emergency_save;
+	game.difficulty = g_engine->isDemo() ? 0 : -1;
 
 	Common::strcpy_s(config_file_name, "config.dra");
 	Common::strcpy_s(save_game_key, "drag");
@@ -149,7 +150,7 @@ static void game_main(int argc, const char **argv) {
 	mads_mode = env_verify();
 
 	new_section = 1;
-	new_room = 101;
+	new_room = g_engine->isDemo() ? 110 : 101;
 	player.x = 160;
 	player.y = 78;
 
@@ -219,10 +220,16 @@ void dragonsphere_main() {
 		env_search_mode = ENV_SEARCH_CONCAT_FILES;
 
 	if (ConfMan.getBool("start_game") || ConfMan.hasKey("save_slot"))
+		// Start the game
 		selected_item = 0;
+	else if (g_engine->isDemo())
+		// Demo
+		selected_item = 9;
 	else if (ConfMan.getBool("start_intro"))
+		// Show the intro directly
 		selected_item = 3;
 	else
+		// Show the title screen
 		selected_item = -1;
 
 	while (!g_engine->shouldQuit()) {
@@ -257,12 +264,18 @@ void dragonsphere_main() {
 
 		case 3:
 			AnimView::animview_main("@dragon");
-			selected_item = -1;
+			selected_item = g_engine->isDemo() ? 0 : -1;
 			break;
 
 		case 4:
 			// Exit
 			return;
+
+		case 9:
+			// Demo
+			AnimView::animview_main("@demodisk");
+			selected_item = 0;
+			break;
 
 		default:
 			// Credits

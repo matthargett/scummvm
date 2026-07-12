@@ -1651,16 +1651,25 @@ static const WMEGameDescription gameDescriptions[] = {
 	WME_WINENTRY("jamesperis", "Demo",
 		WME_ENTRY1s("data.dcp", "edb9f9c7a08993c1e28f4e477b5f9830", 116113507), Common::ES_ESP, ADGF_UNSTABLE | ADGF_DEMO, WME_1_9_1),
 
-	// James Peris 2: The Fountain of Eternal Drunkenness (English)
+	// James Peris 2: The Fountain of Eternal Drunkenness (English) (Steam 2023-11-18)
 	WME_WINENTRY("jamesperis2", "Steam",
-		WME_ENTRY2s("data.dcp", "1d19fac76ab9267881214d7c7968acb6", 980791568,
-					"audio.dcp", "0a768e0266238772b698b5a26a9c2b50", 488048201), Common::EN_ANY, ADGF_UNSTABLE, WME_1_9_3),
+		WME_ENTRY2s("data.dcp", "aefa9016a6fcc6a57fb1ac1561945885", 983123199,
+					"audio.dcp", "35ad443ee6a47476010875e81cceadd6", 488107857), Common::EN_ANY, ADGF_UNSTABLE, WME_1_9_3),
 
-	// James Peris 2: The Fountain of Eternal Drunkenness (Spanish)
+	// James Peris 2: The Fountain of Eternal Drunkenness (Spanish) (Steam 2023-11-18)
 	WME_WINENTRY("jamesperis2", "Steam",
-		WME_ENTRY2s("data.dcp", "1d19fac76ab9267881214d7c7968acb6", 980791568,
-					"audio.dcp", "0a768e0266238772b698b5a26a9c2b50", 488048201), Common::ES_ESP, ADGF_UNSTABLE, WME_1_9_3),
+		WME_ENTRY2s("data.dcp", "aefa9016a6fcc6a57fb1ac1561945885", 983123199,
+					"audio.dcp", "35ad443ee6a47476010875e81cceadd6", 488107857), Common::ES_ESP, ADGF_UNSTABLE, WME_1_9_3),
 
+	// James Peris 2: The Fountain of Eternal Drunkenness - Uncut (English) (Steam 2023-11-18)
+	WME_WINENTRY("jamesperis2", "Steam",
+		WME_ENTRY2s("data.dcp", "f9102e99fadc25409ee2ef3040039023", 985240842,
+					"audio.dcp", "69f37a00693f812937dee6836e371d9e", 488048201), Common::EN_ANY, ADGF_UNSTABLE, WME_1_9_3),
+
+	// James Peris 2: The Fountain of Eternal Drunkenness - Uncut  (Spanish) (Steam 2023-11-18)
+	WME_WINENTRY("jamesperis2", "Steam",
+		WME_ENTRY2s("data.dcp", "f9102e99fadc25409ee2ef3040039023", 985240842,
+					"audio.dcp", "69f37a00693f812937dee6836e371d9e", 488048201), Common::ES_ESP, ADGF_UNSTABLE, WME_1_9_3),
 	// Lov Mamuta
 	WME_WINENTRY("lovmamuta", "",
 		WME_ENTRY1s("data.dcp", "ce2be4691fa0104cfdd63656cedaf810", 11198933), Common::CS_CZE, GF_3D, WME_1_9_1),
@@ -4332,7 +4341,12 @@ static const WMEGameDescription gameDescriptions[] = {
 	// 1 1/2 Ritter: Auf der Suche nach der hinreissenden Herzelinde (English fanmade)
 	WME_WINENTRY("ritter", "Fanmade",
 		WME_ENTRY2s("data.dcp", "5ac416cee605d3a30f4d59687b1cdab2", 364260278,
-					"string3.tab", "413ee9f47f52567d0ac22e34485cacfa", 513012), Common::EN_ANY, ADGF_NO_FLAGS, WME_1_8_6),
+					"string3.tab", "t:c65f5c610df9609ef99a453f225d7095", 513012), Common::EN_ANY, ADGF_NO_FLAGS, WME_1_8_6),
+
+	// 1 1/2 Ritter: Auf der Suche nach der hinreissenden Herzelinde (English fanmade v2.0)
+	WME_WINENTRY("ritter", "Fanmade",
+		WME_ENTRY2s("data.dcp", "5ac416cee605d3a30f4d59687b1cdab2", 364260278,
+					"string3.tab", "t:9df6cfd648a350d7a1a323483cc8726a", 513101), Common::EN_ANY, ADGF_NO_FLAGS, WME_1_8_6),
 
 	// 1 1/2 Ritter: Auf der Suche nach der hinreissenden Herzelinde (Czech fanmade)
 	WME_WINENTRY("ritter", "Fanmade",

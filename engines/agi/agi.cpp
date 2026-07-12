@@ -476,6 +476,9 @@ AgiEngine::AgiEngine(OSystem *syst, const AGIGameDescription *gameDesc) : AgiBas
 	_text = nullptr;
 	_loader = nullptr;
 	_menu = nullptr;
+#ifdef PLAYDATE
+	_playdateMenu = nullptr;
+#endif
 	_systemUI = nullptr;
 	_inventory = nullptr;
 	_logFile = nullptr;

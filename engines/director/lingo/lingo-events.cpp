@@ -134,16 +134,9 @@ void Movie::resolveScriptEvent(LingoEvent &event) {
 		else
 			spriteId = _score->getMouseSpriteIDFromPos(event.mousePos);
 
-		debugC(3, kDebugEvents, "Movie::resolveScriptEvent(%s): pos: [%d, %d], spriteId: %d", leventType2str(event.event), event.mousePos.x, event.mousePos.y, spriteId);
-
-		if (event.event == kEventMouseDown || event.event == kEventRightMouseDown) {
-			_lastClickedSpriteId = spriteId; // the clickOn
-		} else 	if (event.event == kEventMouseUp || event.event == kEventRightMouseUp) {
-			// Do not override when clicked on Score
-			if (spriteId)
-				_lastClickedSpriteId = spriteId;
-		}
-
+		debugC(3, kDebugEvents, "Movie::resolveScriptEvent(%s): id: %d sourceType: %s, handlerType: %s, pos: [%d, %d], spriteId: %d",
+			leventType2str(event.event), event.eventId, scriptType2str(event.scriptType),
+			eventHandlerSourceType2str(event.eventHandlerSourceType), event.mousePos.x, event.mousePos.y, spriteId);
 	}
 	// Very occasionally, we want to specify an event with a channel ID
 	// rather than infer it from the position. Allow it to override.
@@ -566,6 +559,14 @@ void Movie::queueEvent(Common::Queue<LingoEvent> &queue, LEvent event, int targe
 
 		uint16 spriteId = _score->getMouseSpriteIDFromPos(pos);
 		Sprite *sprite = _score->getSpriteById(spriteId);
+
+		if (event == kEventMouseDown || event == kEventRightMouseDown) {
+			_lastClickedSpriteId = spriteId; // the clickOn
+		} else 	if (event == kEventMouseUp || event == kEventRightMouseUp) {
+			// Do not override when clicked on Score
+			if (spriteId)
+				_lastClickedSpriteId = spriteId;
+		}
 
 		switch (event) {
 		case kEventKeyUp:

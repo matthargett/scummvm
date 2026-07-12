@@ -26,14 +26,15 @@
 #include "common/debug.h"
 #include "common/system.h"
 #include "engines/enhancements.h"
+#include "engines/util.h"
 #include "graphics/cursorman.h"
 #include "graphics/paletteman.h"
-#include "graphics/scaler/aspect.h"
 #include "macs2/debugtools.h"
 #include "macs2/detection.h"
 #include "macs2/gameobjects.h"
 #include "macs2/macs2.h"
 #include "macs2/music.h"
+#include "macs2/scummui.h"
 
 namespace Macs2 {
 namespace {
@@ -118,28 +119,6 @@ void buildFadedPalette(byte *colors, const byte *sourcePalette, int fadeValue) {
 	}
 }
 
-static Common::Point cursorReplaceHotspot(uint16 width, uint16 height) {
-	const uint scale = MAX(1u, g_system->getScaleFactor());
-	const int hotX = (int)width / (2 * (int)scale);
-	int hotY = (int)height / (2 * (int)scale);
-
-	if (g_system->getFeatureState(OSystem::kFeatureAspectRatioCorrection)) {
-		const int target = (int)height / 2;
-		int bestHotY = hotY;
-		int bestErr = ABS(real2Aspect(bestHotY * (int)scale) - target);
-		for (int candidate = 0; candidate <= (int)height; candidate++) {
-			const int err = ABS(real2Aspect(candidate * (int)scale) - target);
-			if (err < bestErr) {
-				bestErr = err;
-				bestHotY = candidate;
-			}
-		}
-		hotY = bestHotY;
-	}
-
-	return Common::Point(hotX, hotY);
-}
-
 } // namespace
 
 const View1::BorderStyle View1::kBorderRaised = {0x1010, 0x1012, 0x1011};
@@ -162,9 +141,57 @@ View1::View1() : UIElement("View1") {
 	rebuildCharacterLookupTable();
 	_inventorySource = protagonist->_gameObject;
 	_inventoryButtonLocations.resize(6);
+
+	if (hasScummVerbUI()) {
+		_scummUI = new ScummUI(this);
+		_bounds = Common::Rect(0, 0, kScreenWidth, kScreenHeight);
+		_innerBounds = _bounds;
+		setInventorySource(_inventorySource);
+	}
+}
+
+void View1::ensureScummVerbUI() {
+	if (!hasScummVerbUI())
+		return;
+	if (!_scummUI) {
+		_scummUI = new ScummUI(this);
+		if (_inventorySource)
+			setInventorySource(_inventorySource);
+	}
+	if (_bounds.height() != kScreenHeight) {
+		_bounds = Common::Rect(0, 0, kScreenWidth, kScreenHeight);
+		_innerBounds = _bounds;
+		::initGraphics(kScreenWidth, kScreenHeight);
+	}
+}
+
+bool View1::hasScummVerbUI() const {
+	return g_engine->enhancementEnabled(kEnhUIUX);
+}
+
+bool View1::shouldShowScummVerbUI() const {
+	if (!hasScummVerbUI())
+		return false;
+	if (_currentMode == ViewMode::VM_HELP)
+		return false;
+	if (_isShowingTextBox || _isShowingDialoguePanel)
+		return false;
+	if (_uiPanelState == kUiPanelContainerInventory || _uiPanelState == kUiPanelSaveLoad)
+		return false;
+	if (g_engine->_scriptExecutor->_cursorMode == Script::MouseMode::Disabled)
+		return false;
+
+	// Use the actor object table directly; Character lookup can lag behind scene changes.
+	const GameObject *actor = GameObjects::getObjectByIndex(Scenes::instance()._currentActorIndex);
+	if (!actor)
+		return false;
+
+	const uint16 scene = (uint16)Scenes::instance()._currentSceneIndex;
+	return actor->_sceneIndex == scene;
 }
 
 View1::~View1() {
+	delete _scummUI;
 	for (Character *c : _characters) {
 		delete c;
 	}
@@ -205,6 +232,14 @@ void View1::openInventory(GameObject *newInventorySource) {
 
 	setInventorySource(newInventorySource);
 	_pendingPanelRequest = kPanelRequestNone; // Binary: g_wPendingPanelRequest = 0
+
+	// SCUMM verb UI: protagonist inventory is always visible in the strip.
+	if (hasScummVerbUI() && newInventorySource->_index == Scenes::instance()._currentActorIndex) {
+		if (_scummUI)
+			_scummUI->syncInventory();
+		return;
+	}
+
 	// Binary: g_wUiPanelState = 2 for protagonist, 3 for container
 	_uiPanelState = (newInventorySource->_index == Scenes::instance()._currentActorIndex)
 						? kUiPanelInventory
@@ -253,18 +288,56 @@ void View1::closeInventory() {
 }
 
 void View1::setInventorySource(GameObject *newInventorySource) {
+	if (newInventorySource == nullptr) {
+		warning("Tried to set inventory source to a null object");
+		return;
+	}
 	_inventorySource = newInventorySource;
 	// Rebuild inventory list from all objects whose SceneIndex matches.
 	// Binary (syncInventoryObjectList at 1008:071e) checks: object.sceneIndex == actorIndex + 0x400.
-	// The +0x400 offset encodes "inside this container/actor's inventory".
+	const uint16 inventorySceneId = (_inventorySource->_index == Scenes::instance()._currentActorIndex)
+										? (uint16)(Scenes::instance()._currentActorIndex + 0x400)
+										: (uint16)(_inventorySource->_index + 0x400);
 	_inventoryItems.clear();
 
-	const uint16 inventorySceneId = _inventorySource->_index + 0x400;
 	for (GameObject *currentObject : GameObjects::instance()._objects) {
 		if (currentObject != nullptr && currentObject->_sceneIndex == inventorySceneId) {
 			_inventoryItems.push_back(currentObject);
 		}
 	}
+	if (hasScummVerbUI() && _scummUI)
+		_scummUI->syncInventory();
+}
+
+void View1::refreshProtagonistInventoryAfterLoad(uint16 actorIndex) {
+	_inventorySource = GameObjects::instance().getProtagonistObject();
+	const uint16 invScene = actorIndex + 0x400;
+
+	Common::Array<GameObject *> validated;
+	for (GameObject *obj : _inventoryItems) {
+		if (obj && obj->_sceneIndex == invScene)
+			validated.push_back(obj);
+	}
+
+	for (GameObject *obj : GameObjects::instance()._objects) {
+		if (!obj || obj->_sceneIndex != invScene)
+			continue;
+
+		bool found = false;
+		for (GameObject *listed : validated) {
+			if (listed == obj) {
+				found = true;
+				break;
+			}
+		}
+		if (!found)
+			validated.push_back(obj);
+	}
+
+	_inventoryItems = validated;
+
+	if (hasScummVerbUI() && _scummUI)
+		_scummUI->resetInventoryAfterLoad();
 }
 
 bool View1::isInventorySourceProtagonist() const {
@@ -275,6 +348,8 @@ void View1::transferInventoryItem(GameObject *item, GameObject *targetContainer)
 	int index = findInventoryItem(item);
 	_inventoryItems.remove_at(index);
 	item->_sceneIndex = targetContainer->_index + 0x400;
+	if (hasScummVerbUI() && _scummUI)
+		_scummUI->syncInventory();
 }
 
 int View1::findInventoryItem(const GameObject *item) {
@@ -286,7 +361,7 @@ int View1::findInventoryItem(const GameObject *item) {
 	return -1;
 }
 
-Character *View1::getCharacterByIndex(uint16 index) {
+Character *View1::getCharacterByIndex(uint16 index) const {
 	if (index > 0 && index <= kMaxSceneObjects) {
 		Character *c = _characterByObjectIndex[index];
 		if (c != nullptr && c->_gameObject != nullptr && c->_gameObject->_index == index)
@@ -356,6 +431,22 @@ void View1::updateCursor(const byte *palette) {
 	// Original indexes cursor array as: base + mode * 16 - 16, i.e. 0-based index = mode - 1.
 	// The array has 33 entries (indices 0-32). Cursor modes 0x13-0x1A map to entries 18-25.
 	int mode = (int)g_engine->_scriptExecutor->_cursorMode - 1;
+
+	// SCUMM-style UI: gameplay verbs share the walk cursor; the sentence line shows the active verb.
+	if (hasScummVerbUI()) {
+		const Script::MouseMode cursorMode = g_engine->_scriptExecutor->_cursorMode;
+		switch (cursorMode) {
+		case Script::MouseMode::Talk:
+		case Script::MouseMode::Look:
+		case Script::MouseMode::Use:
+		case Script::MouseMode::Walk:
+			mode = (int)Script::MouseMode::Walk - 1;
+			break;
+		default:
+			break;
+		}
+	}
+
 	if (mode < 0 || mode >= kNumLoadedCursors) {
 		warning("Invalid cursor mode %d, falling back to Walk cursor", mode);
 		mode = (int)Script::MouseMode::Walk - 1;
@@ -385,10 +476,7 @@ void View1::updateCursor(const byte *palette) {
 		rgbaCursor[i] = rgbaCursorFormat.RGBToColor(paletteEntry[0], paletteEntry[1], paletteEntry[2]);
 	}
 
-	// adjustViewportToMouse (1008:3de3): interaction center = mouse; draw at center - half.
-	// getMousePos() is the center; compensate hotspot for SurfaceSdl rHot scaling (see above).
-	const Common::Point hotspot = cursorReplaceHotspot(width, height);
-	CursorMan.replaceCursor(rgbaCursor.data(), width, height, hotspot.x, hotspot.y, 0, &rgbaCursorFormat);
+	CursorMan.replaceCursor(rgbaCursor.data(), width, height, width >> 1, height >> 1, 0, &rgbaCursorFormat);
 	// Enable a cursor palette so the backend won't re-blit the cursor on
 	// every screen palette change. The macs2 engine uses RGBA cursors with
 	// baked-in palette colors, so the cursor palette content is irrelevant -
@@ -431,7 +519,7 @@ void View1::drawDarkRectangle(uint16 x, uint16 y, uint16 width, uint16 height) {
 			const uint16 currentY = y + yOffset;
 			const uint8 currentValue = (uint8)s.getPixel(currentX, currentY);
 			const uint8 newValue = g_engine->_panelRemapTable[currentValue];
-			if (currentX < 320 && currentY < 200)
+			if (currentX < kScreenWidth && currentY < kGameHeight)
 				s.setPixel(currentX, currentY, newValue);
 		}
 	}
@@ -536,6 +624,30 @@ void View1::renderString(const Common::Point pos, const Common::String &s) {
 	renderString(pos.x, pos.y, s);
 }
 
+void View1::renderStringTo(uint16 x, uint16 y, const Common::String &s, Graphics::ManagedSurface &surf) {
+	uint16 currentX = x;
+	uint16 currentY = y;
+
+	uint16 widestGlyph = 1;
+	for (auto iter = s.begin(); iter != s.end(); iter++) {
+		GlyphData data;
+		if (g_engine->findGlyph(*iter, data)) {
+			widestGlyph = MAX(widestGlyph, data._width);
+		}
+	}
+
+	for (auto iter = s.begin(); iter != s.end(); iter++) {
+		GlyphData data;
+		const bool found = g_engine->findGlyph(*iter, data);
+		if (found) {
+			drawSprite(currentX, currentY, data, surf, false);
+			currentX += data._width + 1;
+		} else {
+			currentX += widestGlyph;
+		}
+	}
+}
+
 int View1::measureStringWithFont(const Common::String &s, const GlyphData *glyphs, uint16 numGlyphs) {
 	int width = 0;
 	uint16 widestGlyph = 1;
@@ -559,6 +671,11 @@ int View1::measureStringWithFont(const Common::String &s, const GlyphData *glyph
 
 void View1::renderStringWithFont(uint16 x, uint16 y, const Common::String &s, const GlyphData *glyphs, uint16 numGlyphs) {
 	Graphics::ManagedSurface surf = getSurface();
+	renderStringWithFontTo(x, y, s, glyphs, numGlyphs, surf);
+}
+
+void View1::renderStringWithFontTo(uint16 x, uint16 y, const Common::String &s, const GlyphData *glyphs,
+								   uint16 numGlyphs, Graphics::ManagedSurface &surf) {
 	uint16 currentX = x;
 	uint16 widestGlyph = 1;
 	for (uint i = 0; i < numGlyphs; i++) {
@@ -662,9 +779,9 @@ void View1::drawPathfindingPoints(Graphics::ManagedSurface &s) {
 		return;
 	}
 	const Common::Array<uint8> &overlay = c->_pathfindingOverlay;
-	for (int y = 0; y < 200; y++) {
-		for (int x = 0; x < 320; x++) {
-			const uint8 currentValue = overlay[y * 320 + x];
+	for (int y = 0; y < kGameHeight; y++) {
+		for (int x = 0; x < kScreenWidth; x++) {
+			const uint8 currentValue = overlay[y * kScreenWidth + x];
 			if (currentValue != 0) {
 				s.setPixel(x, y, currentValue);
 			}
@@ -711,6 +828,9 @@ void View1::layoutActionBarButtons() {
 }
 
 void View1::openMainMenu(Common::Point clickedPosition) {
+	if (hasScummVerbUI())
+		return;
+
 	// Binary handleInput: save cursor and set to PanelCursor (0x19)
 	_savedCursorMode = g_engine->_scriptExecutor->_cursorMode;
 	g_engine->setCursorMode(Script::MouseMode::PanelCursor);
@@ -733,11 +853,11 @@ void View1::openMainMenu(Common::Point clickedPosition) {
 		upperLeft.y = 0;
 	}
 	// Binary openActionBarAtPosition (1008:3fba): clamp to screen bounds.
-	if ((int)(upperLeft.x + panelSize.x) >= 320) {
-		upperLeft.x = 320 - panelSize.x - 1;
+	if ((int)(upperLeft.x + panelSize.x) >= kScreenWidth) {
+		upperLeft.x = kScreenWidth - panelSize.x - 1;
 	}
-	if ((int)(upperLeft.y + panelSize.y) >= 200) {
-		upperLeft.y = 200 - panelSize.y - 1;
+	if ((int)(upperLeft.y + panelSize.y) >= kGameHeight) {
+		upperLeft.y = kGameHeight - panelSize.y - 1;
 	}
 
 	_mainMenuRect = Common::Rect(upperLeft, upperLeft + panelSize);
@@ -931,6 +1051,9 @@ void View1::transferPickupTarget(GameObject *targetObject) {
 		}
 	}
 
+	if (hasScummVerbUI() && _scummUI)
+		_scummUI->syncInventory();
+
 	// Binary sets g_wNeedsRedraw and restores scene background over the panel area.
 	redraw();
 }
@@ -1079,6 +1202,7 @@ void View1::startFadingWithSpeed(uint16 speed) {
 	_fadeMode = FadeMode::None;
 	_paletteDirty = false;
 	endFadeCursorSuppression(g_engine->_pal);
+	redraw();
 }
 
 void View1::beginFadeCursorSuppression() {
@@ -1322,6 +1446,8 @@ bool View1::handleContainerInventoryClick(const MouseDownMessage &msg) {
 				updateCursor();
 				g_engine->_scriptExecutor->_inventoryActionFlag = true;
 				setInventorySource(_inventorySource);
+				if (hasScummVerbUI() && _scummUI)
+					_scummUI->syncInventory();
 			}
 			break;
 		}
@@ -1361,6 +1487,8 @@ bool View1::handleContainerInventoryClick(const MouseDownMessage &msg) {
 		}
 		g_engine->setCursorMode(Script::MouseMode::UseInventory);
 		updateCursor();
+		if (hasScummVerbUI() && _scummUI)
+			_scummUI->syncInventory();
 		return true;
 	}
 
@@ -1443,7 +1571,7 @@ bool View1::handleActionBarClick(const MouseDownMessage &msg) {
 }
 
 bool View1::handleHelpClick(const MouseDownMessage &msg) {
-	Common::Rect screenRect(320, 200);
+	Common::Rect screenRect(kScreenWidth, kGameHeight);
 	if (screenRect.contains(msg._pos)) {
 		uint8 depth = g_engine->_depthMap.getPixel(msg._pos.x, msg._pos.y);
 		if (depth > 0 && depth < 0xFA) {
@@ -1485,6 +1613,14 @@ bool View1::handleInput(const MouseDownMessage &msg) {
 		// When currentMode == VM_HELP, clicking on the depth map previews scenes.
 		if (_currentMode == ViewMode::VM_HELP) {
 			return handleHelpClick(msg);
+		}
+
+		if (shouldShowScummVerbUI() && _scummUI && _scummUI->isPointInUI(msg._pos)) {
+			if (g_engine->_scriptExecutor->_cursorMode != Script::MouseMode::Disabled) {
+				_scummUI->handleClick(msg._pos, g_engine->_scriptExecutor->isExecuting());
+				presentFrame();
+			}
+			return true;
 		}
 
 		// Handle original save/load panel clicks
@@ -1562,6 +1698,9 @@ bool View1::handleInput(const MouseDownMessage &msg) {
 		}
 
 		if (g_engine->_scriptExecutor->_cursorMode == Script::MouseMode::Walk) {
+			if (shouldShowScummVerbUI() && msg._pos.y >= kGameHeight)
+				return true;
+
 			Character *protagonist = getCharacterByIndex(Scenes::instance()._currentActorIndex);
 			if (protagonist == nullptr) {
 				debugC(kDebugScript, "Ignoring walk click without active actor character in the scene");
@@ -1585,7 +1724,7 @@ bool View1::handleInput(const MouseDownMessage &msg) {
 			protagonist->_path.clear();
 
 			const bool directPath = g_engine->isPathWalkable(target.y, target.x, charPos.y, charPos.x);
-			if (directPath || g_engine->getWalkabilityAt(target.y, target.x) >= 200) {
+			if (directPath || Macs2Engine::isWalkabilityBlocking(g_engine->getWalkabilityAt(target.y, target.x))) {
 				protagonist->_targetPosition = target;
 			} else {
 				const bool found = protagonist->calculatePath(target);
@@ -1602,6 +1741,9 @@ bool View1::handleInput(const MouseDownMessage &msg) {
 		}
 
 		// Check if we hit something
+		if (shouldShowScummVerbUI() && msg._pos.y >= kGameHeight)
+			return true;
+
 		// Original order: getHotspotAtPoint first, then drawCharactersAndHitTest overrides.
 		// Our order (objects first, fallback to background) produces the same result.
 		uint16 index = getHitObjectID(Common::Point(msg._pos.x, msg._pos.y));
@@ -1663,14 +1805,33 @@ bool View1::handleInput(const MouseDownMessage &msg) {
 					_savedCursorMode = g_engine->_scriptExecutor->_cursorMode;
 					openOriginalSaveLoadPanel();
 				} else {
+					// Binary save/load path saves cursor then sets PanelCursor (0x19).
+					_savedCursorMode = g_engine->_scriptExecutor->_cursorMode;
+					g_engine->setCursorMode(Script::MouseMode::PanelCursor);
 					g_engine->openMainMenuDialog();
+					updateCursor();
 				}
 			}
 			return true;
 		}
 
-		// From handleInput (1008:e8bf): right-click when not executing
-		// opens the action bar at the mouse position.
+		// From handleInput (1008:e8bf): right-click when not executing and cursor != Disabled
+		// opens the action bar at the mouse position (or cycles verbs with SCUMM UI).
+		if (g_engine->_scriptExecutor->_cursorMode == Script::MouseMode::Disabled) {
+			return true;
+		}
+		if (hasScummVerbUI()) {
+			if (shouldShowScummVerbUI()) {
+				g_engine->nextCursorMode();
+				_activeInventoryItem = nullptr;
+				g_engine->_scriptExecutor->_interactedInventoryItemId = 0;
+				if (_scummUI)
+					_scummUI->syncActiveVerbFromCursorMode();
+				updateCursor();
+				presentFrame();
+			}
+			return true;
+		}
 		if (_uiPanelState != kUiPanelActionBar) {
 			openMainMenu(msg._pos);
 		} else {
@@ -1710,6 +1871,14 @@ bool View1::handlePanelRelease(const MouseUpMessage &msg) {
 
 	if (_uiPanelState == kUiPanelNone || _clickedButtonIndex == 0) {
 		return false;
+	}
+
+	// Binary handleInput (1008:e8bf): action bar/inventory panel release is only handled
+	// when g_wScriptIsExecuting==0 and g_wCursorMode!=0x1A. Save/load (state 4) still
+	// closes during script execution.
+	if (g_engine->_scriptExecutor->isExecuting() &&
+		_uiPanelState != kUiPanelSaveLoad) {
+		return true;
 	}
 
 	const UiPanelState previousState = _uiPanelState;
@@ -1799,6 +1968,26 @@ bool View1::msgMouseUp(const MouseUpMessage &msg) {
 bool View1::msgMouseMove(const MouseMoveMessage &msg) {
 	_hoverAreaId = g_engine->_scriptExecutor->getAreaAtPoint(msg._pos.x, msg._pos.y);
 	_hoverHotspotId = g_engine->getHotspotAtPoint(msg._pos);
+
+	if (shouldShowScummVerbUI() && _scummUI) {
+		if (_scummUI->isPointInUI(msg._pos)) {
+			_scummUI->handleMouseMove(msg._pos);
+		} else if (msg._pos.y < kGameHeight) {
+			_scummUI->clearSentenceObject();
+			uint16 index = getHitObjectID(msg._pos);
+			if (index == 0)
+				index = g_engine->getHotspotAtPoint(msg._pos);
+			if (index != 0 && index >= 0x400) {
+				const uint16 objIndex = index - 0x400;
+				if (objIndex < GameObjects::instance()._objectNames.size()) {
+					const Common::String &name = GameObjects::instance()._objectNames[objIndex];
+					if (!name.empty())
+						_scummUI->updateSentenceLine(name);
+				}
+			}
+		}
+	}
+
 	return true;
 }
 
@@ -1823,8 +2012,24 @@ bool View1::msgAction(const ActionMessage &msg) {
 		debug("Game speed mode: %u", g_engine->_gameSpeedMode);
 		return true;
 	case Macs2::kMacs2ActionOpenGMM:
+		// Binary has no GMM; mirror save/load panel cursor handling when a script wait is active.
+		if (g_engine->_scriptExecutor->isExecuting()) {
+			if (g_engine->_scriptExecutor->_cursorMode == Script::MouseMode::Disabled) {
+				_savedCursorMode = g_engine->_scriptExecutor->_cursorMode;
+				g_engine->setCursorMode(Script::MouseMode::PanelCursor);
+			}
+		} else if (g_engine->_scriptExecutor->_cursorMode == Script::MouseMode::Disabled) {
+			return true;
+		}
 		g_engine->openMainMenuDialog();
 		updateCursor();
+		return true;
+	case Macs2::kMacs2ActionHelp:
+		if (!_helpButtonDisabled && _currentMode != ViewMode::VM_HELP &&
+			!g_engine->_scriptExecutor->isExecuting() &&
+			g_engine->_scriptExecutor->_cursorMode != Script::MouseMode::Disabled) {
+			enterMapMode();
+		}
 		return true;
 	default:
 		break;
@@ -1855,14 +2060,29 @@ bool View1::msgKeypress(const KeypressMessage &msg) {
 	// Binary (handleInput 1008:edff): UI panels only open when not executing and cursor != Disabled.
 	if (!g_engine->_scriptExecutor->isExecuting() && g_engine->_scriptExecutor->_cursorMode != Script::MouseMode::Disabled) {
 		if (msg.ascii == (uint16)'i') {
-			if (_uiPanelState != kUiPanelInventory) {
+			if (hasScummVerbUI()) {
+				if (_uiPanelState == kUiPanelContainerInventory)
+					closeInventory();
+			} else if (_uiPanelState != kUiPanelInventory) {
 				openInventory(GameObjects::instance().getProtagonistObject());
 			} else {
 				closeInventory();
 			}
 		} else if (msg.ascii == 'n') {
-			Common::Point mousePos = g_system->getEventManager()->getMousePos();
-			openMainMenu(mousePos);
+			if (hasScummVerbUI()) {
+				if (shouldShowScummVerbUI()) {
+					g_engine->nextCursorMode();
+					_activeInventoryItem = nullptr;
+					g_engine->_scriptExecutor->_interactedInventoryItemId = 0;
+					if (_scummUI)
+						_scummUI->syncActiveVerbFromCursorMode();
+					updateCursor();
+					presentFrame();
+				}
+			} else {
+				Common::Point mousePos = g_system->getEventManager()->getMousePos();
+				openMainMenu(mousePos);
+			}
 		}
 	}
 
@@ -1944,7 +2164,8 @@ void View1::draw() {
 
 	// We keep the inventory on but don't draw it in case we display a string
 	// i.e. a description of an item
-	if ((_uiPanelState == kUiPanelInventory || _uiPanelState == kUiPanelContainerInventory) && !_isShowingTextBox && !_isShowingDialoguePanel) {
+	const bool showProtagonistInventory = _uiPanelState == kUiPanelInventory && !hasScummVerbUI();
+	if ((showProtagonistInventory || _uiPanelState == kUiPanelContainerInventory) && !_isShowingTextBox && !_isShowingDialoguePanel) {
 		drawInventory(s);
 	}
 
@@ -2000,6 +2221,18 @@ void View1::draw() {
 					"Exit to DOS", "Schliessen"};
 				renderString(mousePos.x + 20, mousePos.y + 20, buttonNames[i]);
 				break;
+			}
+		}
+	}
+
+	if (hasScummVerbUI()) {
+		ensureScummVerbUI();
+		if (_scummUI && !_isShowingTextBox && !_isShowingDialoguePanel) {
+			Graphics::ManagedSurface fullScreen(*g_events->getScreen(), Common::Rect(0, 0, kScreenWidth, kScreenHeight));
+			if (shouldShowScummVerbUI()) {
+				_scummUI->draw(fullScreen);
+			} else {
+				fullScreen.fillRect(Common::Rect(0, kGameHeight, kScreenWidth, kScreenHeight), 0);
 			}
 		}
 	}
@@ -2158,6 +2391,7 @@ bool View1::tick() {
 					executor->_walkTargetObjectIndex = 0;
 				} else {
 					Character *c = getCharacterByIndex(walkTarget);
+					bool walkComplete = false;
 					if (c != nullptr) {
 						Common::Point pos = c->getPosition();
 						// Binary: walkAlongPath guarantees pos == finalDest on arrival.
@@ -2169,24 +2403,39 @@ bool View1::tick() {
 								c->_motionProgress == 0) {
 								c->_motionTargetVerticalOffset = walkObject->_verticalOffsetScale;
 							}
-							bool verticalOk = !c->hasPendingVerticalMotion();
-							if (verticalOk) {
-								if (!executor->_pickupInProgress) {
-									executor->_walkTargetObjectIndex = 0;
-									g_engine->runScriptExecutor();
-								} else if (c->_gameObject->_orientation != 0x11) {
-									// Binary: pickup in progress, trigger pickup animation.
-									// Save current orientation so it can be restored after pickup.
-									c->_previousOrientation = c->_gameObject->_orientation;
-									c->_gameObject->_orientation = 0x11;
-								}
+							walkComplete = !c->hasPendingVerticalMotion();
+						}
+					} else if (walkObject->_storedWalkRuntime.valid) {
+						// Binary gameTick (1008:e752): polls object table pos vs runtime finalDest;
+						// no on-screen Character is required (e.g. after moveObject to another scene).
+						const GameObject::StoredWalkRuntime &rt = walkObject->_storedWalkRuntime;
+						if (walkObject->_position.x == rt.pathFinalDestination.x &&
+							walkObject->_position.y == rt.pathFinalDestination.y) {
+							if ((int16)rt.motionTargetVerticalOffset < 0 ||
+								rt.motionTargetVerticalOffset == walkObject->_verticalOffsetScale) {
+								walkComplete = true;
 							}
+						}
+					}
+					if (walkComplete) {
+						if (!executor->_pickupInProgress) {
+							debugC(kDebugScript, "waitForWalk complete obj=%u", walkTarget);
+							executor->debugLogActorWalkState("waitForWalk complete");
+							executor->_walkTargetObjectIndex = 0;
+							g_engine->runScriptExecutor();
+						} else if (c != nullptr && c->_gameObject->_orientation != 0x11) {
+							// Binary: pickup in progress, trigger pickup animation.
+							// Save current orientation so it can be restored after pickup.
+							c->_previousOrientation = c->_gameObject->_orientation;
+							c->_gameObject->_orientation = 0x11;
 						}
 					}
 				}
 			} else if (executor->_waitForPcmSound) {
 				drawSceneUpdate();
 				if (!g_engine->isCurrentSoundPlaying()) {
+					debugC(kDebugScript, "waitForSound complete");
+					executor->debugLogActorWalkState("waitForSound complete");
 					executor->_waitForPcmSound = false;
 					g_engine->runScriptExecutor();
 				}
@@ -2206,6 +2455,8 @@ bool View1::tick() {
 		} else {
 			drawSceneUpdate();
 			if (executor->getFrameWaitCounter() == 0) {
+				debugC(kDebugScript, "frameWait complete");
+				executor->debugLogActorWalkState("frameWait complete");
 				executor->endFrameWait();
 				g_engine->runScriptExecutor();
 			}
@@ -2366,7 +2617,7 @@ void View1::drawAllCharacters(Graphics::ManagedSurface *surface, bool fullUpdate
 			int16 walkabilityOffset = 0;
 			if (g_engine->_pathfindingMap.w > 0) {
 				walkabilityOffset = g_engine->getWalkabilityAt(charY, charX);
-				if (walkabilityOffset >= 200)
+				if (Macs2Engine::isWalkabilityBlocking((uint16)walkabilityOffset))
 					walkabilityOffset = 0;
 			}
 			if (obj->_verticalOffsetScale != 0)
@@ -2374,8 +2625,8 @@ void View1::drawAllCharacters(Graphics::ManagedSurface *surface, bool fullUpdate
 
 			int shadingTableOffset = 0;
 			if (g_engine->_shadowMap.w > 0) {
-				const int sx = CLIP<int>(charX, 0, 319);
-				const int sy = CLIP<int>(charY, 0, 199);
+				const int sx = CLIP<int>(charX, 0, kScreenWidthLast);
+				const int sy = CLIP<int>(charY, 0, kGameHeightLast);
 				shadingTableOffset = MIN<int>(g_engine->_shadowMap.getPixel(sx, sy), 0x20);
 			}
 
@@ -2395,6 +2646,7 @@ void View1::drawAllCharacters(Graphics::ManagedSurface *surface, bool fullUpdate
 			const byte *pixelData = frame._data.data();
 
 			// drawAllCharacters @ 1008:9573-9754: drawAnimFrame / drawAnimFrameShaded / drawAnimFrameDepth
+			const bool clipGameArea = hasScummVerbUI();
 			if (obj->_hasScaling) {
 				drawSpriteTransparent(shadingTableOffset, depthThreshold, scalingFactor,
 									  drawX, drawY, frame._width, frame._height, pixelData, *surface);
@@ -2403,7 +2655,7 @@ void View1::drawAllCharacters(Graphics::ManagedSurface *surface, bool fullUpdate
 								 frame._width, frame._height, pixelData, *surface);
 			} else {
 				drawSprite(drawX, drawY, frame._width, frame._height,
-						   const_cast<byte *>(pixelData), *surface, false);
+						   const_cast<byte *>(pixelData), *surface, false, false, 0, clipGameArea);
 			}
 
 			// drawAllCharacters @ 1008:9759: wLastDrawX/Y exclude per-frame offsetX/offsetY
@@ -2435,7 +2687,7 @@ void View1::drawAllCharacters(Graphics::ManagedSurface *surface, bool fullUpdate
 			if (current != nullptr && DebugMan.isDebugChannelEnabled(kDebugGraphics)) {
 				Common::String number = Common::String::format("%u", obj->_orientation);
 				renderString(current->getPosition(), number.c_str());
-				Common::Rect screenRect(0, 0, 320, 200);
+				Common::Rect screenRect(0, 0, kScreenWidth, kGameHeight);
 				if (screenRect.contains(current->getPosition()))
 					surface->setPixel(current->getPosition().x, current->getPosition().y, 0xFF);
 			}
@@ -2443,10 +2695,24 @@ void View1::drawAllCharacters(Graphics::ManagedSurface *surface, bool fullUpdate
 	}
 
 	// Binary drawAllCharacters tail: movement-finished repeat run (opcode 0x27 area checks).
-	if (fullUpdate && g_engine->_movementFinishedFlag && !executor->isScriptWaitDeferred()) {
-		executor->_isRepeatRun = true;
-		g_engine->runScriptExecutor();
-		executor->_isRepeatRun = false;
+	if (fullUpdate && g_engine->_movementFinishedFlag) {
+		if (executor->isScriptWaitDeferred()) {
+			debugC(kDebugScript,
+				   "repeatRun deferred: walkWait=%u frameWait=%u soundWait=%d musicWait=%d adlibWait=%d",
+				   executor->_walkTargetObjectIndex, executor->getFrameWaitCounter(),
+				   executor->_waitForPcmSound ? 1 : 0, executor->_waitForMusicControl ? 1 : 0,
+				   executor->_waitForAdlibReady ? 1 : 0);
+		} else {
+			const Common::Point actorPos = executor->getCharPosition();
+			const uint16 area = executor->getAreaAtPoint(actorPos.x, actorPos.y);
+			debugC(kDebugScript, "repeatRun start: actor=(%d,%d) areaRepeatRun=%u var[122]=%u",
+				   actorPos.x, actorPos.y, area, executor->getVariableValue(122));
+			executor->debugLogActorWalkState("repeatRun start");
+			executor->_isRepeatRun = true;
+			g_engine->runScriptExecutor();
+			executor->_isRepeatRun = false;
+			executor->debugLogActorWalkState("repeatRun end");
+		}
 	}
 }
 
@@ -2517,6 +2783,9 @@ void View1::drawInventory(Graphics::ManagedSurface &s) {
 
 	// Draw the buttons at the bottom
 	for (int i = 0; i < 6; i++) {
+		if (hasScummVerbUI() && !isInventorySourceProtagonist() && i == (int)InventoryButtonIndex::Drop)
+			continue;
+
 		uint16 index = iconIndices[i];
 		AnimFrame &currentFrame = g_engine->_imageResources[index - 1];
 		drawNinePatchBorder(Common::Point(buttonX, buttonY), Common::Point(buttonW, buttonH), kBorderRaised, false, false, s);
@@ -2601,7 +2870,7 @@ GameObject *View1::getClickedInventoryItem(const Common::Point &p) {
 	return nullptr;
 }
 
-void View1::drawSprite(int16 x, int16 y, uint16 width, uint16 height, byte *data, Graphics::ManagedSurface &s, bool mirrored, bool useDepth, uint8 depth) {
+void View1::drawSprite(int16 x, int16 y, uint16 width, uint16 height, byte *data, Graphics::ManagedSurface &s, bool mirrored, bool useDepth, uint8 depth, bool clipToGameArea) {
 	for (int currentX = 0; currentX < width; currentX++) {
 		int actualX = mirrored ? width - currentX - 1 : currentX;
 		for (int currentY = 0; currentY < height; currentY++) {
@@ -2610,6 +2879,8 @@ void View1::drawSprite(int16 x, int16 y, uint16 width, uint16 height, byte *data
 				int finalX = x + actualX;
 				int finalY = y + currentY;
 				if (finalX >= 0 && finalX < s.w && finalY >= 0 && finalY < s.h) {
+					if (clipToGameArea && finalY >= kGameHeight)
+						continue;
 					// Check for depth
 					uint8 bgDepth = g_engine->_depthMap.getPixel(finalX, finalY);
 					// Depth test: draw pixel only if depth map value < character depth
@@ -2623,12 +2894,12 @@ void View1::drawSprite(int16 x, int16 y, uint16 width, uint16 height, byte *data
 	}
 }
 
-void View1::drawSprite(const Common::Point &pos, uint16 width, uint16 height, byte *data, Graphics::ManagedSurface &s, bool mirrored, bool useDepth, uint8 depth) {
-	drawSprite(pos.x, pos.y, width, height, data, s, mirrored, useDepth, depth);
+void View1::drawSprite(const Common::Point &pos, uint16 width, uint16 height, byte *data, Graphics::ManagedSurface &s, bool mirrored, bool useDepth, uint8 depth, bool clipToGameArea) {
+	drawSprite(pos.x, pos.y, width, height, data, s, mirrored, useDepth, depth, clipToGameArea);
 }
 
-void View1::drawSprite(int16 x, int16 y, const Sprite &sprite, Graphics::ManagedSurface &s, bool mirrored, bool useDepth, uint8 depth) {
-	drawSprite(x, y, sprite._width, sprite._height, const_cast<byte *>(sprite._data.data()), s, mirrored, useDepth, depth);
+void View1::drawSprite(int16 x, int16 y, const Sprite &sprite, Graphics::ManagedSurface &s, bool mirrored, bool useDepth, uint8 depth, bool clipToGameArea) {
+	drawSprite(x, y, sprite._width, sprite._height, const_cast<byte *>(sprite._data.data()), s, mirrored, useDepth, depth, clipToGameArea);
 }
 
 void View1::drawSpriteClipped(uint16 x, uint16 y, Common::Rect &clippingRect, uint16 width, uint16 height, const byte *const data, Graphics::ManagedSurface &s) {
@@ -2636,10 +2907,10 @@ void View1::drawSpriteClipped(uint16 x, uint16 y, Common::Rect &clippingRect, ui
 		for (int currentY = 0; currentY < height; currentY++) {
 			uint8 val = data[currentY * width + currentX];
 			if (val != 0) {
-				if (clippingRect.contains(x + currentX, y + currentY)) {
-					if (x + currentX < 320 && y + currentY < 200)
-						s.setPixel(x + currentX, y + currentY, val);
-				}
+				const int px = x + currentX;
+				const int py = y + currentY;
+				if (clippingRect.contains(px, py) && px >= 0 && px < s.w && py >= 0 && py < s.h)
+					s.setPixel(px, py, val);
 			}
 		}
 	}
@@ -2647,6 +2918,49 @@ void View1::drawSpriteClipped(uint16 x, uint16 y, Common::Rect &clippingRect, ui
 
 void View1::drawSpriteClipped(uint16 x, uint16 y, Common::Rect &clippingRect, const Sprite &sprite, Graphics::ManagedSurface &s) {
 	drawSpriteClipped(x, y, clippingRect, sprite._width, sprite._height, sprite._data.data(), s);
+}
+
+void View1::drawSpriteFitted(const Common::Rect &bounds, const Sprite &sprite, Graphics::ManagedSurface &s, uint16 inset) {
+	if (sprite._width == 0 || sprite._height == 0 || sprite._data.empty())
+		return;
+
+	const Common::Rect inner(bounds.left + inset, bounds.top + inset,
+							 bounds.right - inset, bounds.bottom - inset);
+	if (inner.width() <= 0 || inner.height() <= 0)
+		return;
+
+	const int destW = inner.width();
+	const int destH = inner.height();
+	const int scaleW = (destW * 256) / sprite._width;
+	const int scaleH = (destH * 256) / sprite._height;
+	const int scale = MIN(scaleW, scaleH);
+	if (scale <= 0)
+		return;
+
+	const int drawW = MAX(1, (sprite._width * scale) / 256);
+	const int drawH = MAX(1, (sprite._height * scale) / 256);
+	const int startX = inner.left + (destW - drawW) / 2;
+	const int startY = inner.top + (destH - drawH) / 2;
+
+	for (int dy = 0; dy < drawH; dy++) {
+		const int srcY = (dy * sprite._height) / drawH;
+		const int py = startY + dy;
+		if (py < inner.top || py >= inner.bottom)
+			continue;
+
+		for (int dx = 0; dx < drawW; dx++) {
+			const int srcX = (dx * sprite._width) / drawW;
+			const uint8 val = sprite._data[srcY * sprite._width + srcX];
+			if (val == 0)
+				continue;
+
+			const int px = startX + dx;
+			if (px < inner.left || px >= inner.right || px < 0 || px >= s.w || py < 0 || py >= s.h)
+				continue;
+
+			s.setPixel(px, py, val);
+		}
+	}
 }
 
 static byte applyShadingTable(byte color, int shadingTableOffset) {
@@ -2665,7 +2979,7 @@ void View1::drawSpriteScaled(int shadingTableOffset, uint8 depthThreshold, int16
 	int srcRow = 0;
 	int remainingRows = srcHeight;
 	while (remainingRows > 0) {
-		if (screenY >= 0 && screenY < s.h) {
+		if (screenY >= 0 && screenY < s.h && !(hasScummVerbUI() && screenY >= kGameHeight)) {
 			int screenX = drawX;
 			for (uint16 srcX = 0; srcX < srcWidth; srcX++) {
 				if (screenX >= 0 && screenX < s.w) {
@@ -2695,7 +3009,7 @@ void View1::drawSpriteTransparent(int shadingTableOffset, uint8 depthThreshold, 
 	uint16 yScaleAccum = 0;
 
 	while (remainingRows > 0) {
-		if (screenY >= 0 && screenY < s.h) {
+		if (screenY >= 0 && screenY < s.h && !(hasScummVerbUI() && screenY >= kGameHeight)) {
 			int screenX = drawX;
 			const byte *srcPtr = srcPixels + srcRowOffset;
 			int remainingSrcPixels = (int)srcWidth;
@@ -2938,7 +3252,7 @@ void View1::drawImageResources(Graphics::ManagedSurface &s) {
 	uint16 y = 0;
 	uint16 currentMaxHeight = 0;
 	for (AnimFrame &current : g_engine->_imageResources) {
-		if (x + current._width > 320) {
+		if (x + current._width > kScreenWidth) {
 			y += currentMaxHeight;
 			x = 0;
 			currentMaxHeight = 0;
@@ -3018,7 +3332,7 @@ uint16 View1::getHitObjectID(const Common::Point &pos) const {
 			continue;
 
 		const uint8 characterDepth = currentCharacter->getPosition().y;
-		if (pos.x >= 0 && pos.x < 320 && pos.y >= 0 && pos.y < 200) {
+		if (pos.x >= 0 && pos.x < kScreenWidth && pos.y >= 0 && pos.y < kGameHeight) {
 			const uint8 bgDepth = g_engine->_depthMap.getPixel(pos.x, pos.y);
 			if (bgDepth >= characterDepth)
 				continue;
@@ -3100,31 +3414,16 @@ bool Character::HandleWalkability(Character *c) {
 	return true;
 }
 
-uint8 Character::lookupWalkability(const Common::Point &p) const {
-	Common::Rect screenRect(320, 200);
-	if (!screenRect.contains(p)) {
-		return 0x00;
-	}
-	uint32 value = g_engine->_pathfindingMap.getPixel(p.x, p.y);
-	// Values 0xC8..0xEF use the pathfinding override table (opcode 0x12)
-	if (value >= 0xC8 && value <= 0xEF) {
-		uint16 overrideResult;
-		if (g_engine->getPathfindingOverride(value, overrideResult)) {
-			return (uint8)overrideResult;
-		}
-		// Override not active - return non-walkable
-		return 0xFF;
-	}
-	return (uint8)value;
+uint16 Character::lookupWalkability(const Common::Point &p) const {
+	return g_engine->getWalkabilityAt((int16)p.y, (int16)p.x);
 }
 
 bool Character::isWalkable(const Common::Point &p) const {
-	uint8 walkability = lookupWalkability(p);
-	return walkability < 0xC8;
+	return Macs2Engine::isWalkabilityWalkable(lookupWalkability(p));
 }
 
 Character::Character() {
-	_pathfindingOverlay = Common::Array<uint8>(320 * 200, 0);
+	_pathfindingOverlay = Common::Array<uint8>(kScreenWidth * kGameHeight, 0);
 }
 
 bool Character::calculatePath(Common::Point target) {
@@ -3278,7 +3577,7 @@ void Character::setPosition(const Common::Point &newPosition) {
 
 uint16 Character::getVerticalOffset() const {
 	uint16 result = g_engine->getWalkabilityAt(getPosition());
-	if (result >= 0xC8) {
+	if (Macs2Engine::isWalkabilityBlocking(result)) {
 		result = 0;
 	}
 
@@ -3441,7 +3740,7 @@ void Character::startPickup(Macs2::GameObject *object) {
 	_path.clear();
 
 	bool directPath = g_engine->isPathWalkable(destY, destX, current.y, current.x);
-	if (!directPath && g_engine->getWalkabilityAt(destY, destX) < 200) {
+	if (!directPath && Macs2Engine::isWalkabilityWalkable(g_engine->getWalkabilityAt(destY, destX))) {
 		calculatePath(Common::Point(destX, destY));
 	}
 
@@ -3676,45 +3975,52 @@ void Character::update() {
 			}
 			// Walkability check - binary uses getWalkabilityAt(posY, posX) >= 0xC8
 			if (!isWalkable(pos)) {
+				const uint16 tileArea = g_engine->_scriptExecutor->getAreaAtPoint(pos.x, pos.y);
+				if (tileArea >= 210 && tileArea <= 215) {
+					debugC(kDebugPath,
+						   "walk blocked on plate area %u at (%d,%d) walk=%u int16=%d target=(%d,%d)",
+						   tileArea, pos.x, pos.y, lookupWalkability(pos), (int16)lookupWalkability(pos),
+						   _targetPosition.x, _targetPosition.y);
+				}
 				// Revert position
 				pos = savedPos;
 				// Wall-sliding: build push vector from ±1 and ±2 samples
 				int pushX = 0, pushY = 0;
-				if (lookupWalkability(Common::Point(pos.x + 1, pos.y)) >= 200)
+				if (Macs2Engine::isWalkabilityBlocking(lookupWalkability(Common::Point(pos.x + 1, pos.y))))
 					pushX--;
-				if (lookupWalkability(Common::Point(pos.x - 1, pos.y)) >= 200)
+				if (Macs2Engine::isWalkabilityBlocking(lookupWalkability(Common::Point(pos.x - 1, pos.y))))
 					pushX++;
-				if (lookupWalkability(Common::Point(pos.x, pos.y + 1)) >= 200)
+				if (Macs2Engine::isWalkabilityBlocking(lookupWalkability(Common::Point(pos.x, pos.y + 1))))
 					pushY--;
-				if (lookupWalkability(Common::Point(pos.x, pos.y - 1)) >= 200)
+				if (Macs2Engine::isWalkabilityBlocking(lookupWalkability(Common::Point(pos.x, pos.y - 1))))
 					pushY++;
-				if (lookupWalkability(Common::Point(pos.x + 2, pos.y)) >= 200)
+				if (Macs2Engine::isWalkabilityBlocking(lookupWalkability(Common::Point(pos.x + 2, pos.y))))
 					pushX--;
-				if (lookupWalkability(Common::Point(pos.x - 2, pos.y)) >= 200)
+				if (Macs2Engine::isWalkabilityBlocking(lookupWalkability(Common::Point(pos.x - 2, pos.y))))
 					pushX++;
-				if (lookupWalkability(Common::Point(pos.x, pos.y + 2)) >= 200)
+				if (Macs2Engine::isWalkabilityBlocking(lookupWalkability(Common::Point(pos.x, pos.y + 2))))
 					pushY--;
-				if (lookupWalkability(Common::Point(pos.x, pos.y - 2)) >= 200)
+				if (Macs2Engine::isWalkabilityBlocking(lookupWalkability(Common::Point(pos.x, pos.y - 2))))
 					pushY++;
 				// Apply push vector
 				while (pushX != 0 || pushY != 0) {
 					if (pushX < 0) {
-						if (lookupWalkability(Common::Point(pos.x - 1, pos.y)) < 200)
+						if (Macs2Engine::isWalkabilityWalkable(lookupWalkability(Common::Point(pos.x - 1, pos.y))))
 							pos.x--;
 						pushX++;
 					}
 					if (pushX > 0) {
-						if (lookupWalkability(Common::Point(pos.x + 1, pos.y)) < 200)
+						if (Macs2Engine::isWalkabilityWalkable(lookupWalkability(Common::Point(pos.x + 1, pos.y))))
 							pos.x++;
 						pushX--;
 					}
 					if (pushY < 0) {
-						if (lookupWalkability(Common::Point(pos.x, pos.y - 1)) < 200)
+						if (Macs2Engine::isWalkabilityWalkable(lookupWalkability(Common::Point(pos.x, pos.y - 1))))
 							pos.y--;
 						pushY++;
 					}
 					if (pushY > 0) {
-						if (lookupWalkability(Common::Point(pos.x, pos.y + 1)) < 200)
+						if (Macs2Engine::isWalkabilityWalkable(lookupWalkability(Common::Point(pos.x, pos.y + 1))))
 							pos.y++;
 						pushY--;
 					}
@@ -3730,6 +4036,17 @@ void Character::update() {
 
 	// Binary (2280): if pixelsMoved != walkSpeed -> revert and cancel
 	if (pixelsMoved != walkSpeed) {
+		const uint16 tileArea = g_engine->_scriptExecutor->getAreaAtPoint(pos.x, pos.y);
+		if (tileArea >= 210 && tileArea <= 215) {
+			debugC(kDebugPath,
+				   "walk cancelled pixelsMoved=%d walkSpeed=%d at (%d,%d) area=%u walk=%u finalDest=(%d,%d)",
+				   pixelsMoved, walkSpeed, pos.x, pos.y, tileArea, lookupWalkability(pos),
+				   _pathFinalDestination.x, _pathFinalDestination.y);
+		} else if (Macs2Engine::isWalkabilityBlocking(lookupWalkability(pos))) {
+			debugC(kDebugPath,
+				   "walk cancelled (non-walkable) pixelsMoved=%d walkSpeed=%d at (%d,%d) walk=%u",
+				   pixelsMoved, walkSpeed, pos.x, pos.y, lookupWalkability(pos));
+		}
 		pos = savedPos;
 		_targetPosition = pos;
 		_pathFinalDestination = pos;

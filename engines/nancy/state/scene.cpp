@@ -278,16 +278,61 @@ void Scene::pushScene(int16 itemID) {
 
 void Scene::popScene(bool inventory) {
 	if (!inventory || _sceneState.pushedInvItemID == -1) {
-		_sceneState.pushedScene.continueSceneSound = true;
+		_sceneState.pushedScene.continueSceneSound = kContinueSceneSound;
 		changeScene(_sceneState.pushedScene);
 		_sceneState.isScenePushed = false;
 	} else {
-		_sceneState.pushedInvScene.continueSceneSound = true;
+		_sceneState.pushedInvScene.continueSceneSound = kContinueSceneSound;
 		changeScene(_sceneState.pushedInvScene);
 		_sceneState.isInvScenePushed = false;
 		addItemToInventory(_sceneState.pushedInvItemID);
 		_sceneState.pushedInvItemID = kEvNoEvent;
 		_sceneState.pushedInvScene.sceneID = kNoScene;
+	}
+}
+
+void Scene::startUIPrepScene(int16 uiType, int16 prepSceneID) {
+	if (_uiPrep.active || (uint16)prepSceneID == kNoScene) {
+		return;
+	}
+
+	_uiPrep.active = true;
+	_uiPrep.uiType = uiType;
+	_uiPrep.returnScene = _sceneState.currentScene;
+	_uiPrep.startMillis = g_system->getMillis();
+
+	SceneChangeDescription desc;
+	desc.sceneID = (uint16)prepSceneID;
+	desc.frameID = 0;
+	desc.verticalOffset = 0;
+	changeScene(desc);
+}
+
+void Scene::finishUIPrepScene() {
+	if (!_uiPrep.active) {
+		return;
+	}
+
+	_uiPrep.active = false;
+
+	// Restore the scene we were in when the popup was opened, keeping its sound.
+	SceneChangeDescription ret = _uiPrep.returnScene;
+	ret.continueSceneSound = kContinueSceneSound;
+	changeScene(ret);
+
+	// Open the popup whose prep scene just populated its content.
+	switch (_uiPrep.uiType) {
+	case kUITypeInventory:
+		_inventoryPopup.open();
+		break;
+	case kUITypeNotebook:
+		_notebookPopup.open();
+		break;
+	case kUITypeCellphone:
+		_cellPhonePopup.open();
+		break;
+	default:
+		break;
 	}
 }
 
@@ -353,6 +398,30 @@ void Scene::addItemToInventory(int16 id) {
 		if (g_nancy->getGameType() <= kGameTypeNancy9) {
 			_inventoryBox.addItem(id);
 		} else {
+			// Nancy 10+ has no always-visible inventory box; the popup renders
+			// from the shared, save-persisted order list instead. Items are
+			// inserted at the front, except that when the UIIV chunk opts in
+			// (appendItemsWhileOpen) an item added while the popup is open goes
+			// to the end. That's how the most recently dropped item ends up last.
+			bool addToBack = false;
+			if (_inventoryPopup.isOpen()) {
+				const UIIV *uiivData = GetEngineData(UIIV);
+				addToBack = uiivData && uiivData->appendItemsWhileOpen;
+			}
+
+			Common::Array<int16> &order = _inventoryBox.getOrder();
+			for (uint i = 0; i < order.size(); ++i) {
+				if (order[i] == id) {
+					order.remove_at(i);
+					break;
+				}
+			}
+			if (addToBack) {
+				order.push_back(id);
+			} else {
+				order.insert_at(0, id);
+			}
+
 			if (_inventoryPopup.isOpen()) {
 				_inventoryPopup.refreshGrid();
 			} else if (_taskbar) {
@@ -380,8 +449,18 @@ void Scene::removeItemFromInventory(int16 id, bool pickUp) {
 
 		if (g_nancy->getGameType() <= kGameTypeNancy9) {
 			_inventoryBox.removeItem(id);
-		} else if (_inventoryPopup.isOpen()) {
-			_inventoryPopup.refreshGrid();
+		} else {
+			Common::Array<int16> &order = _inventoryBox.getOrder();
+			for (uint i = 0; i < order.size(); ++i) {
+				if (order[i] == id) {
+					order.remove_at(i);
+					break;
+				}
+			}
+
+			if (_inventoryPopup.isOpen()) {
+				_inventoryPopup.refreshGrid();
+			}
 		}
 	}
 }
@@ -927,6 +1006,11 @@ void Scene::init() {
 	_flags.items.resize(g_nancy->getStaticData().numItems, g_nancy->_false);
 	_flags.disabledItems.resize(_flags.items.size(), 0);
 
+	// The CursorManager is owned by the engine and survives a New Game (which
+	// destroys and recreates the Scene). Clear any held-item cursor left over
+	// from a previous playthrough so a fresh game starts with the normal cursor.
+	g_nancy->_cursor->setCursorItemID(-1);
+
 	_timers.lastTotalTime = 0;
 	_timers.playerTime = bootSummary->startTimeHours * 3600000;
 	_timers.sceneTime = 0;
@@ -1100,7 +1184,10 @@ void Scene::load(bool fromSaveFile) {
 		_sceneState.currentScene.paletteID = 0;
 	}
 
-	if (_sceneState.summary.videoFile != "NO_ART_SCENE") {
+	// "NO_ART_SCENE" and (Nancy 11+) "POPUP_PREP_SCENE" are videoless sentinel
+	// scenes that carry only logic ARs; they have no viewport art to load.
+	if (_sceneState.summary.videoFile != "NO_ART_SCENE" &&
+			_sceneState.summary.videoFile != "POPUP_PREP_SCENE") {
 		const Common::Path palettePath = !_sceneState.summary.palettes.empty() ?
 			_sceneState.summary.palettes[(byte)_sceneState.currentScene.paletteID] :
 			Common::Path();
@@ -1316,11 +1403,28 @@ Common::Rect Scene::activePopupConfinement() const {
 	if (_conversationPopup.isVisible()) return _conversationPopup.getScreenPosition();
 	if (_inventoryPopup.isVisible())    return _inventoryPopup.getScreenPosition();
 	if (_notebookPopup.isVisible())     return _notebookPopup.getScreenPosition();
-	if (_cellPhonePopup.isVisible())    return _cellPhonePopup.getScreenPosition();
+	// The cellphone stays up during a call it placed, but the conversation
+	// (textbox) is the active UI then — don't confine the cursor to the phone,
+	// or it fights the textbox as each new line starts.
+	if (_cellPhonePopup.isVisible() && _activeConversation == nullptr)
+		return _cellPhonePopup.getScreenPosition();
 	return Common::Rect();
 }
 
 void Scene::handleInput() {
+	// While a UI prep scene is running the player shouldn't be able to interact
+	// with the (hidden, videoless) prep scenes. Swallow all input until the
+	// prep's UIPopupPrepScene AR finishes it. A safety timeout guards against a
+	// prep scene that never reaches its terminator so the game can't lock up.
+	if (_uiPrep.active) {
+		if (g_system->getMillis() - _uiPrep.startMillis > 5000) {
+			warning("UI prep scene did not finish within timeout; aborting");
+			finishUIPrepScene();
+		}
+		g_nancy->_input->getInput();
+		return;
+	}
+
 	NancyInput input = g_nancy->_input->getInput();
 
 	// Warp the mouse below the inactive zone during dialogue scenes
@@ -1420,7 +1524,18 @@ void Scene::handleInput() {
 	// skipped while the textbox is in open mode (it visually covers the
 	// buttons, so they should not receive hover/clicks).
 	if (!_activeMovie) {
-		if (_taskbar && !_textbox.isFullMode()) {
+		// While a Nancy 10+ popup (inventory / notebook / cellphone /
+		// conversation) is open, the original disables the entire taskbar —
+		// every button, including MENU and HELP. Skip the taskbar input so it
+		// neither hovers nor reacts to clicks until the popup is closed.
+		const bool popupOpen = g_nancy->getGameType() >= kGameTypeNancy10 &&
+								!activePopupConfinement().isEmpty();
+		if (_taskbar) {
+			// Grey out the whole taskbar while a popup is open (matches the
+			// original); restored automatically once the popup closes.
+			_taskbar->setPopupLockout(popupOpen);
+		}
+		if (_taskbar && !_textbox.isFullMode() && !popupOpen) {
 			// MENU and HELP leave gameplay entirely, which would cut off the
 			// taskbar click sound. The original defers the transition until that
 			// sound finishes, so we hold the click here and only switch state
@@ -1443,9 +1558,19 @@ void Scene::handleInput() {
 				case kTaskButtonInventory:
 					_inventoryPopup.toggle();
 					break;
-				case kTaskButtonNotebook:
-					_notebookPopup.toggle();
+				case kTaskButtonNotebook: {
+					// Nancy 11+ populates the notebook lazily: opening it first
+					// runs a hidden prep scene (header.linkbackScene) whose ARs
+					// add the journal / task entries. Games without a prep scene
+					// (linkbackScene == kNoScene, e.g. Nancy 10) just toggle.
+					const int16 prepScene = _notebookPopup.getPrepSceneID();
+					if (!_notebookPopup.isVisible() && (uint16)prepScene != kNoScene) {
+						startUIPrepScene(kUITypeNotebook, prepScene);
+					} else {
+						_notebookPopup.toggle();
+					}
 					break;
+				}
 				case kTaskButtonCellphone:
 					_cellPhonePopup.toggle();
 					break;

@@ -169,12 +169,12 @@ INV::INV(Common::SeekableReadStream *chunkStream) : EngineData(chunkStream) {
 
 	s.skip(0x10, kGameTypeVampire, kGameTypeNancy9); // unknown rect, same size as a hotspot
 
-	byte textBuf[60];
+	byte textBuf[61];
 
 	if (s.getVersion() >= kGameTypeNancy2) {
 		cantSound.readNormal(*chunkStream);
 		s.syncBytes(textBuf, 60);
-		textBuf[59] = '\0';
+		textBuf[60] = '\0';
 		cantText = (char *)textBuf;
 	}
 
@@ -210,18 +210,18 @@ INV::INV(Common::SeekableReadStream *chunkStream) : EngineData(chunkStream) {
 
 		if (s.getVersion() == kGameTypeNancy2) {
 			s.syncBytes(textBuf, 60);
-			textBuf[59] = '\0';
+			textBuf[60] = '\0';
 			assembleTextLine((char *)textBuf, item.cantText, 60);
 
 			s.syncBytes(textBuf, 60);
-			textBuf[59] = '\0';
+			textBuf[60] = '\0';
 			assembleTextLine((char *)textBuf, item.cantTextNotHolding, 60);
 
 			item.cantSound.readNormal(*chunkStream);
 			item.cantSoundNotHolding.readNormal(*chunkStream);
 		} else if (s.getVersion() >= kGameTypeNancy3 && s.getVersion() <= kGameTypeNancy8) {
 			s.syncBytes(textBuf, 60);
-			textBuf[59] = '\0';
+			textBuf[60] = '\0';
 			assembleTextLine((char *)textBuf, item.cantText, 60);
 
 			item.cantSound.readNormal(*chunkStream);
@@ -230,7 +230,7 @@ INV::INV(Common::SeekableReadStream *chunkStream) : EngineData(chunkStream) {
 				if (s.getVersion() >= kGameTypeNancy10)
 					readFilename(s, item.cantSounds[j].name);
 				s.syncBytes(textBuf, 60);
-				textBuf[59] = '\0';
+				textBuf[60] = '\0';
 				assembleTextLine((char *)textBuf, item.cantTexts[j], 60);
 				if (s.getVersion() == kGameTypeNancy9)
 					readFilename(s, item.cantSounds[j].name);
@@ -1038,14 +1038,17 @@ UICL::UICL(Common::SeekableReadStream *chunkStream) : EngineData(chunkStream) {
 	readRect(*chunkStream, browserHeading.srcRect);
 	readRect(*chunkStream, browserHeading.destRect);
 
-	readFilename(*chunkStream, holdMusicSound);
-	readFilename(*chunkStream, answeringMachineSound);
-	holdLink1 = chunkStream->readSint16LE();
-	holdLink2 = chunkStream->readSint16LE();
-	readFilename(*chunkStream, urlSound);
-	urlLink1 = chunkStream->readSint16LE();
-	urlLink2 = chunkStream->readSint16LE();
-	urlLink3 = chunkStream->readSint16LE();
+	// Initial email entry (key + value + flag + event flag), then initial
+	// web-search entry (key + extra + flag + event flag). Both are optional;
+	// an empty key marks an absent entry. CellPhonePopup seeds these on init.
+	readFilename(*chunkStream, initialEmail.key);
+	readFilename(*chunkStream, initialEmail.value);
+	initialEmail.flag = chunkStream->readSint16LE();
+	initialEmail.eventFlag = chunkStream->readSint16LE();
+	readFilename(*chunkStream, initialSearch.key);
+	initialSearch.extra = chunkStream->readSint16LE();
+	initialSearch.flag = chunkStream->readSint16LE();
+	initialSearch.eventFlag = chunkStream->readSint16LE();
 
 	fontId1 = chunkStream->readUint16LE();
 	fontId2 = chunkStream->readUint16LE();
@@ -1090,7 +1093,11 @@ UIIV::UIIV(Common::SeekableReadStream *chunkStream) : EngineData(chunkStream) {
 	if (g_nancy->getGameType() >= kGameTypeNancy13)
 		readRect(*chunkStream, slotsHotspot);
 
-	chunkStream->skip(2);
+	// Two byte flags. The first controls where items added while the popup is
+	// open land in the inventory order (see appendItemsWhileOpen); the second
+	// is unused here.
+	appendItemsWhileOpen = chunkStream->readByte();
+	chunkStream->skip(1);
 
 	for (uint i = 0; i < kNumFilters; ++i) {
 		readUIButtonSlot(*chunkStream, filters[i]);

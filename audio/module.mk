@@ -36,7 +36,6 @@ MODULE_OBJS := \
 	decoders/aiff.o \
 	decoders/apc.o \
 	decoders/asf.o \
-	decoders/flac.o \
 	decoders/g711.o \
 	decoders/iff_sound.o \
 	decoders/mac_snd.o \
@@ -45,7 +44,6 @@ MODULE_OBJS := \
 	decoders/quicktime.o \
 	decoders/raw.o \
 	decoders/voc.o \
-	decoders/vorbis.o \
 	decoders/wave.o \
 	decoders/wma.o \
 	decoders/xa.o \
@@ -125,6 +123,16 @@ endif
 ifdef USE_MPCDEC
 MODULE_OBJS += \
 	decoders/mpc.o
+endif
+
+ifdef USE_FLAC
+MODULE_OBJS += \
+	decoders/flac.o
+endif
+
+ifdef USE_VORBIS
+MODULE_OBJS += \
+	decoders/vorbis.o
 endif
 
 ifdef USE_MT32EMU

@@ -19,39 +19,22 @@
  *
  */
 
-#ifndef MADS_CORE_LOCK_H
-#define MADS_CORE_LOCK_H
+#ifndef MACS2_CONSTANTS_H
+#define MACS2_CONSTANTS_H
 
-#include "mads/madsv2/core/general.h"
+namespace Macs2 {
 
-namespace MADS {
-namespace MADSV2 {
+// Original game viewport dimensions (all scene maps and buffers use these).
+static constexpr int kScreenWidth     = 320;
+static constexpr int kScreenWidthLast = kScreenWidth - 1;
+static constexpr int kGameHeight      = 200;
+static constexpr int kGameHeightLast  = kGameHeight - 1;
 
-extern char *lock_program_name;
-extern char *lock_search_mark;
-extern int  lock_search_length;
-extern word *lock_hash_value;
+// SCUMM-style verb/inventory strip (kEnhUIUX enhancement only).
+static constexpr int kUIHeight       = 64;
+static constexpr int kScreenHeight   = kGameHeight + kUIHeight;
+static constexpr int kScreenHeightLast = kScreenHeight - 1;
 
-extern word lock_get_disk_hash();
+} // namespace Macs2
 
-extern long lock_search_hash_offset();
-
-extern void lock_write_new_hash();
-
-extern int lock_get_copy_code();
-
-extern void lock_short_protection_check();
-
-extern int lock_verification();
-extern void lock_sabotage();
-
-extern void lock_long_protection_check();
-
-extern void lock_secret_protection_check();
-
-extern void lock_preliminary_check();
-
-} // namespace MADSV2
-} // namespace MADS
-
-#endif
+#endif // MACS2_CONSTANTS_H

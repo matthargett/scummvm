@@ -130,15 +130,13 @@ protected:
 // text into the new (UICO-driven) textbox
 class FrameTextBox : public ActionRecord {
 public:
-	FrameTextBox(bool fullMode) : _fullMode(fullMode), _flags(0), _slot(0) {}
+	FrameTextBox(bool fullMode) : _fullMode(fullMode) {}
 
 	void readData(Common::SeekableReadStream &stream) override;
 	void execute() override;
 
 	bool _fullMode;
 	Common::String _text;
-	int16 _flags;
-	int16 _slot;
 
 protected:
 	Common::String getRecordTypeName() const override { return "FrameTextBox"; }
@@ -148,12 +146,6 @@ protected:
 // (inventory / notebook / cellphone) is enabled.
 class ControlUIItems : public ActionRecord {
 public:
-	enum UIType {
-		kUITypeInventory = 1,
-		kUITypeNotebook  = 2,
-		kUITypeCellphone = 3
-	};
-
 	void readData(Common::SeekableReadStream &stream) override;
 	void execute() override;
 
@@ -162,6 +154,11 @@ public:
 	byte _flagB = 0;    // 0 = clear, 1 = enable+remember scene
 	int16 _startScene = 0; // start scene id (9999 = none); also the auto-open cell phone's call target
 	int16 _endScene = 0;   // end scene id (9999 = none)
+
+	Common::String getRecordExtraInfo() const override {
+		return Common::String::format("uiButton: %d, autoOpenOrBadgeSound: %d, flagB: %d, startScene: %d, endScene: %d",
+									  _uiButton, _autoOpenOrBadgeSound, _flagB, _startScene, _endScene);
+	}
 
 protected:
 	Common::String getRecordTypeName() const override { return "ControlUIItems"; }
@@ -188,11 +185,12 @@ public:
 	void execute() override;
 
 	int16 _mode = 0;
-	Common::String _key;          // CVTX key for the list row text (both modes)
-	Common::String _value;        // body CVTX key (mode 0/email); unused for mode 1
-	int16 _extra = 0;             // page index (mode 1); unused for mode 0
-	int16 _flag = 0;              // stored but unused by the original; reserved
-	int16 _eventFlag = 0;         // event-flag index set when the entry is opened
+	SearchLink _link;
+
+	Common::String getRecordExtraInfo() const override {
+		return Common::String::format("Key: %s, Value: %s, Mode: %d, Extra: %d, Flag: %d, EventFlag: %d",
+			_link.key.c_str(), _link.value.c_str(), _mode, _link.extra, _link.flag, _link.eventFlag);
+	}
 
 protected:
 	Common::String getRecordTypeName() const override { return "AddSearchLink"; }
@@ -220,6 +218,10 @@ public:
 	void execute() override;
 
 	UICL::Contact _contact;
+
+	Common::String getRecordExtraInfo() const override {
+		return Common::String::format("Contact: %s", _contact.name.c_str());
+	}
 
 protected:
 	Common::String getRecordTypeName() const override { return "ChangeCellPhoneInfo"; }

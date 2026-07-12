@@ -480,7 +480,7 @@ struct ImageChunk : public EngineData {
 struct CVTX : public EngineData {
 	CVTX(Common::SeekableReadStream *chunkStream);
 
-	Common::HashMap<Common::String, Common::String> texts;
+	Common::HashMap<Common::String, Common::String, Common::IgnoreCase_Hash, Common::IgnoreCase_EqualTo> texts;
 };
 
 struct TABL : public EngineData {
@@ -674,21 +674,18 @@ struct UICL : public EngineData {
 	SrcDestRectPair helpHeading;
 	SrcDestRectPair browserHeading;
 
-	Common::Path holdMusicSound;
-	Common::Path answeringMachineSound;       // chunk+0xCE4 (33B): "SHAMA02"
-	int16 holdLink1 = 0;
-	int16 holdLink2 = 0;
-	Common::Path urlSound;
-	int16 urlLink1 = 0;
-	int16 urlLink2 = 0;
-	int16 urlLink3 = 0;
+	// One initial email entry and one initial web-search entry can be baked
+	// into the UICL chunk itself; the original seeds them at new-game init
+	// (its cellphone reset). An empty key means the game ships that list empty.
+	SearchLink initialEmail;
+	SearchLink initialSearch;
 
 	uint16 fontId1 = 0;
 	uint16 fontId2 = 0;
 
-	Common::Path outgoingRingSound;           // Process case 2 (post-dial ring)
-	Common::Path pickupSound;                 // Process cases 0/4 (call connect)
-	Common::Path invalidNumberSound;          // Process case 7 (try again)
+	Common::Path outgoingRingSound;           // post-dial ring
+	Common::Path pickupSound;                 // call connect
+	Common::Path invalidNumberSound;          // try again
 
 	uint16 contactCount = 0;
 	Common::Array<Contact> contacts;
@@ -717,6 +714,10 @@ struct UIIV : public EngineData {
 	Common::Array<Common::Rect> slotSrcRects;       // 16 entries (image coords)
 	Common::Array<Common::Rect> slotDestRects;      // 16 entries (screen coords)
 	Common::Rect slotsHotspot;                      // Nancy13+: clickable region of the item slots
+	// When nonzero, items added while the popup is open are appended to the end
+	// of the inventory order instead of being inserted at the front (so the most
+	// recently dropped item ends up last). See Scene::addItemToInventory.
+	byte appendItemsWhileOpen = 0;
 	UIButtonSlot filters[kNumFilters];              // 6 entries
 	Common::Array<Common::Rect> tabCaptionSrcRects; // 6 entries
 	Common::Rect tabCaptionDestRect;                // on-screen target

@@ -7,8 +7,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: ScummVM 1.4.0svn\n"
 "Report-Msgid-Bugs-To: scummvm-devel@lists.scummvm.org\n"
-"POT-Creation-Date: 2026-07-04 16:10+0000\n"
-"PO-Revision-Date: 2026-06-30 09:26+0000\n"
+"POT-Creation-Date: 2026-07-08 18:20+0000\n"
+"PO-Revision-Date: 2026-07-11 11:39+0000\n"
 "Last-Translator: IlDucci <pajaroloco_2@hotmail.com>\n"
 "Language-Team: Spanish <https://translations.scummvm.org/projects/scummvm/"
 "scummvm/es/>\n"
@@ -1342,7 +1342,7 @@ msgstr ""
 "pestaña **Nube**.\n"
 "\n"
 "2. Selecciona tu servicio de almacenamiento en la nube favorito en el menú "
-"desplegable **Alm. activo** y luego selecciona **Conectar**.\n"
+"desplegable **Almac. activo** y luego selecciona **Conectar**.\n"
 "\n"
 "\t  ![Selección de servicio de almacenamiento en la nube](choose_storage.png "
 "\"Selección de servicio de almacenamiento en la nube\"){w=70%,maxw=50em}\n"
@@ -2433,7 +2433,7 @@ msgstr "Autoguardado:"
 
 #: gui/options.cpp:2746
 msgid "Random seed:"
-msgstr "Valor de inicial.:"
+msgstr "Valor de inicializ.:"
 
 #: gui/options.cpp:2746
 msgid "Seed for initializing all random number generators"
@@ -2481,7 +2481,7 @@ msgstr "Buscar ahora"
 
 #: gui/options.cpp:2797
 msgid "Active storage:"
-msgstr "Alm. activo:"
+msgstr "Almac. activo:"
 
 #: gui/options.cpp:2797
 msgid "Active cloud storage"
@@ -3055,20 +3055,18 @@ msgid ""
 "Use the button below to copy the required game information into your "
 "clipboard."
 msgstr ""
-"Usa el botón de abajo para copiar la información del juego requerida en tu "
-"portapapeles."
+"Pulsa el botón de debajo para copiar la información necesaria del juego en "
+"el portapapeles."
 
 #: gui/unknown-game-dialog.cpp:105
 msgid "You can also directly report your game to the Bug Tracker."
-msgstr ""
-"También puedes informar directamente sobre tu juego en el gestor de fallos."
+msgstr "También puedes informar directamente en el gestor de fallos."
 
 #: gui/unknown-game-dialog.cpp:155
 msgid ""
 "All necessary information about your game has been copied into the clipboard"
 msgstr ""
-"Toda la información necesaria sobre tu juego ha sido copiada en el "
-"portapapeles"
+"Se ha copiado toda la información necesaria sobre tu juego en el portapapeles"
 
 #: gui/unknown-game-dialog.cpp:157
 msgid "Copying the game information to the clipboard has failed!"
@@ -3927,10 +3925,10 @@ msgid ""
 "Please report the following data to the ScummVM team at %s along with the "
 "name of the game you tried to add and its version, language, etc.:"
 msgstr ""
-"Parece que el juego en %s se trate de una versión desconocida.\n"
+"Parece que el juego de la ruta %s es una variante desconocida.\n"
 "\n"
-"Por favor, envía los siguientes datos al equipo de ScummVM en %s, junto con "
-"el nombre del juego que intentabas añadir, su versión, idioma, etc.:"
+"Envía los siguientes datos al equipo de ScummVM en %s, junto con el nombre "
+"del juego que intentabas añadir, su versión, idioma, etc.:"
 
 #: engines/game.cpp:203
 #, c-format
@@ -4008,7 +4006,7 @@ msgstr "Clic derecho"
 #. I18N: Action in In Cold Blood
 #: engines/metaengine.cpp:99 engines/agos/metaengine.cpp:178
 #: engines/buried/metaengine.cpp:167 engines/crab/input/input.cpp:261
-#: engines/cruise/metaengine.cpp:217 engines/dm/metaengine.cpp:180
+#: engines/cruise/metaengine.cpp:217 engines/dm/metaengine.cpp:126
 #: engines/grim/grim.cpp:550 engines/hdb/metaengine.cpp:258
 #: engines/hypno/metaengine.cpp:243 engines/hypno/metaengine.cpp:339
 #: engines/hypno/metaengine.cpp:456 engines/icb/icb.cpp:137
@@ -6423,7 +6421,7 @@ msgstr ""
 #: engines/access/metaengine.cpp:236 engines/alcachofa/metaengine.cpp:94
 #: engines/bbvs/metaengine.cpp:92 engines/buried/metaengine.cpp:133
 #: engines/chamber/metaengine.cpp:63 engines/cine/metaengine.cpp:270
-#: engines/cruise/metaengine.cpp:168 engines/dm/metaengine.cpp:124
+#: engines/cruise/metaengine.cpp:168 engines/dm/metaengine.cpp:70
 #: engines/draci/metaengine.cpp:195 engines/drascula/metaengine.cpp:205
 #: engines/efh/metaengine.cpp:256 engines/hopkins/metaengine.cpp:206
 #: engines/hugo/metaengine.cpp:129 engines/hypno/metaengine.cpp:128
@@ -6990,7 +6988,7 @@ msgstr "AGOS - Principal"
 #: engines/buried/metaengine.cpp:136 engines/cge/metaengine.cpp:199
 #: engines/cge2/metaengine.cpp:212 engines/chamber/metaengine.cpp:64
 #: engines/cine/metaengine.cpp:271 engines/cruise/metaengine.cpp:169
-#: engines/dm/metaengine.cpp:126 engines/draci/metaengine.cpp:196
+#: engines/dm/metaengine.cpp:72 engines/draci/metaengine.cpp:196
 #: engines/drascula/metaengine.cpp:206 engines/hopkins/metaengine.cpp:207
 #: engines/hugo/metaengine.cpp:130 engines/hypno/metaengine.cpp:225
 #: engines/hypno/metaengine.cpp:324 engines/hypno/metaengine.cpp:372
@@ -7047,7 +7045,7 @@ msgstr "Caminar hacia delante"
 msgid "Turn backward"
 msgstr "Dar media vuelta"
 
-#: engines/agos/metaengine.cpp:228 engines/dm/metaengine.cpp:186
+#: engines/agos/metaengine.cpp:228 engines/dm/metaengine.cpp:132
 #: engines/kyra/engine/eobcommon.cpp:375 engines/kyra/engine/lol.cpp:517
 #: engines/lab/metaengine.cpp:257 engines/mm/mm1/metaengine.cpp:102
 #: engines/mohawk/riven.cpp:901 engines/pegasus/pegasus.cpp:2740
@@ -7061,7 +7059,7 @@ msgstr "Dar media vuelta"
 msgid "Turn left"
 msgstr "Girar a la izquierda"
 
-#: engines/agos/metaengine.cpp:234 engines/dm/metaengine.cpp:206
+#: engines/agos/metaengine.cpp:234 engines/dm/metaengine.cpp:152
 #: engines/kyra/engine/eobcommon.cpp:376 engines/kyra/engine/lol.cpp:518
 #: engines/lab/metaengine.cpp:271 engines/mm/mm1/metaengine.cpp:103
 #: engines/mohawk/riven.cpp:907 engines/pegasus/pegasus.cpp:2747
@@ -7801,7 +7799,7 @@ msgstr "Ocultar pista"
 #. SAVE GAME
 #: engines/bladerunner/metaengine.cpp:330 engines/buried/metaengine.cpp:179
 #: engines/cge/metaengine.cpp:221 engines/cge2/metaengine.cpp:235
-#: engines/dgds/metaengine.cpp:75 engines/dm/metaengine.cpp:174
+#: engines/dgds/metaengine.cpp:75 engines/dm/metaengine.cpp:120
 #: engines/drascula/metaengine.cpp:285 engines/efh/metaengine.cpp:272
 #: engines/freescape/games/castle/castle.cpp:473
 #: engines/freescape/games/dark/dark.cpp:227
@@ -7940,7 +7938,7 @@ msgstr "Asignaciones del inventario"
 
 #: engines/buried/metaengine.cpp:141 engines/chamber/metaengine.cpp:69
 #: engines/chamber/metaengine.cpp:75 engines/chamber/metaengine.cpp:81
-#: engines/dm/metaengine.cpp:130 engines/private/metaengine.cpp:141
+#: engines/dm/metaengine.cpp:76 engines/private/metaengine.cpp:141
 #: engines/sherlock/metaengine.cpp:1187
 msgid "Select / Interact"
 msgstr "Seleccionar/Interactuar"
@@ -7973,7 +7971,7 @@ msgid "Look right"
 msgstr "Mirar hacia la derecha"
 
 #: engines/buried/metaengine.cpp:218 engines/colony/metaengine.cpp:99
-#: engines/dm/metaengine.cpp:196 engines/kyra/engine/eobcommon.cpp:371
+#: engines/dm/metaengine.cpp:142 engines/kyra/engine/eobcommon.cpp:371
 #: engines/kyra/engine/lol.cpp:513 engines/mohawk/riven.cpp:881
 #: engines/titanic/metaengine.cpp:336 engines/titanic/metaengine.cpp:378
 #: engines/twine/metaengine.cpp:332 engines/ultima/ultima0/metaengine.cpp:78
@@ -8314,13 +8312,13 @@ msgstr ""
 msgid "Move backward"
 msgstr "Retroceder"
 
-#: engines/colony/metaengine.cpp:113 engines/dm/metaengine.cpp:216
+#: engines/colony/metaengine.cpp:113 engines/dm/metaengine.cpp:162
 #: engines/freescape/movement.cpp:53 engines/hpl1/metaengine.cpp:78
 #: engines/mm/mm1/metaengine.cpp:104
 msgid "Strafe left"
 msgstr "Desplazarse a la izquierda"
 
-#: engines/colony/metaengine.cpp:120 engines/dm/metaengine.cpp:236
+#: engines/colony/metaengine.cpp:120 engines/dm/metaengine.cpp:182
 #: engines/freescape/movement.cpp:61 engines/hpl1/metaengine.cpp:79
 #: engines/mm/mm1/metaengine.cpp:105
 msgid "Strafe right"
@@ -8617,41 +8615,41 @@ msgstr ""
 "Utiliza el modo de gráficos en color verdadero (32 bits por píxel), aunque "
 "el juego no estaba diseñado para dicho modo"
 
-#: engines/dm/metaengine.cpp:125
+#: engines/dm/metaengine.cpp:71
 msgid "Dialog choice selection keymappings"
 msgstr "Asignaciones de selección de diálogos"
 
 #. I18N: (Game name: Dungeon Master) The player has a team of 4 characters called "champions" which they choose themselves. One of them can be assigned the "leader". This action toggles the inventory screen of the leader champion.
-#: engines/dm/metaengine.cpp:137
+#: engines/dm/metaengine.cpp:83
 msgid "Toggle leader inventory"
 msgstr "Mostrar/Ocultar inventario del líder"
 
 #. I18N: (Game name: Dungeon Master) The game has multi-choice dialogs. If there is only one choice, then this action can be used to select it.
-#: engines/dm/metaengine.cpp:144
+#: engines/dm/metaengine.cpp:90
 msgid "Select dialog choice (only works if there is a single choice)"
 msgstr "Seleccionar diálogo (solo si hay una única opción)"
 
 #. I18N: (Game name: Dungeon Master) The player has a team of 4 characters called "champions" which they choose themselves. This action toggles the inventory screen of champion 1.
-#: engines/dm/metaengine.cpp:151
+#: engines/dm/metaengine.cpp:97
 msgid "Toggle champion 1 inventory"
 msgstr "Mostrar/Ocultar inventario de paladín 1"
 
 #. I18N: (Game name: Dungeon Master) The player has a team of 4 characters called "champions" which they choose themselves. This action toggles the inventory screen of champion 2.
-#: engines/dm/metaengine.cpp:157
+#: engines/dm/metaengine.cpp:103
 msgid "Toggle champion 2 inventory"
 msgstr "Mostrar/Ocultar inventario de paladín 2"
 
 #. I18N: (Game name: Dungeon Master) The player has a team of 4 characters called "champions" which they choose themselves. This action toggles the inventory screen of champion 3.
-#: engines/dm/metaengine.cpp:163
+#: engines/dm/metaengine.cpp:109
 msgid "Toggle champion 3 inventory"
 msgstr "Mostrar/Ocultar inventario de paladín 3"
 
 #. I18N: (Game name: Dungeon Master) The player has a team of 4 characters called "champions" which they choose themselves. This action toggles the inventory screen of champion 4.
-#: engines/dm/metaengine.cpp:169
+#: engines/dm/metaengine.cpp:115
 msgid "Toggle champion 4 inventory"
 msgstr "Mostrar/Ocultar inventario de paladín 4"
 
-#: engines/dm/metaengine.cpp:226 engines/kyra/engine/eobcommon.cpp:372
+#: engines/dm/metaengine.cpp:172 engines/kyra/engine/eobcommon.cpp:372
 #: engines/kyra/engine/lol.cpp:514 engines/mohawk/riven.cpp:895
 #: engines/titanic/metaengine.cpp:343 engines/titanic/metaengine.cpp:384
 #: engines/twine/metaengine.cpp:339 engines/wintermute/keymapper_tables.h:155
@@ -8661,7 +8659,7 @@ msgid "Move backwards"
 msgstr "Retroceder"
 
 #. I18N: (Game name: Dungeon Master) The player has a team of 4 characters called "champions" which they choose themselves. The champions can be put to sleep. This action wakes up the sleeping champion.
-#: engines/dm/metaengine.cpp:247
+#: engines/dm/metaengine.cpp:193
 msgid "Wake up champion"
 msgstr "Despertar a paladín"
 
@@ -11191,6 +11189,10 @@ msgstr "Alternar velocidad del juego"
 #: engines/touche/metaengine.cpp:147
 msgid "Open options menu"
 msgstr "Abrir menú de opciones"
+
+#: engines/macs2/metaengine.cpp:85
+msgid "Help / map"
+msgstr "Ayuda/Mapa"
 
 #: engines/made/detection_tables.h:446 engines/made/detection_tables.h:463
 msgid "The game is using unsupported engine"

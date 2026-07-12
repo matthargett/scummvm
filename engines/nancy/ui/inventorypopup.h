@@ -84,7 +84,21 @@ private:
 	void drawCloseButton(bool hovered);
 	void drawScrollbar(UIButtonState state);
 	void rebuildVisibleList();
+
+	// Reconcile the shared, save-persisted inventory order list with the items
+	// the player actually owns: drop stale entries and append any owned items
+	// missing from it (in item-ID order). Fixes up saves made before ordering
+	// was tracked in one pass, instead of one item at a time. Returns true if
+	// the order list was changed.
+	bool syncOrderWithInventory();
+
+	bool itemMatchesFilter(int16 itemID) const;
 	void setActiveFilterIndex(uint index);
+
+	// Play a popup button's click sound (the filter tabs and the close X),
+	// falling back to the shared button-click slot in the popup header when the
+	// button carries no sound of its own.
+	void playButtonClickSound(const UIButtonRecord &button);
 
 	// Apply the current scrollbar position to the page index, clamping
 	// to the number of pages required by the active filter.

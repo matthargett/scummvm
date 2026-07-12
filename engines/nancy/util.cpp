@@ -344,38 +344,6 @@ void assembleTextLine(char *rawCaption, Common::String &output, uint size) {
 	}
 }
 
-Common::String getTextFromCaseInsensitiveKey(Common::HashMap<Common::String, Common::String> texts, Common::String &key) {
-	if (texts.contains(key)) {
-		return texts[key];
-	} else {
-		// Nancy10+ searched keyed texts in a key insensitive way, but
-		// the possible permutations involve mainly the last character
-		// being upper or lower case, so just try that before giving up.
-		if (key[key.size() - 1] == toupper(key[key.size() - 1]))
-			key[key.size() - 1] = tolower(key[key.size() - 1]);
-		else
-			key[key.size() - 1] = toupper(key[key.size() - 1]);
-
-		if (texts.contains(key))
-			return texts[key];
-
-		// Try all uppercase
-		key.toUppercase();
-
-		if (texts.contains(key))
-			return texts[key];
-
-		// Check for lowercase cases for the second to last character, for Nancy11+
-		key[key.size() - 2] = tolower(key[key.size() - 2]);
-
-		if (texts.contains(key))
-			return texts[key];
-	}
-
-	warning("Key not found: %s", key.c_str());
-	return "";
-}
-
 bool DeferredLoader::load(uint32 endTime) {
 	uint32 loopStartTime = g_system->getMillis();
 	uint32 loopTime = 0; // Stores the loop that took the longest time to complete

@@ -119,7 +119,7 @@ static void readTextboxText(Common::SeekableReadStream &stream, Common::String &
 		const CVTX *autotext = (const CVTX *)g_nancy->getEngineData("AUTOTEXT");
 		assert(autotext);
 
-		out = getTextFromCaseInsensitiveKey(autotext->texts, stringID);
+		out = autotext->texts.getValOrDefault(stringID, "");
 	} else if (size > 0) {
 		char *buf = new char[size];
 		stream.read(buf, size);
@@ -211,11 +211,8 @@ void TextboxClear::execute() {
 void FrameTextBox::readData(Common::SeekableReadStream &stream) {
 	readTextboxText(stream, _text);
 
-	// Trailing two int16 fields: meaning differs slightly between the
-	// three opcodes that reuse this layout, but are safe to capture as a
-	// pair until UICO conversation rendering is wired up.
-	_flags = stream.readSint16LE();
-	_slot  = stream.readSint16LE();
+	// The original appends the "<e>" end-of-line hypertext tag to the caption
+	_text += "<e>";
 }
 
 void FrameTextBox::execute() {
@@ -302,9 +299,10 @@ void UIPopupPrepScene::readData(Common::SeekableReadStream &stream) {
 }
 
 void UIPopupPrepScene::execute() {
-	// TODO: finish this
-
-	debug("UIPopupPrepScene: UIType=%d, signalValue=%d", _uiType, _signalValue);
+	// Terminates a UI prep scene chain: the entry-adding ARs in the prep
+	// scene(s) have run, so signal the scene to restore the pre-open scene and
+	// open the (now populated) popup. A no-op if no prep is currently running.
+	NancySceneState.finishUIPrepScene();
 
 	finishExecution();
 }
@@ -312,17 +310,16 @@ void UIPopupPrepScene::execute() {
 void AddSearchLink::readData(Common::SeekableReadStream &stream) {
 	_mode = stream.readSint16LE();
 
-	readFilename(stream, _key);
-	readFilename(stream, _value);
+	readFilename(stream, _link.key);
+	readFilename(stream, _link.value);
 
-	_extra  = stream.readSint16LE();
-	_flag = stream.readSint16LE();
-	_eventFlag = stream.readSint16LE();
+	_link.extra = stream.readSint16LE();
+	_link.flag = stream.readSint16LE();
+	_link.eventFlag = stream.readSint16LE();
 }
 
 void AddSearchLink::execute() {
-	NancySceneState.getCellPhonePopup().addSearchLink(
-		_mode, _key, _value, _extra, _flag, _eventFlag);
+	NancySceneState.getCellPhonePopup().addSearchLink(_mode, _link);
 
 	// Cellphone taskbar badge: mode 0 = new email (sub-cat 1), mode != 0
 	// = new web search topic (sub-cat 2).
@@ -374,7 +371,7 @@ void ChangeCellPhoneInfo::execute() {
 }
 
 void CellPhonePopCellSceneFromStack::readData(Common::SeekableReadStream &stream) {
-	_sceneChange.readData(stream);
+	_sceneChange.sceneID = stream.readUint16LE();
 }
 
 void CellPhonePopCellSceneFromStack::execute() {
@@ -392,8 +389,9 @@ void CellPhonePopCellSceneFromStack::execute() {
 			NancySceneState.changeScene(returnScene);
 	}
 
-	// Conversation is over; take the phone down.
-	phone.close();
+	// Conversation is over. An incoming call closes the phone; a player-placed
+	// call leaves it open at the welcome screen.
+	phone.endCall();
 
 	finishExecution();
 }

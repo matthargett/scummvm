@@ -30,7 +30,7 @@ namespace Nancy {
 namespace Misc {
 
 struct MetaInfo {
-	enum Type { kColor, kFont, kMark, kHotspot };
+	enum Type { kColor, kFont, kMark, kHotspot, kUnderline };
 
 	Type type;
 	uint numChars;
@@ -60,11 +60,12 @@ void HypertextParser::setImageName(const Common::Path &name) {
 	_imageName = name;
 }
 
-static uint lineStep(const Graphics::Font *font) {
-	const uint h = font->getFontHeight();
-	if (g_nancy->getGameType() >= kGameTypeNancy10)
+static uint lineStep(const Font *font) {
+	if (g_nancy->getGameType() >= kGameTypeNancy10) {
+		const uint h = font->getLineHeight();
 		return h + h / 9;
-	return h;
+	}
+	return font->getFontHeight();
 }
 
 void HypertextParser::drawAllText(const Common::Rect &textBounds, uint leftOffsetNonNewline, uint fontID, uint highlightFontID) {
@@ -75,6 +76,10 @@ void HypertextParser::drawAllText(const Common::Rect &textBounds, uint leftOffse
 	Graphics::ManagedSurface image;
 
 	_numDrawnLines = 0;
+
+	if (_recordMarkHotspots) {
+		_markHotspots.clear();
+	}
 
 	if (!_imageName.empty()) {
 		g_nancy->_resource->loadImage(_imageName, image);
@@ -167,6 +172,15 @@ void HypertextParser::drawAllText(const Common::Rect &textBounds, uint leftOffse
 
 					currentLine += '\t';
 					continue;
+				case 'u' :
+					// Underline toggle. Paired <u> tags bracket underlined text
+					// (e.g. journal cross-references).
+					if (curToken.size() != 1) {
+						break;
+					}
+
+					metaInfo.push({MetaInfo::kUnderline, numNonSpaceChars, 0});
+					continue;
 				case 'c' :
 					// Color tokens
 					// We keep the positions (excluding spaces) and colors of the color tokens in a queue
@@ -244,13 +258,18 @@ void HypertextParser::drawAllText(const Common::Rect &textBounds, uint leftOffse
 			hotspot.left = textBounds.left;
 			hotspot.top = textBounds.top + (_numDrawnLines * lineStep(font)) - 1;
 			hotspot.setHeight(0);
-			hotspot.setWidth(0);
+			// Conversation responses are clickable across the whole width of the
+			// text area, not only where the glyphs are, so the player can click
+			// (and highlight) anywhere on the line. The MAX() width accumulation
+			// below preserves this since no wrapped line is wider than the area.
+			hotspot.setWidth(textBounds.width());
 		}
 
 		// Go through the wrapped lines and draw them, making sure to
 		// respect color tokens
 		uint totalCharsDrawn = 0;
 		byte colorID = _defaultTextColor;
+		bool underline = false;
 		uint numNewlineTokens = 0;
 		uint horizontalOffset = 0;
 		bool newLineStart = false;
@@ -319,6 +338,9 @@ void HypertextParser::drawAllText(const Common::Rect &textBounds, uint leftOffse
 					case MetaInfo::kColor:
 						colorID = change.index;
 						break;
+					case MetaInfo::kUnderline:
+						underline = !underline;
+						break;
 					case MetaInfo::kMark: {
 						auto *mark = GetEngineData(MARK);
 						assert(mark);
@@ -350,6 +372,10 @@ void HypertextParser::drawAllText(const Common::Rect &textBounds, uint leftOffse
 
 						// For now we do not check if we need to go to new line; neither does the original
 						_fullSurface.blitFrom(g_nancy->_graphics->_object0, markSrc, markDest);
+
+						if (_recordMarkHotspots) {
+							_markHotspots.push_back(markDest);
+						}
 
 						horizontalOffset += markDest.width() + 2;
 						break;
@@ -395,12 +421,22 @@ void HypertextParser::drawAllText(const Common::Rect &textBounds, uint leftOffse
 				Common::String &stringToDraw = subLine.size() ? subLine : line;
 
 				// Draw the normal text
+				const int drawX = textBounds.left + horizontalOffset + (newLineStart ? 0 : leftOffsetNonNewline);
+				const int drawY = textBounds.top + _numDrawnLines * lineStep(font) + _imageVerticalOffset;
 				font->drawString(				&_fullSurface,
 												stringToDraw,
-												textBounds.left + horizontalOffset + (newLineStart ? 0 : leftOffsetNonNewline),
-												textBounds.top + _numDrawnLines * lineStep(font) + _imageVerticalOffset,
+												drawX,
+												drawY,
 												textBounds.width(),
 												colorID);
+
+				// Underline the segment (the <u> markup toggle) in the text color.
+				if (underline && !stringToDraw.empty()) {
+					const int underlineWidth = font->getStringWidth(stringToDraw);
+					const int underlineY = drawY + font->getFontHeight() - 1;
+					_fullSurface.fillRect(Common::Rect(drawX, underlineY, drawX + underlineWidth, underlineY + 1),
+											font->getColorPixel(colorID));
+				}
 
 				// Then, draw the highlight
 				if (hasHotspot && !_textHighlightSurface.empty()) {

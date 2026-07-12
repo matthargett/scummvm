@@ -127,8 +127,11 @@ public:
 			ScriptContext *context = resolveHandlerContext(obj, _script.id, node.name);
 			if (context) {
 				ImGuiScript script = buildImGuiHandlerScript(context, _script.id.castLib, node.name, _script.moviePath);
-				setScriptToDisplay(script);
-				_state->_dbg._goToDefinition = true;
+				// Open the definition in the window that hosts this script view
+				if (_state->_dbg._hostExecutionContext)
+					setScriptToDisplay(script);
+				else
+					addToOpenHandlers(script);
 			}
 		}
 		ImGui::SameLine();
@@ -996,9 +999,8 @@ private:
 				ImGui::SameLine();
 			}
 		}
-		if (_state->_dbg._goToDefinition && _scrollTo) {
+		if (_scrollTo) {
 			ImGui::SetScrollHereY(0.5f);
-			_state->_dbg._goToDefinition = false;
 		}
 
 		indent();
@@ -1155,10 +1157,11 @@ private:
 		const float width = ImGui::GetContentRegionAvail().x;
 		const ImVec2 mid(pos.x + 7, pos.y + 7);
 
-		ImVec4 color = _state->theme->bp_color_disabled;
+		// add/delBreakpoint invalidate bp, so copy its state into locals
 		const Director::Breakpoint *bp = getBreakpoint(_script.handlerId, _script.id.member, pc);
-		if (bp)
-			color = _state->theme->bp_color_enabled;
+		bool hasBp = bp != nullptr;
+		bool bpEnabled = bp && bp->enabled;
+		ImVec4 color = hasBp ? _state->theme->bp_color_enabled : _state->theme->bp_color_disabled;
 
 		// Need to give a new id for each button
 		Common::String id = _script.handlerId + _renderLineID;
@@ -1169,8 +1172,10 @@ private:
 
 		// click on breakpoint column?
 		if (ImGui::IsItemClicked(0)) {
-			if (color == _state->theme->bp_color_enabled) {
+			if (hasBp) {
 				g_lingo->delBreakpoint(bp->id);
+				hasBp = false;
+				bpEnabled = false;
 				color = _state->theme->bp_color_disabled;
 			} else {
 				Director::Breakpoint newBp;
@@ -1179,8 +1184,11 @@ private:
 				newBp.funcName = _script.handlerId;
 				newBp.funcOffset = pc;
 				g_lingo->addBreakpoint(newBp);
+				hasBp = true;
+				bpEnabled = true;
 				color = _state->theme->bp_color_enabled;
 			}
+			bp = nullptr;
 		}
 
 		if (color == _state->theme->bp_color_disabled && ImGui::IsItemHovered()) {
@@ -1188,7 +1196,7 @@ private:
 		}
 
 		// draw breakpoint
-		if (!bp || bp->enabled)
+		if (!hasBp || bpEnabled)
 			dl->AddCircleFilled(mid, 4.0f, ImColor(color));
 		else
 			dl->AddCircle(mid, 4.0f, ImColor(_state->theme->line_color));

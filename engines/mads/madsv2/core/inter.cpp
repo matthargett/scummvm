@@ -27,7 +27,6 @@
 #include "mads/madsv2/core/mouse.h"
 #include "mads/madsv2/core/font.h"
 #include "mads/madsv2/core/pal.h"
-#include "mads/madsv2/core/lbm.h"
 #include "mads/madsv2/core/keys.h"
 #include "mads/madsv2/core/mcga.h"
 #include "mads/madsv2/core/vocab.h"
@@ -421,7 +420,7 @@ done:
 static void inter_show_word(int class_, int id) {
 	int x, y, junk;
 	int word_id = 0;
-	char temp_buf[80];
+	char temp_buf[80] = { 0 };
 	int write_it = true;
 
 	if (!inter_get_spot(class_, id, &x, &y, &junk, &junk)) {

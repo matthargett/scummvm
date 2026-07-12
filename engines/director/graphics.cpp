@@ -44,6 +44,11 @@ uint32 DirectorEngine::transformColor(uint32 color) {
 	if (_pixelformat.bytesPerPixel == 1)
 		return color;
 
+	// A palette index can never exceed 0xff (max 256 colors); a larger value
+	// must be a packed RGB int from a Lingo color assignment (e.g. rgb()).
+	if (color > 0xff)
+		return _wm->findBestColor((color >> 16) & 0xff, (color >> 8) & 0xff, color & 0xff);
+
 	return _wm->findBestColor(_currentPalette[color * 3], _currentPalette[color * 3 + 1], _currentPalette[color * 3 + 2]);
 }
 
@@ -247,9 +252,10 @@ void DirectorEngine::syncPalette() {
 		memcpy(paletteBuf, _currentPalette, _currentPaletteLength*3);
 	}
 
-	// Pass the palette to OSystem only for 8bpp mode
-	if (_pixelformat.bytesPerPixel == 1)
+	if (_pixelformat.bytesPerPixel == 1) {
+		// Pass the palette to OSystem only for 8bpp mode
 		_system->getPaletteManager()->setPalette(paletteBuf, 0, _currentPaletteLength);
+	}
 
 	_wm->passPalette(paletteBuf, _currentPaletteLength);
 }

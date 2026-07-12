@@ -154,7 +154,6 @@ void rail_connect_all_nodes() {
 	}
 }
 
-
 /**
  * Used for recursively determing walk path between room rail nodes
  * @param node_id		Node currently being evaluated
@@ -165,11 +164,9 @@ void rail_connect_all_nodes() {
  *
  * The function is recursive and modifies the globals directly.
  */
-static void recursive_check_path(int node_id,
-	uint16 weight,
-	uint16 allow_mode,
-	int working_sp) {
-	// visited[node_id] = true
+static void recursive_check_path(int node_id, uint16 weight,
+		uint16 allow_mode, int working_sp) {
+
 	rail_visited[node_id] = 1;
 
 	// push(node_id) onto working stack

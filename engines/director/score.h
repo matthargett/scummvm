@@ -86,7 +86,7 @@ public:
 	static int compareLabels(const void *a, const void *b);
 	uint16 getLabel(Common::String &label);
 	Common::String *getLabelList();
-	Common::String *getFrameLabel(uint id);
+	Common::String getFrameLabel(uint id);
 	void setStartToLabel(Common::String &label);
 	void gotoLoop();
 	void gotoNext();
@@ -230,6 +230,7 @@ public:
 	Cursor _defaultCursor;
 	CursorRef _currentCursor;
 	bool _skipTransition;
+	bool _skipIdle;
 
 	Common::Array<uint32> _spriteDetailOffsets;
 	Common::Array<bool> _spriteDetailAccessed;

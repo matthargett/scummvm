@@ -221,6 +221,7 @@ _bink=yes
 _cloud=auto
 _dlc=no
 _scummvmdlc=no
+_playdate_simulator=no
 _pandoc=no
 _curl=yes
 _lld=no
@@ -270,6 +271,7 @@ _xcodetoolspath=
 _sparklepath=
 _pkgconfig=pkg-config
 _sdlconfig=sdl2-config
+_prefer_sdl3=no
 _libcurlconfig=curl-config
 _libmikmodconfig=libmikmod-config
 _freetypeconfig=freetype-config
@@ -690,7 +692,7 @@ get_system_exe_extension() {
 	riscos)
 		_exeext=",e1f"
 		;;
-	3ds | dreamcast | ds | gamecube | n64 | psp | switch | wii)
+	3ds | dreamcast | ds | gamecube | n64 | playdate | psp | switch | wii)
 		_exeext=".elf"
 		;;
 	kolibrios | kos32)
@@ -1084,6 +1086,7 @@ Optional Features:
   --enable-ext-sse2        allow code to use sse2 extensions on x86/amd64
   --enable-ext-avx2        allow code to use avx2 extensions on x86/amd64
   --enable-ext-neon        allow code to use neon extensions on ARM
+  --enable-playdate-simulator build for Playdate Simulator (host arch)
   --enable-test-c++11      build the C++11 features test file
 
 Optional Documentation Options:
@@ -1191,6 +1194,8 @@ Optional Libraries:
                            /opt/mxe/usr/i686-w64-mingw32.static/bin/sdl2-config
                            then you should pass:
                            '--with-sdl-prefix=/opt/mxe/usr/i686-w64-mingw32.static'
+
+  --prefer-sdl3               prefer SDL3 over SDL2 if both are available [no]
 
   --with-freetype2-prefix=DIR prefix where the freetype-config script is
                               installed (optional)
@@ -1439,6 +1444,8 @@ for ac_option in $@; do
 	--disable-ext-avx2)          _ext_avx2=no            ;;
 	--enable-ext-neon)           _ext_neon=yes           ;;
 	--disable-ext-neon)          _ext_neon=no            ;;
+	--enable-playdate-simulator) _playdate_simulator=yes ;;
+	--prefer-sdl3)               _prefer_sdl3=yes        ;;
 	--with-fluidsynth-prefix=*)
 		arg=`echo $ac_option | cut -d '=' -f 2`
 		FLUIDSYNTH_CFLAGS="-I$arg/include"
@@ -3128,42 +3135,47 @@ case $_host_os in
 			append_var DEFINES "-D_GNU_SOURCE"
 		fi
 		;;
-	darwin*)
-		append_var DEFINES "-DMACOSX"
-		append_var LIBS "-framework AudioUnit -framework AudioToolbox -framework Carbon -framework CoreMIDI"
-		# SDL2 doesn't seem to add Cocoa for us.
-		append_var LIBS "-framework Cocoa"
-		add_line_to_config_mk 'MACOSX = 1'
-		_seq_midi=no
-		# Custom openUrl() doesn't require it, and it's unavailable on 10.4 anyway
-		_has_posix_spawn=no
+darwin*)
+		if test "$_backend" = "playdate"; then
+			# Do not pull macOS frameworks or set MACOSX for Playdate builds
+			_seq_midi=no
+			_has_posix_spawn=no
+		else
+			append_var DEFINES "-DMACOSX"
+			append_var LIBS "-framework AudioUnit -framework AudioToolbox -framework Carbon -framework CoreMIDI"
+			# SDL2 doesn't seem to add Cocoa for us.
+			append_var LIBS "-framework Cocoa"
+			add_line_to_config_mk 'MACOSX = 1'
+			_seq_midi=no
+			# Custom openUrl() doesn't require it, and it's unavailable on 10.4 anyway
+			_has_posix_spawn=no
 
-		# Now we may have MacPorts or Fink installed
-		# Which put libraries and headers in non-standard places
-		# Checking them here
+			# Now we may have MacPorts or Fink installed
+			# Which put libraries and headers in non-standard places
+			# Checking them here
 
-		# MacPorts
-		# There is no way to get the prefix, so implementing a hack here
-		macport_version=`port version 2>/dev/null`
-		if test "$?" -eq 0; then
-			macport_version="`echo "${macport_version}" | sed -ne 's/Version: \([0-9]\.[0-9]\.[0-9]\)/\1/gp'`"
-			echo_n "You seem to be running MacPorts version ${macport_version}..."
+			# MacPorts
+			# There is no way to get the prefix, so implementing a hack here
+			macport_version=`port version 2>/dev/null`
+			if test "$?" -eq 0; then
+				macport_version="`echo "${macport_version}" | sed -ne 's/Version: \([0-9]\.[0-9]\.[0-9]\)/\1/gp'`"
+				echo_n "You seem to be running MacPorts version ${macport_version}..."
 
-			macport_prefix=`which port`
-			# strip off /bin/port from /opt/local/bin/port
-			macport_prefix=`dirname ${macport_prefix}`
-			macport_prefix=`dirname ${macport_prefix}`
+				macport_prefix=`which port`
+				# strip off /bin/port from /opt/local/bin/port
+				macport_prefix=`dirname ${macport_prefix}`
+				macport_prefix=`dirname ${macport_prefix}`
 
-			echo "adding ${macport_prefix} to paths"
+				echo "adding ${macport_prefix} to paths"
 
-			LDFLAGS="-L${macport_prefix}/lib $LDFLAGS"
-			CXXFLAGS="-I${macport_prefix}/include $CXXFLAGS"
+				LDFLAGS="-L${macport_prefix}/lib $LDFLAGS"
+				CXXFLAGS="-I${macport_prefix}/include $CXXFLAGS"
 
-			if test -z "$_staticlibpath"; then
-				_staticlibpath=${macport_prefix}
-				echo "Set staticlib-prefix to ${_staticlibpath}"
+				if test -z "$_staticlibpath"; then
+					_staticlibpath=${macport_prefix}
+					echo "Set staticlib-prefix to ${_staticlibpath}"
+				fi
 			fi
-		fi
 
 		# Fink
 		# There is no way to get the prefix, so implementing a hack here
@@ -3344,6 +3356,7 @@ EOF
 		_pandoc=yes
 		if test "$_pandocformat" = "default"; then
 			_pandocformat="html"
+		fi
 		fi
 		;;
 	dreamcast)
@@ -4539,6 +4552,57 @@ case $_backend in
 		append_var LDFLAGS "-fpic"
 		_sdl=auto
 		;;
+	playdate)
+		if test -z "$PLAYDATE_SDK_PATH"; then
+			PLAYDATE_SDK_PATH="/Users/matt/Developer/PlaydateSDK"
+		fi
+
+		# Keep the footprint small and force static assets
+		_ogg=no
+		_vorbis=no
+		_flac=no
+		_mad=no
+		_png=no
+		_jpeg=no
+		_gif=no
+		_theoradec=no
+		_vpx=no
+		_faad=no
+		_libmikmod=no
+		_libopenmpt=no
+		_freetype2=no
+		_fribidi=no
+		_tts=no
+		_seq_midi=no
+		_timidity=no
+		_mt32emu=no
+		_updates=no
+		_cloud=no
+		_libcurl=no
+		_sdlnet=no
+		_sdl=no
+		_lld=no
+
+		append_var DEFINES "-DPLAYDATE"
+		append_var DEFINES "-DNONSTANDARD_PORT"
+		append_var DEFINES "-DTARGET_EXTENSION"
+		append_var CXXFLAGS "-flto -fvisibility=hidden"
+
+		if test "$_playdate_simulator" = yes ; then
+			append_var DEFINES "-DTARGET_SIMULATOR"
+			append_var CXXFLAGS "-fPIC"
+		else
+			# ARM Cortex-M7 flags for Device
+			append_var CXXFLAGS "-mcpu=cortex-m7 -mthumb -mfpu=fpv5-sp-d16 -mfloat-abi=hard"
+			append_var CXXFLAGS "-fno-exceptions -fno-rtti -fno-threadsafe-statics"
+			
+			# Linker flags
+			append_var LDFLAGS "-mcpu=cortex-m7 -mthumb -mfpu=fpv5-sp-d16 -mfloat-abi=hard"
+		fi
+
+		append_var INCLUDES "-I$PLAYDATE_SDK_PATH/C_API"
+		append_var INCLUDES "-I\$(srcdir)/backends/platform/playdate"
+		;;
 	sdl)
 		_sdl=auto
 		;;
@@ -4619,7 +4683,7 @@ fi
 # Setup SDL specifics for SDL based backends
 #
 if test "$_sdl" = auto ; then
-	if test "$_pkg_config" = "yes" && ($_pkgconfig --exists sdl || $_pkgconfig --exists sdl2); then
+	if test "$_pkg_config" = "yes" && test "$_prefer_sdl3" = "no" && ($_pkgconfig --exists sdl || $_pkgconfig --exists sdl2); then
 		find_sdlconfig
 		_sdlversion=`$_sdlconfig --version`
 		cat > $TMPC << EOF
@@ -5772,10 +5836,10 @@ if test "$_nfm" = auto ; then
 #include <nfmcore.h>
 #include <nfmutil.h>
 
-sOplInterface gOplIf;
+sFmInterface gOplIf;
 
 int main(void)
-{ 
+{
 	nfInit(NULL, NULL);
 
 	sOplInterfaceConfiguration ifCfg;
@@ -5789,7 +5853,7 @@ int main(void)
 	params.uParam.outputPort = OPT_INTERNAL;
     params.uParam.param = 0;
 
-    gOplIf = nfCreateInterface(ifCfg); 
+    gOplIf = nfCreateInterface(ifCfg);
 
     const int32_t retval = nfInitialiseInterface(&gOplIf, &params);
 
@@ -5797,7 +5861,7 @@ int main(void)
     {
 	 (void)nfDestroyInterface(&gOplIf);
      return 0;
-    }	
+    }
 
   return -1;
 }

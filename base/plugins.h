@@ -22,10 +22,10 @@
 #ifndef BASE_PLUGINS_H
 #define BASE_PLUGINS_H
 
+#include "backends/plugins/elf/version.h"
 #include "common/array.h"
 #include "common/fs.h"
 #include "common/str.h"
-#include "backends/plugins/elf/version.h"
 
 #if defined(USE_ELF_LOADER) && defined(ELF_LOADER_CXA_ATEXIT)
 #include <cxxabi.h>
@@ -34,7 +34,6 @@
 #define INCLUDED_FROM_BASE_PLUGINS_H
 #include "base/internal_plugins.h"
 #undef INCLUDED_FROM_BASE_PLUGINS_H
-
 
 // Plugin versioning
 
@@ -60,7 +59,6 @@ enum PluginType {
 #define PLUGIN_TYPE_SCALER_VERSION 1
 
 extern const int pluginTypeVersions[PLUGIN_TYPE_MAX];
-
 
 // Plugin linking
 
@@ -95,12 +93,12 @@ extern const int pluginTypeVersions[PLUGIN_TYPE_MAX];
  *
  * @see REGISTER_PLUGIN_DYNAMIC
  */
-#define REGISTER_PLUGIN_STATIC(ID,TYPE,PLUGINCLASS) \
-	extern const PluginType g_##ID##_type; \
-	const PluginType g_##ID##_type = TYPE; \
-	PluginObject *g_##ID##_getObject() { \
-		return new PLUGINCLASS(); \
-	} \
+#define REGISTER_PLUGIN_STATIC(ID, TYPE, PLUGINCLASS) \
+	extern const PluginType g_##ID##_type;            \
+	extern const PluginType g_##ID##_type = TYPE;     \
+	PluginObject *g_##ID##_getObject() {              \
+		return new PLUGINCLASS();                     \
+	}                                                 \
 	void dummyFuncToAllowTrailingSemicolon_##ID##_()
 
 #ifdef DYNAMIC_MODULES
@@ -129,7 +127,6 @@ extern const int pluginTypeVersions[PLUGIN_TYPE_MAX];
 	void dummyFuncToAllowTrailingSemicolon_##ID##_()
 
 #endif // DYNAMIC_MODULES
-
 
 // Abstract plugins
 
@@ -162,13 +159,13 @@ protected:
 public:
 	Plugin() : _pluginObject(0), _type(PLUGIN_TYPE_MAX) {}
 	virtual ~Plugin() {
-		//if (isLoaded())
-			//unloadPlugin();
+		// if (isLoaded())
+		// unloadPlugin();
 	}
 
-//	virtual bool isLoaded() const = 0; // TODO
-	virtual bool loadPlugin() = 0;     // TODO: Rename to load() ?
-	virtual void unloadPlugin() = 0;   // TODO: Rename to unload() ?
+	//	virtual bool isLoaded() const = 0; // TODO
+	virtual bool loadPlugin() = 0;   // TODO: Rename to load() ?
+	virtual void unloadPlugin() = 0; // TODO: Rename to unload() ?
 
 	/**
 	 * The following functions query information from the plugin object once
@@ -177,7 +174,7 @@ public:
 	PluginType getType() const;
 	const char *getName() const;
 
-	template <class T>
+	template<class T>
 	T &get() const {
 		T *pluginObject = dynamic_cast<T *>(_pluginObject);
 		if (!pluginObject) {
@@ -201,7 +198,6 @@ public:
 	virtual bool loadPlugin();
 	virtual void unloadPlugin();
 };
-
 
 /** List of Plugin instances. */
 typedef Common::Array<Plugin *> PluginList;
@@ -310,10 +306,14 @@ protected:
 	PluginManager();
 
 	void unloadAllPlugins();
+
 public:
 	virtual ~PluginManager();
 
-	static void destroy() { delete _instance; _instance = 0; }
+	static void destroy() {
+		delete _instance;
+		_instance = 0;
+	}
 	static PluginManager &instance();
 
 	void addPluginProvider(PluginProvider *pp);
@@ -328,7 +328,7 @@ public:
 	const Plugin *findEnginePlugin(const Common::String &engineId);
 
 	// Functions used by the uncached PluginManager
-	virtual void init()	{}
+	virtual void init() {}
 	virtual void loadFirstPlugin() {}
 	virtual bool loadNextPlugin() { return false; }
 	virtual bool loadPluginFromEngineId(const Common::String &engineId) { return false; }
@@ -353,7 +353,7 @@ class PluginManagerUncached : public PluginManager {
 protected:
 	friend class PluginManager;
 	PluginList _allEnginePlugins;
-	Plugin  *_detectionPlugin;
+	Plugin *_detectionPlugin;
 	PluginList::iterator _currentPlugin;
 
 	bool _isDetectionLoaded;
@@ -373,7 +373,7 @@ public:
 	void unloadDetectionPlugin() override;
 #endif
 
-	void loadAllPlugins() override {} 	// we don't allow these
+	void loadAllPlugins() override {} // we don't allow these
 	void loadAllPluginsOfType(PluginType type) override {}
 };
 
