@@ -3,6 +3,7 @@ MODULE := audio
 MODULE_OBJS := \
 	adlib.o \
 	adlib_ctmidi.o \
+	adlib_hmisos.o \
 	adlib_ms.o \
 	audiostream.o \
 	casio.o \
@@ -12,6 +13,7 @@ MODULE_OBJS := \
 	mac_plugin.o \
 	mididrv.o \
 	mididrv_ms.o \
+	midiparser_hmp.o \
 	midiparser_qt.o \
 	midiparser_smf.o \
 	midiparser_xmidi.o \
@@ -25,6 +27,8 @@ MODULE_OBJS := \
 	musicplugin.o \
 	null.o \
 	rate.o \
+	sid.o \
+	ym2149.o \
 	timestamp.o \
 	decoders/3do.o \
 	decoders/aac.o \
@@ -55,6 +59,7 @@ MODULE_OBJS := \
 	mods/rjp1.o \
 	mods/soundfx.o \
 	mods/tfmx.o \
+	mods/desktoptracker.o \
 	softsynth/cms.o \
 	softsynth/opl/dbopl.o \
 	softsynth/opl/dosbox.o \
@@ -62,7 +67,23 @@ MODULE_OBJS := \
 	softsynth/appleiigs.o \
 	softsynth/fluidsynth.o \
 	softsynth/eas.o \
-	softsynth/pcspk.o
+	softsynth/pcspk.o \
+	softsynth/ay8912.o
+
+ifdef USE_HMI_AUDIO
+MODULE_OBJS += \
+	effects/hmi/interfaces/envelope.o \
+	effects/hmi/interfaces/filter1.o \
+	effects/hmi/hmifxfp.o \
+	effects/hmi/hmifxlib.o \
+	effects/hmi/interfaces/mono_delay.o \
+	effects/hmi/interfaces/phasor.o \
+	effects/hmi/interfaces/resonator.o \
+	effects/hmi/interfaces/reverb1.o \
+	effects/hmi/interfaces/reverb2.o \
+	effects/hmi/interfaces/ring_modulator.o \
+	effects/hmi/interfaces/stereo_delay.o
+endif
 
 ifndef DISABLE_NUKED_OPL
 MODULE_OBJS += \
@@ -77,6 +98,14 @@ endif
 ifdef USE_ALSA
 MODULE_OBJS += \
 	alsa_opl.o
+endif
+
+ifeq ($(BACKEND),atari)
+MODULE_OBJS += \
+	atari_ym2149.o
+else
+MODULE_OBJS += \
+	softsynth/ym2149.o
 endif
 
 ifdef USE_FMTOWNS_PC98_AUDIO
@@ -127,6 +156,11 @@ MODULE_OBJS += \
 	rwopl3.o
 endif
 
+ifdef USE_NFM
+MODULE_OBJS += \
+	nfmopl.o
+endif
+	
 ifdef USE_VGMTRANS_AUDIO
 MODULE_OBJS += \
 	soundfont/rawfile.o \

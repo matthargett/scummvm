@@ -24,17 +24,19 @@
 
 #include "common/rect.h"
 #include "common/array.h"
+#include "common/stack.h"
 #include "graphics/managed_surface.h"
 #include "graphics/screen.h"
 
 #include "mediastation/clients.h"
+#include "mediastation/events.h"
 #include "mediastation/mediascript/scriptvalue.h"
 
 namespace MediaStation {
 
 class MediaStationEngine;
 struct DissolvePattern;
-class Bitmap;
+class PixMapImage;
 
 enum BlitMode {
 	kUncompressedBlit = 0x00,
@@ -43,8 +45,11 @@ enum BlitMode {
 	kUncompressedTransparentBlit = 0x08,
 	kPartialDissolve = 0x10,
 	kFullDissolve = 0x20,
-	kCccBlit = 0x40,
-	kCccTransparentBlit = 0x80
+	// These are variants of Color Cell Compression to compress low framerate
+	// "videos" as opposed to just animations. They seem only to be used in
+	// the Lamb Chop cutscenes.
+	kColorCellCompressionBlit = 0x40,
+	kColorCellCompressionTransparentBlit = 0x80
 };
 
 enum TransitionType {
@@ -59,8 +64,26 @@ enum TransitionType {
 	kTransitionSetToPaletteObject = 308,
 	kTransitionSetToPercentOfPaletteObject = 309,
 	kTransitionColorShiftCurrentPalette = 310,
+	kTransitionScrollLeft = 311,
+	kTransitionScrollRight = 312,
+	kTransitionScrollUp = 313,
+	kTransitionScrollDown = 314,
+	kTransitionWipeLeft = 315,
+	kTransitionWipeRight = 316,
+	kTransitionWipeUp = 317,
+	kTransitionWipeDown = 318,
+	kTransitionSlideLeft = 319,
+	kTransitionSlideRight = 320,
+	kTransitionSlideUp = 321,
+	kTransitionSlideDown = 322,
+	kTransitionSlitLROpen = 323,
+	kTransitionSlitLRClose = 324,
+	kTransitionSlitUDOpen = 325,
+	kTransitionSlitUDClose = 326,
+	kTransitionCircleIn = 327,
 	kTransitionCircleOut = 328
 };
+const char *transitionTypeToStr(TransitionType type);
 
 enum VideoDisplayManagerSectionType {
 	kVideoDisplayManagerUpdateDirty = 0x578,
@@ -70,6 +93,78 @@ enum VideoDisplayManagerSectionType {
 	kVideoDisplayManagerLoadPalette = 0x5aa,
 };
 
+class Region {
+public:
+	void addRect(const Common::Rect &rect);
+	bool intersects(const Common::Rect &rect);
+	void operator&=(const Common::Rect &rect);
+	void operator+=(const Common::Point &point);
+
+	Common::Array<Common::Rect> _rects;
+	Common::Rect _bounds;
+};
+
+class Clip {
+public:
+	Clip() {}
+	Clip(const Common::Rect &rect);
+
+	void addToRegion(const Region &region);
+	void addToRegion(const Common::Rect &rect);
+	bool clipIntersectsRect(const Common::Rect &rect);
+	void intersectWithRegion(const Common::Rect &rect);
+	void makeEmpty();
+
+	Region _region;
+	Common::Rect _bounds;
+};
+
+class DisplayContext {
+public:
+	bool clipIsEmpty();
+	void intersectClipWith(const Common::Rect &rect);
+	bool rectIsInClip(const Common::Rect &rect);
+	void setClipTo(Region region);
+	void emptyCurrentClip();
+	void deleteClips();
+
+	void addClip();
+	Clip *currentClip();
+	Clip *previousClip();
+	void verifyClipSize();
+
+	// These are not named as such in the original, but are helper functions
+	// for things that likely were macros or something similar in the original.
+	void pushOrigin();
+	void popOrigin();
+
+	Common::Point _origin;
+	Graphics::ManagedSurface *_destImage = nullptr;
+
+private:
+	Common::Stack<Common::Point> _origins;
+	Common::Stack<Clip> _clips;
+};
+
+class DisplayUpdateManager {
+public:
+	virtual ~DisplayUpdateManager() {}
+	virtual void onEvent(const DisplayEvent &event);
+
+	void performAutoUpdateAndFlush();
+	void performUpdateAll();
+	void performUpdateDirty();
+
+	void enableAutoUpdate(uint disabledUpdateDepthCounter);
+	uint disableAutoUpdate();
+	bool needToDisplay();
+
+private:
+	bool _autoUpdateEnabled = true;
+	bool _forceFlush = false;
+	uint _disabledScreenAutoUpdateToken = 0;
+};
+
 class VideoDisplayManager : public ParameterClient {
 public:
 	VideoDisplayManager(MediaStationEngine *vm);
@@ -77,31 +172,55 @@ public:
 
 	virtual bool attemptToReadFromStream(Chunk &chunk, uint sectionType) override;
 
+	void flushToDisplay();
 	void updateScreen() { _screen->update(); }
 	Graphics::Palette *getRegisteredPalette() { return _registeredPalette; }
 	void setRegisteredPalette(Graphics::Palette *palette) { _registeredPalette = palette; }
 
 	void imageBlit(
-		const Common::Point &destinationPoint,
-		const Bitmap *image,
+		Common::Point destinationPoint,
+		const PixMapImage *image,
 		double dissolveFactor,
-		const Common::Array<Common::Rect> &dirtyRegion,
-		Graphics::ManagedSurface *destinationImage = nullptr);
+		DisplayContext *displayContext,
+		Graphics::ManagedSurface *destinationImage = nullptr,
+		bool useTransBlit = false);
 
 	void imageDeltaBlit(
-		const Common::Point &deltaFramePos,
+		Common::Point deltaFramePos,
 		const Common::Point &keyFrameOffset,
-		const Bitmap *deltaFrame,
-		const Bitmap *keyFrame,
+		const PixMapImage *deltaFrame,
+		const PixMapImage *keyFrame,
 		const double dissolveFactor,
-		const Common::Array<Common::Rect> &dirtyRegion);
+		DisplayContext *displayContext);
+
+	Graphics::ManagedSurface decompressRle8Bitmap(
+		const PixMapImage *source,
+		const Graphics::ManagedSurface *keyFrame = nullptr,
+		const Common::Point *keyFrameOffset = nullptr);
+
+	const int16 CCC_BLOCK_DIMENSION = 4;
+	Graphics::ManagedSurface decompressCccBitmap(const PixMapImage *source);
+	Graphics::ManagedSurface decompressCccTransparentBitmap(const PixMapImage *source);
+	void decompressCccBlock(
+		Graphics::ManagedSurface &dest,
+		int16_t blockX,
+		int16_t blockY,
+		uint8_t backgroundColor,
+		uint8_t foregroundColor,
+		uint16_t bitMask,
+		int16_t blockWidth,
+		int16_t blockHeight,
+		const uint8_t *transparencyColor = nullptr);
 
 	void effectTransition(Common::Array<ScriptValue> &args);
 	void setTransitionOnSync(Common::Array<ScriptValue> &args) { _scheduledTransitionOnSync = args; }
 	void doTransitionOnSync();
 
-	void performUpdateDirty();
-	void performUpdateAll();
+	void setGammaValues(double red, double green, double blue);
+	void getDefaultGammaValues(double &red, double &green, double &blue);
+	void getGammaValues(double &red, double &green, double &blue);
+
+	DisplayContext _displayContext;
 
 private:
 	MediaStationEngine *_vm = nullptr;
@@ -109,6 +228,11 @@ private:
 	Graphics::Palette *_registeredPalette = nullptr;
 	Common::Array<ScriptValue> _scheduledTransitionOnSync;
 	double _defaultTransitionTime = 0.0;
+
+	const double DEFAULT_GAMMA_VALUE = 1.0;
+	double _redGamma = 1.0;
+	double _greenGamma = 1.0;
+	double _blueGamma = 1.0;
 
 	void readAndEffectTransition(Chunk &chunk);
 	void readAndRegisterPalette(Chunk &chunk);
@@ -120,47 +244,54 @@ private:
 		Graphics::ManagedSurface *dest,
 		const Common::Point &destLocation,
 		const Graphics::ManagedSurface &source,
-		const Common::Array<Common::Rect> &dirtyRegion);
+		const Common::Array<Common::Rect> &dirtyRegion,
+		bool useTransBlit = false);
 	void rleBlitRectsClip(
 		Graphics::ManagedSurface *dest,
 		const Common::Point &destLocation,
-		const Bitmap *source,
+		const PixMapImage *source,
 		const Common::Array<Common::Rect> &dirtyRegion);
-	Graphics::ManagedSurface decompressRle8Bitmap(
-		const Bitmap *source,
-		const Graphics::ManagedSurface *keyFrame = nullptr,
-		const Common::Point *keyFrameOffset = nullptr);
+	void cccBlitRectsClip(
+		Graphics::ManagedSurface *dest,
+		const Common::Point &destLocation,
+		const PixMapImage *source,
+		const Common::Array<Common::Rect> &dirtyRegion);
+	void cccTransparentBlitRectsClip(
+		Graphics::ManagedSurface *dest,
+		const Common::Point &destLocation,
+		const PixMapImage *source,
+		const Common::Array<Common::Rect> &dirtyRegion);
 	void dissolveBlitRectsClip(
 		Graphics::ManagedSurface *dest,
 		const Common::Point &destPos,
-		const Bitmap *source,
+		const PixMapImage *source,
 		const Common::Array<Common::Rect> &dirtyRegion,
 		const uint dissolveFactor);
 	void dissolveBlit1Rect(
 		Graphics::ManagedSurface *dest,
 		const Common::Rect &areaToRedraw,
 		const Common::Point &originOnScreen,
-		const Bitmap *source,
+		const PixMapImage *source,
 		const Common::Rect &dirtyRegion,
 		const DissolvePattern &pattern);
 	void fullDeltaRleBlitRectsClip(
 		Graphics::ManagedSurface *destinationImage,
 		const Common::Point &deltaFramePos,
 		const Common::Point &keyFrameOffset,
-		const Bitmap *deltaFrame,
-		const Bitmap *keyFrame,
+		const PixMapImage *deltaFrame,
+		const PixMapImage *keyFrame,
 		const Common::Array<Common::Rect> &dirtyRegion);
 	void deltaRleBlitRectsClip(
 		Graphics::ManagedSurface *destinationImage,
 		const Common::Point &deltaFramePos,
-		const Bitmap *deltaFrame,
-		const Bitmap *keyFrame,
+		const PixMapImage *deltaFrame,
+		const PixMapImage *keyFrame,
 		const Common::Array<Common::Rect> &dirtyRegion);
 	void deltaRleBlit1Rect(
 		Graphics::ManagedSurface *destinationImage,
 		const Common::Point &destinationPoint,
-		const Bitmap *sourceImage,
-		const Bitmap *deltaImage,
+		const PixMapImage *sourceImage,
+		const PixMapImage *deltaImage,
 		const Common::Rect &dirtyRect);
 
 	// Transition methods.

@@ -71,9 +71,9 @@ struct DrawListStruct {
 	// not masking the value in numObj, but store the type in type
 	uint16 numObj = 0;
 
-	uint16 xw = 0;
-	uint16 yw = 0;
-	uint16 zw = 0;
+	int16 xw = 0;
+	int16 yw = 0;
+	int16 zw = 0;
 	uint16 num = 0;
 
 	inline bool operator==(const DrawListStruct& other) const {
@@ -140,6 +140,8 @@ private:
 	void processDrawList(DrawListStruct *drawList, int32 drawListPos, bool bgRedraw);
 	void renderOverlays();
 	void renderText();
+
+	void fillBackground(uint8 color);
 
 public:
 	Redraw(TwinEEngine *engine);

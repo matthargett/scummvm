@@ -31,33 +31,75 @@
 
 namespace MediaStation {
 
+enum Platform {
+	kPlatformParamTokenUnknown = 0,
+	kPlatformParamTokenWindows = 0x76D,
+	kPlatformParakTokenMacintosh = 0x76E
+};
+
 class ScriptFunction {
 public:
 	ScriptFunction(Chunk &chunk);
 	~ScriptFunction();
 
 	ScriptValue execute(Common::Array<ScriptValue> &args);
+	Common::String decompile() const;
+	uint32 bytecodeSize() const { return _bytecodeSize; }
 
 	uint _contextId = 0;
 	uint _id = 0;
 
 private:
-	CodeChunk *_code = nullptr;
+	byte *_bytecodeBuffer = nullptr;
+	uint32 _bytecodeSize = 0;
 };
 
 class FunctionManager : public ParameterClient {
+friend class Debugger;
+
 public:
 	FunctionManager() {};
 	virtual ~FunctionManager();
 
 	virtual bool attemptToReadFromStream(Chunk &chunk, uint sectionType) override;
 	ScriptValue call(uint functionId, Common::Array<ScriptValue> &args);
+	ScriptFunction *getFunctionById(uint functionId);
 	void deleteFunctionsForContext(uint contextId);
 
-	ScriptValue script_Random(Common::Array<ScriptValue> &args);
+	uint _scriptBlockCallDepth = 0;
 
 private:
 	Common::HashMap<uint, ScriptFunction *> _functions;
+
+	void script_GetPlatform(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+	void script_Random(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+	void script_TimeOfDay(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+	void script_SquareRoot(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+	void script_GetUniqueRandom(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+	void script_CurrentRunTime(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+	void script_SetGammaCorrection(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+	void script_GetDefaultGammaCorrection(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+	void script_GetCurrentGammaCorrection(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+	void script_SetAudioVolume(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+	void script_GetAudioVolume(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+	void script_SystemLanguagePreference(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+	void script_SetRegistry(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+	void script_GetRegistry(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+	void script_SetProfile(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+	void script_DebugPrint(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+
+	// 101 Dalmatians.
+	void script_MazeGenerate(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+	void script_MazeApplyMoveMask(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+	void script_MazeSolve(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+	void script_BeginTimedInterval(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+	void script_EndTimedInterval(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+
+	// Hercules.
+	void script_Checkers(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
+
+	// IBM/Crayola.
+	void script_Drawing(Common::Array<ScriptValue> &args, ScriptValue &returnValue);
 };
 
 } // End of namespace MediaStation

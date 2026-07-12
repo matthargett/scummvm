@@ -50,9 +50,14 @@
 #include "scumm/imuse/imuse.h"
 #include "scumm/imuse_digi/dimuse_engine.h"
 #include "scumm/smush/smush_player.h"
+#include "scumm/smush/rebel/smush_player_ra1.h"
+#include "scumm/smush/rebel/smush_player_ra2.h"
 #include "scumm/players/player_towns.h"
 #include "scumm/insane/insane.h"
+#include "scumm/insane/rebel2/rebel.h"
+#include "scumm/insane/rebel1/rebel.h"
 #include "scumm/he/animation_he.h"
+#include "scumm/he/font_he.h"
 #include "scumm/he/intern_he.h"
 #include "scumm/he/logic_he.h"
 #include "scumm/he/sound_he.h"
@@ -91,6 +96,7 @@
 #include "scumm/imuse/drivers/macintosh.h"
 #include "scumm/imuse/drivers/midi.h"
 #include "scumm/detection_steam.h"
+#include "scumm/debugger/debugtools.h"
 
 #ifdef ENABLE_HE
 #ifdef USE_ENET
@@ -395,6 +401,9 @@ ScummEngine::ScummEngine(OSystem *syst, const DetectorResult &dr)
 		// #15666, #11290, and <https://forums.scummvm.org/viewtopic.php?p=97395#p97395>).
 		if (_game.id == GID_LOOM || !ConfMan.getBool("trim_fmtowns_to_200_pixels"))
 			_screenHeight = 240;
+	} else if (_game.id == GID_REBEL2 && ConfMan.getBool("rebel2_hires")) {
+		_screenWidth = 640;
+		_screenHeight = 400;
 	} else if (_game.version == 8 || _game.heversion >= 71) {
 		// COMI uses 640x480. Likewise starting from version 7.1, HE games use
 		// 640x480, too.
@@ -843,6 +852,15 @@ ScummEngine_v90he::~ScummEngine_v90he() {
 	}
 }
 
+ScummEngine_v99he::ScummEngine_v99he(OSystem *syst, const DetectorResult &dr) : ScummEngine_v95he(syst, dr) {
+	_heFont = new HEFont(this);
+}
+
+ScummEngine_v99he::~ScummEngine_v99he() {
+	delete _heFont;
+	_heFont = nullptr;
+}
+
 ScummEngine_v100he::ScummEngine_v100he(OSystem *syst, const DetectorResult &dr) : ScummEngine_v99he(syst, dr) {
 	/* Moonbase stuff */
 	if (_game.id == GID_MOONBASE)
@@ -1146,6 +1164,8 @@ Common::Error ScummEngine::init() {
 
 			_filenamePattern.pattern = "%.2d.LFL";
 			_filenamePattern.genMethod = kGenRoomNum;
+		} else if (_game.id == GID_REBEL1 || _game.id == GID_REBEL2) {
+			_fileHandle = new ScummFile(this);
 		} else if (_game.platform == Common::kPlatformMacintosh) {
 			// The mac versions of Indy4, Sam&Max, DOTT, FT and The Dig used a
 			// special meta (container) file format to store the actual SCUMM data
@@ -1356,7 +1376,7 @@ Common::Error ScummEngine::init() {
 
 				GUI::MessageDialog dialog(Common::U32String::format(
 					_("Could not find the '%s' Macintosh executable to read resources from. %s will be disabled."),
-						gameName, (_game.id == GID_MONKEY2 || _game.version > 6) ? _s("The Mac GUI") : _s("The music and the Mac GUI")), _("OK"));
+						gameName, (_game.id == GID_MONKEY2 || _game.version > 6) ? _s("The Mac GUI") : _s("The music and the Mac GUI")));
 				dialog.runModal();
 			} else if (isUsingOriginalGUI() || _game.id == GID_INDY3 || _game.id == GID_LOOM) {
 				// FIXME: THIS IS A TEMPORARY WORKAROUND!
@@ -1493,6 +1513,11 @@ Common::Error ScummEngine::init() {
 
 	setupScumm(macResourceFile);
 
+	if (_game.id == GID_REBEL1 || _game.id == GID_REBEL2) {
+		_setupIsComplete = true;
+		return Common::kNoError;
+	}
+
 	readIndexFile();
 
 	// Create the debugger now that _numVariables has been set
@@ -1552,6 +1577,16 @@ Common::Error ScummEngine::init() {
 #endif
 		_internalGUIControls[i].doubleLinesFlag = false;
 	}
+
+#ifndef USE_FREETYPE2
+	if (_game.id == GID_FUNSHOP) {
+		GUI::MessageDialog dialog(_(
+			"It appears your ScummVM version was not built with TrueType Fonts support.\n\n"
+			"Since the One-Stop Fun Shop series makes extensive use of TTF fonts,\n"
+			"some of the graphics on screen will be missing."));
+		dialog.runModal();
+	}
+#endif
 
 	_setupIsComplete = true;
 
@@ -1749,10 +1784,82 @@ void ScummEngine::setupScumm(const Common::Path &macResourceFile) {
 
 	free(_compositeBuf);
 	_compositeBuf = (byte *)malloc(_screenWidth * _textSurfaceMultiplier * _screenHeight * _textSurfaceMultiplier * _outputPixelFormat.bytesPerPixel);
+
+	// MI2 NI DOS Demo, load demo.rec playback file if present
+	if ((_game.id == GID_MONKEY2) && (_game.features & GF_DEMO) && (_game.platform == Common::kPlatformDOS) && !ConfMan.getBool("disable_mi2_ni_demo"))
+		_playback.tryLoadPlayback(this);
 }
 
 #ifdef ENABLE_SCUMM_7_8
 void ScummEngine_v7::setupScumm(const Common::Path &macResourceFile) {
+	if (_game.id == GID_REBEL1) {
+		_res->allocResTypeData(rtBuffer, 0, 10, kDynamicResTypeMode);
+		initScreens(0, 200);
+
+		_numVariables = 256;
+		_scummVars = (int32 *)calloc(_numVariables, sizeof(int32));
+
+		_numArray = 50;
+		_res->allocResTypeData(rtString, 0, _numArray, kDynamicResTypeMode);
+		_res->allocResTypeData(rtSound, 0, 200, kDynamicResTypeMode);
+		_res->allocResTypeData(rtCostume, 0, 200, kDynamicResTypeMode);
+		_res->allocResTypeData(rtRoom, 0, 20, kDynamicResTypeMode);
+
+		defineArray(0, kIntArray, 0, 1000);
+		_numActors = 0;
+
+		setupScummVars();
+
+		_useOriginalGUI = false;
+
+		_sound = new Sound(this, _mixer, false);
+		_musicEngine = _imuseDigital = nullptr;
+		_res->allocResTypeData(rtBuffer, 0, 10, kDynamicResTypeMode);
+		initScreens(0, 200);
+
+		_insane = new InsaneRebel1(this);
+		_splayer = new SmushPlayerRebel1(this, nullptr, _insane);
+
+		_macGui = nullptr;
+		_charset = new CharsetRendererV7(this);
+
+		initBanners();
+		return;
+	}
+
+	if (_game.id == GID_REBEL2) {
+		_res->allocResTypeData(rtBuffer, 0, 10, kDynamicResTypeMode);
+		initScreens(0, _screenHeight);
+
+		_numVariables = 256;
+		_scummVars = (int32 *)calloc(_numVariables, sizeof(int32));
+
+		_numArray = 50;
+		_res->allocResTypeData(rtString, 0, _numArray, kDynamicResTypeMode);
+		_res->allocResTypeData(rtSound, 0, 200, kDynamicResTypeMode);
+		_res->allocResTypeData(rtCostume, 0, 200, kDynamicResTypeMode);
+		_res->allocResTypeData(rtRoom, 0, 20, kDynamicResTypeMode);
+
+		defineArray(0, kIntArray, 0, 1000);
+		_numActors = 0;
+
+		setupScummVars();
+
+		_useOriginalGUI = false;
+
+		_sound = new Sound(this, _mixer, false);
+		// Rebel Assault 2 doesn't use iMUSE for audio - audio is handled directly by INSANE
+		_musicEngine = _imuseDigital = nullptr;
+		_insane = new InsaneRebel2(this);
+		_splayer = new SmushPlayerRebel2(this, nullptr, _insane);
+
+		// Initialize cursor
+		_macGui = nullptr; // Ensure this is null as we don't want MacGui behavior
+		_charset = new CharsetRendererV7(this); // Just in case
+
+		initBanners();
+		return;
+	}
 
 	// The object line toggle is always synchronized from the main game to
 	// our internal Game Options; at startup we do the opposite, since an user
@@ -1810,8 +1917,7 @@ void ScummEngine_v7::setupScumm(const Common::Path &macResourceFile) {
 		GUI::MessageDialog dialog(_(
 			"Audio files compressed with ScummVM Tools were detected; *.BUN/*.SOU\n"
 			"compression is not supported anymore for this game, audio will be disabled.\n"
-			"Please copy the game from the original media without compression."),
-		_("OK"));
+			"Please copy the game from the original media without compression."));
 		dialog.runModal();
 		_imuseDigital->disableEngine();
 	}
@@ -2300,8 +2406,7 @@ void ScummEngine::setupMusic(int midi) {
 			GUI::MessageDialog dialog(
 				Common::U32String::format(
 					_("Native MIDI support requires the Roland Upgrade from LucasArts,\n"
-					"but %s is missing. Using AdLib instead."), fileName.toString(Common::Path::kNativeSeparator).c_str()),
-				_("OK"));
+					"but %s is missing. Using AdLib instead."), fileName.toString(Common::Path::kNativeSeparator).c_str()));
 			dialog.runModal();
 			_sound->_musicType = MDT_ADLIB;
 		}
@@ -2316,8 +2421,7 @@ void ScummEngine::setupMusic(int midi) {
 		memcmp(_gameMD5, "\xa0\x1f\xab\x4a\x64\xd4\x7b\x96\xe2\xe5\x8e\x6b\x0f\x82\x5c\xc7", 16) == 0) {
 		GUI::MessageDialog dialog(
 			_("This particular version of Monkey Island 1 is known to miss some\n"
-			"required resources for MT-32. Using AdLib instead."),
-			_("OK"));
+			"required resources for MT-32. Using AdLib instead."));
 		dialog.runModal();
 		_sound->_musicType = MDT_ADLIB;
 	}
@@ -2372,7 +2476,7 @@ void ScummEngine::setupMusic(int midi) {
 		_musicEngine = new Player_AppleII(this, _mixer);
 	} else if (_game.platform == Common::kPlatformC64 && _game.version <= 1) {
 #ifdef USE_SID_AUDIO
-		_musicEngine = new Player_SID(this, _mixer);
+		_musicEngine = new Player_SID(this);
 #endif
 	} else if (_game.platform == Common::kPlatformNES && _game.version == 1) {
 #ifndef DISABLE_NES_APU
@@ -2556,6 +2660,10 @@ void ScummEngine_v7::syncSoundSettings() {
 
 	if (!isUsingOriginalGUI()) {
 		ScummEngine::syncSoundSettings();
+		if (_splayer) {
+			_splayer->setChanFlag(0, true);
+			_splayer->setChanFlag(2, true);
+		}
 		return;
 	}
 
@@ -2588,6 +2696,14 @@ void ScummEngine_v7::syncSoundSettings() {
 		_imuseDigital->diMUSESetMusicGroupVol(ConfMan.getInt("music_volume") / 2);
 		_imuseDigital->diMUSESetVoiceGroupVol(ConfMan.getInt("speech_volume") / 2);
 		_imuseDigital->diMUSESetSFXGroupVol(ConfMan.getInt("sfx_volume") / 2);
+	} else if (_game.id == GID_REBEL1) {
+		const int musicVolume = ConfMan.getInt("music_volume");
+		const int sfxVolume = ConfMan.getInt("sfx_volume");
+		const int speechVolume = ConfMan.getInt("speech_volume");
+
+		_mixer->setVolumeForSoundType(Audio::Mixer::kMusicSoundType, musicVolume);
+		_mixer->setVolumeForSoundType(Audio::Mixer::kSFXSoundType, sfxVolume);
+		_mixer->setVolumeForSoundType(Audio::Mixer::kSpeechSoundType, speechVolume);
 	}
 }
 #endif
@@ -2606,6 +2722,22 @@ int ScummEngine::getTalkSpeed() {
 #pragma mark -
 
 Common::Error ScummEngine::go() {
+#ifdef ENABLE_SCUMM_7_8
+	if (_game.id == GID_REBEL1) {
+		ScummEngine_v7 *vm7 = (ScummEngine_v7 *)this;
+		InsaneRebel1 *rebel = (InsaneRebel1 *)vm7->getInsane();
+		rebel->runGame();
+		return Common::kNoError;
+	}
+
+	if (_game.id == GID_REBEL2) {
+		ScummEngine_v7 *vm7 = (ScummEngine_v7 *)this;
+		InsaneRebel2 *rebel = (InsaneRebel2 *)vm7->getInsane();
+		rebel->runGame();
+		return Common::kNoError;
+	}
+#endif
+
 	setTotalPlayTime();
 
 	_lastWaitTime = _system->getMillis();
@@ -2613,6 +2745,9 @@ Common::Error ScummEngine::go() {
 	// If requested, load a save game instead of running the boot script
 	if (_saveLoadFlag != 2 || !loadState(_saveLoadSlot, _saveTemporaryState)) {
 		_saveLoadFlag = 0;
+		if (_game.platform == Common::kPlatformNES && _game.id == GID_MANIAC && !(_game.features & GF_DEMO)) {
+			playNESTitleScreens();
+		}
 		runBootscript();
 	} else {
 		_loadFromLauncher = true; // The only purpose of this is triggering the IQ points update for INDY3/4
@@ -2663,6 +2798,16 @@ Common::Error ScummEngine::go() {
 		}
 	}
 #endif // ENABLE_HE
+
+#ifdef USE_IMGUI
+	if (debugChannelSet(-1, kDebugImGui)) {
+		ImGuiCallbacks callbacks;
+		callbacks.init = Editor::onImGuiInit;
+		callbacks.render = Editor::onImGuiRender;
+		callbacks.cleanup = Editor::onImGuiCleanup;
+		_system->setImGuiCallbacks(callbacks);
+	}
+#endif
 
 	while (!shouldQuit()) {
 		// Determine how long to wait before the next loop iteration should start
@@ -2878,17 +3023,17 @@ void ScummEngine::setTimerAndShakeFrequency() {
 		if (_game.heversion < 70 && _game.platform == Common::kPlatformDOS) {
 			// HE6x DOS games use a slightly different (but not really...)
 			// mechanism to increment "piffies" (a quarter of a jiffy).
-			// 
+			//
 			// Fatty Bear, Putt-Putt's Fun Pack:
 			//   - PIT divisor: 0x5555 (21845) -> ~54.6 Hz timer interrupt
 			//   - The piffy value is directly incremented by 4 on every interrupt
 			//   - Effective jiffy rate: 54.6 Hz
-			// 
+			//
 			// Putt-Putt (1&2), Fatty Bear's Fun Pack, Putt-Putt & Fatty Bear's Activity Pack:
 			//   - PIT divisor: 0x2492 (9362) -> ~127.5 Hz timer interrupt
 			//   - The piffy value is directly incremented by 4 on every *other* interrupt
 			//   - Effective jiffy rate: 63.75 Hz
-			// 
+			//
 			// The multiplication by 4 below re-adapts these jiffy rates to our quarter-frame system.
 
 			if (_game.id == GID_FBEAR || _game.id == GID_FUNPACK) {
@@ -2990,7 +3135,7 @@ void ScummEngine::scummLoop(int delta) {
 				if (_voicePassHelpButtons) {
 					sayText(_passHelpButtons[adjustedObj], Common::TextToSpeechManager::INTERRUPT);
 				}
-				
+
 				_previousSaid = _passHelpButtons[adjustedObj];
 			}
 		} else {
@@ -3196,6 +3341,12 @@ void ScummEngine_v90he::scummLoop(int delta) {
 #endif
 
 void ScummEngine::scummLoop_updateScummVars() {
+	// MI2 NI DOS Demo, start playback if demo.rec was loaded succesfully.
+	if ((_game.id == GID_MONKEY2) && (_game.features & GF_DEMO) && (_game.platform == Common::kPlatformDOS) && !ConfMan.getBool("disable_mi2_ni_demo")) {
+		_playback.mi2DemoArmPlaybackByRoom(this);
+	}
+	if (_playback._active)
+		_playback.playbackPump(this);
 	if (_game.version == 7) {
 		VAR(VAR_CAMERA_POS_X) = camera._cur.x;
 		VAR(VAR_CAMERA_POS_Y) = camera._cur.y;
@@ -4004,6 +4155,9 @@ void ScummEngine_v7::scummLoop_handleSound() {
 		_imuseDigital->refreshScripts();
 	}
 
+	if (_game.id == GID_REBEL1 || _game.id == GID_REBEL2)
+		return;
+
 	_splayer->setChanFlag(0, VAR(VAR_VOICE_MODE) != 0);
 	_splayer->setChanFlag(2, VAR(VAR_VOICE_MODE) != 2);
 }
@@ -4301,7 +4455,7 @@ void ScummEngine::confirmRestartDialog() {
 	}
 }
 
-char ScummEngine::displayMessage(const char *altButton, const char *message, ...) {
+char ScummEngine::displayMessage(const char *message, ...) {
 	char buf[STRINGBUFLEN];
 	va_list va;
 
@@ -4309,7 +4463,7 @@ char ScummEngine::displayMessage(const char *altButton, const char *message, ...
 	vsnprintf(buf, STRINGBUFLEN, message, va);
 	va_end(va);
 
-	GUI::MessageDialog dialog(buf, "OK", altButton);
+	GUI::MessageDialog dialog(buf);
 	return runDialog(dialog);
 }
 
@@ -4322,6 +4476,18 @@ bool ScummEngine::displayMessageYesNo(const char *message, ...) {
 	va_end(va);
 
 	GUI::MessageDialog dialog(buf, _("Yes"), _("No"));
+	return runDialog(dialog) == GUI::kMessageOK;
+}
+
+bool ScummEngine::displayMessageOKQuit(const char *message, ...) {
+	char buf[STRINGBUFLEN];
+	va_list va;
+
+	va_start(va, message);
+	vsnprintf(buf, STRINGBUFLEN, message, va);
+	va_end(va);
+
+	GUI::MessageDialog dialog(buf, _("OK"), _("Quit"));
 	return runDialog(dialog) == GUI::kMessageOK;
 }
 
