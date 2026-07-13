@@ -54,6 +54,7 @@ PlaydateEventSource::PlaydateEventSource(OSystem_Playdate *system)
 	  _buttonBHeld(false),
 	  _buttonBLongPressFired(false),
 	  _crankAccum(0.0f),
+	  _prevCrankAngle(0.0f),
 	  _prevButtons(0) {
 }
 
@@ -216,7 +217,29 @@ void PlaydateEventSource::updatePointer(uint32 buttons, uint32 pushed) {
 }
 
 void PlaydateEventSource::handleCrank() {
-	_crankAccum += _pd->system->getCrankChange();
+	// getCrankChange() reports the change since the last OS frame and returns
+	// the same value on every call within that frame. Because pollEvent() is
+	// drained in a tight loop, calling it per poll would re-add that delta
+	// every time - _crankAccum runs away and floods WHEEL events, spinning the
+	// frame (the same class of hang the buttons had). Derive the delta from
+	// the absolute angle tracked across calls, so a stationary crank yields
+	// zero no matter how often we are polled.
+	const float angle = _pd->system->getCrankAngle();
+	if (_pd->system->isCrankDocked()) {
+		// Track the angle even while docked so undocking does not produce a
+		// spurious jump from a stale reference.
+		_prevCrankAngle = angle;
+		_crankAccum = 0.0f;
+		return;
+	}
+	float delta = angle - _prevCrankAngle;
+	_prevCrankAngle = angle;
+	// Normalize wraparound across 0/360 to the shortest signed arc.
+	if (delta > 180.0f)
+		delta -= 360.0f;
+	else if (delta < -180.0f)
+		delta += 360.0f;
+	_crankAccum += delta;
 
 	while (_crankAccum >= kCrankDegreesPerNotch) {
 		_crankAccum -= kCrankDegreesPerNotch;

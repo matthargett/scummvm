@@ -78,8 +78,11 @@ private:
 	bool _buttonBHeld;
 	bool _buttonBLongPressFired;
 
-	// Crank accumulator, in degrees
+	// Crank accumulator, in degrees, plus the last absolute angle so the
+	// per-poll delta is computed from position rather than getCrankChange()
+	// (which repeats within a frame and would flood WHEEL events).
 	float _crankAccum;
+	float _prevCrankAngle;
 
 	// Previous raw button bitmask, so button edges are derived from the
 	// instantaneous state across every poll rather than from getButtonState's
