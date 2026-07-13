@@ -61,6 +61,12 @@ private:
 	volatile uint32 _writePos; // in frames, advanced only by update()
 
 	int16 *_mixBuf;
+
+	// Wall-clock pacing so the sound generators advance (and fire their
+	// completion flags) even when the consumer is not draining the ring.
+	bool _clockStarted;
+	uint32 _startMs;
+	uint64 _producedFrames;
 };
 
 #endif

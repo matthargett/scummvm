@@ -40,7 +40,10 @@ PlaydateMixerManager::PlaydateMixerManager(PlaydateAPI *pd)
 	  _ringFrames(kRingFrames),
 	  _readPos(0),
 	  _writePos(0),
-	  _mixBuf(nullptr) {
+	  _mixBuf(nullptr),
+	  _clockStarted(false),
+	  _startMs(0),
+	  _producedFrames(0) {
 }
 
 PlaydateMixerManager::~PlaydateMixerManager() {
@@ -65,9 +68,38 @@ void PlaydateMixerManager::update() {
 	if (_audioSuspended || !_mixer)
 		return;
 
-	// Single producer: only update() advances _writePos.
-	while (_ringFrames - (_writePos - _readPos) >= kChunkFrames) {
+	// Pace mixing by wall-clock time. mixCallback() both produces samples
+	// and steps ScummVM's sound generators (e.g. the AGI sound driver),
+	// and it is those generators that fire the "sound finished" flags that
+	// game scripts block on. If production were gated only on free ring
+	// space - as it was - a consumer that is not draining at real time (no
+	// audio device, or a stalled audio thread) would let the ring fill once
+	// and then stall the generators, freezing any sound-gated game logic.
+	// Advancing by elapsed time keeps the generators moving regardless, so
+	// the game never hangs; a half-ring of lookahead is produced for smooth
+	// playback, and when the ring is full the freshly mixed frames are
+	// discarded rather than blocking (dropping them here, instead of
+	// advancing _readPos, keeps the ring strictly single-producer/single-
+	// consumer with the audio callback).
+	const uint32 now = _pd->system->getCurrentTimeMilliseconds();
+	if (!_clockStarted) {
+		_clockStarted = true;
+		_startMs = now;
+		_producedFrames = 0;
+	}
+
+	uint64 dueByNow = (uint64)(now - _startMs) * kSampleRate / 1000 + (_ringFrames / 2);
+	// After a long pause (e.g. a slow room load) skip the backlog rather
+	// than bursting through thousands of frames in a single call.
+	if (dueByNow > _producedFrames + _ringFrames)
+		_producedFrames = dueByNow - _ringFrames;
+
+	while (_producedFrames + kChunkFrames <= dueByNow) {
 		_mixer->mixCallback((byte *)_mixBuf, kChunkFrames * 2 * sizeof(int16));
+		_producedFrames += kChunkFrames;
+
+		if (_ringFrames - (_writePos - _readPos) < kChunkFrames)
+			continue; // ring full: consumer not keeping up, drop these frames
 
 		const uint32 mask = _ringFrames - 1;
 		uint32 pos = _writePos & mask;
