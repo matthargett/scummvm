@@ -89,6 +89,10 @@ public:
 
 	bool showMouse(bool visible) override;
 	void warpMouse(int x, int y) override;
+
+	/** Whether the software cursor is drawn over the game (pointer mode).
+	 *  Set by the event source when the player toggles pointer mode. */
+	void setPointerMode(bool on);
 	void setMouseCursor(const void *buf, uint w, uint h, int hotspotX, int hotspotY,
 	                    uint32 keycolor, const Graphics::PixelFormat *format,
 	                    const byte *mask, frac_t scaleX, frac_t scaleY) override;
@@ -127,6 +131,7 @@ private:
 	int _cursorHotspotX, _cursorHotspotY;
 	byte _cursorPalette[256 * 3];
 	bool _cursorPaletteEnabled;
+	bool _pointerMode; // draw the cursor over the game only in pointer mode
 
 	int _shakeOffsetX;
 	int _shakeOffsetY;

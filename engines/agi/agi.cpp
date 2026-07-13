@@ -433,6 +433,14 @@ AgiEngine::AgiEngine(OSystem *syst, const AGIGameDescription *gameDesc) : AgiBas
 	memset(&_debug, 0, sizeof(struct AgiDebug));
 
 	_game.mouseEnabled = ConfMan.getBool("mousesupport");
+	// The Playdate has no pointer: it is driven by the d-pad, the A/B
+	// buttons and the crank. Disable the AGI mouse so no software cursor is
+	// drawn and the mouse-driven code paths (click-to-walk, icon bars) are
+	// skipped in favor of the keyboard interface. Genuinely pointer-driven
+	// moments can still be reached through the backend's pointer mode (hold
+	// B), which drives the ScummVM GUI cursor rather than the AGI mouse.
+	if (_renderMode == Common::kRenderPlaydate)
+		_game.mouseEnabled = false;
 	_game.mouseHidden = !_game.mouseEnabled;
 
 	_game.predictiveDlgOnMouseClick = ConfMan.getBool("predictivedlgonmouseclick");

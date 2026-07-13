@@ -153,7 +153,16 @@ static void emuMain() {
 // Playdate per-frame callback. Resumes ScummVM until it yields back a
 // rendered frame, then returns 1 so the OS refreshes the display.
 static int updateCallback(void *userdata) {
+	// WATCHDOG (debug): a single resume that runs far longer than a frame
+	// means ScummVM executed a path that never reached updateScreen() or
+	// delayMillis() (the only yield points). That starves the OS update
+	// callback and shows as a beach ball. Log it so the offending path can
+	// be found.
+	const unsigned start = s_pd->system->getCurrentTimeMilliseconds();
 	Playdate::coroutineResume();
+	const unsigned elapsed = s_pd->system->getCurrentTimeMilliseconds() - start;
+	if (elapsed > 500)
+		s_pd->system->logToConsole("WATCHDOG: resume took %u ms without yielding", elapsed);
 	return 1;
 }
 

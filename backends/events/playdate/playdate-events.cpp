@@ -104,6 +104,8 @@ bool PlaydateEventSource::pollEvent(Common::Event &event) {
 	    (_system->getMillis() - _buttonBDownTime) >= kLongPressMs) {
 		_buttonBLongPressFired = true;
 		_pointerMode = !_pointerMode;
+		// The cursor is only drawn over the game while pointer mode is on.
+		((PlaydateGraphicsManager *)_system->getGraphicsManager())->setPointerMode(_pointerMode);
 	}
 	if (released & kButtonB) {
 		if (_buttonBHeld && !_buttonBLongPressFired) {

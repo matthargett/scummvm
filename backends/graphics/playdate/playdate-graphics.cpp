@@ -54,6 +54,7 @@ PlaydateGraphicsManager::PlaydateGraphicsManager(PlaydateAPI *pd)
 	  _cursorX(0), _cursorY(0),
 	  _cursorHotspotX(0), _cursorHotspotY(0),
 	  _cursorPaletteEnabled(false),
+	  _pointerMode(false),
 	  _shakeOffsetX(0), _shakeOffsetY(0),
 	  _inTransaction(false) {
 	memset(_palette, 0, sizeof(_palette));
@@ -290,7 +291,13 @@ void PlaydateGraphicsManager::updateScreen() {
 		renderGameScreen(frame);
 	}
 
-	if (_cursorVisible)
+	// The Playdate is a d-pad/crank device: games are driven by buttons,
+	// not a pointer, so the software cursor is hidden by default even when
+	// the engine asks for it (showMouse(true)). It is only drawn while the
+	// player has explicitly entered pointer mode (hold B), or over the GUI
+	// overlay where there is no other way to aim. This keeps a stray cursor
+	// off keyboard-driven games like the AGI titles.
+	if (_cursorVisible && (_pointerMode || _overlayVisible))
 		renderCursor(frame);
 
 	_pd->graphics->markUpdatedRows(0, LCD_ROWS - 1);
@@ -345,6 +352,10 @@ bool PlaydateGraphicsManager::showMouse(bool visible) {
 	const bool last = _cursorVisible;
 	_cursorVisible = visible;
 	return last;
+}
+
+void PlaydateGraphicsManager::setPointerMode(bool on) {
+	_pointerMode = on;
 }
 
 void PlaydateGraphicsManager::warpMouse(int x, int y) {
