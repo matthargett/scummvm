@@ -37,6 +37,11 @@ static const float kMouseSpeedMin = 1.0f;
 static const float kMouseSpeedMax = 5.0f;
 static const float kMouseAccel = 0.25f;
 
+// Minimum interval between cursor steps, in ms (~60 Hz). Bounds the pointer
+// speed and, crucially, lets the engine's event drain loop reach an empty
+// queue each frame instead of spinning on a stream of MOUSEMOVE events.
+static const uint32 kPointerMoveIntervalMs = 16;
+
 PlaydateEventSource::PlaydateEventSource(OSystem_Playdate *system)
 	: _system(system),
 	  _pd(system->getPlaydateAPI()),
@@ -44,6 +49,8 @@ PlaydateEventSource::PlaydateEventSource(OSystem_Playdate *system)
 	  _mouseY(LCD_ROWS / 2),
 	  _mouseSpeed(kMouseSpeedMin),
 	  _pointerMode(false),
+	  _pointerModeUserSet(false),
+	  _pointerLastMoveMs(0),
 	  _buttonBDownTime(0),
 	  _buttonBHeld(false),
 	  _buttonBLongPressFired(false),
@@ -62,6 +69,8 @@ bool PlaydateEventSource::pollEvent(Common::Event &event) {
 	_pd->system->getButtonState(&current, &pushed, &released);
 
 	const bool pointer = pointerModeActive();
+	// Keep the software cursor visible exactly when pointer mode is active.
+	((PlaydateGraphicsManager *)_system->getGraphicsManager())->setPointerMode(pointer);
 
 	if (pointer) {
 		updatePointer(current, pushed);
@@ -103,9 +112,10 @@ bool PlaydateEventSource::pollEvent(Common::Event &event) {
 	if (_buttonBHeld && !_buttonBLongPressFired &&
 	    (_system->getMillis() - _buttonBDownTime) >= kLongPressMs) {
 		_buttonBLongPressFired = true;
-		_pointerMode = !_pointerMode;
-		// The cursor is only drawn over the game while pointer mode is on.
-		((PlaydateGraphicsManager *)_system->getGraphicsManager())->setPointerMode(_pointerMode);
+		// Manual override: flip away from whatever mode is currently in
+		// effect (auto or previously chosen) and remember the player's choice.
+		_pointerMode = !pointerModeActive();
+		_pointerModeUserSet = true;
 	}
 	if (released & kButtonB) {
 		if (_buttonBHeld && !_buttonBLongPressFired) {
@@ -131,11 +141,15 @@ bool PlaydateEventSource::pollEvent(Common::Event &event) {
 }
 
 bool PlaydateEventSource::pointerModeActive() const {
-	// Key mode is the default everywhere: the launcher and ScummVM's
-	// dialogs are all keyboard navigable, and the targeted AGI games
-	// are keyboard driven. Pointer mode is opt-in (hold B), for the
-	// point-and-click SCI games and the occasional mouse-only widget.
-	return _pointerMode;
+	// Once the player toggles the mode by hand (hold B), honor that choice.
+	// Until then, pick automatically: keyboard/parser AGI games (typed
+	// commands, d-pad walks the ego) default to key mode, while mouse/menu
+	// games such as Manhunter default to pointer mode so they are playable
+	// out of the box (d-pad moves a cursor, A clicks) rather than appearing
+	// frozen when A does nothing.
+	if (_pointerModeUserSet)
+		return _pointerMode;
+	return !_system->agiParserGame();
 }
 
 Common::Point PlaydateEventSource::clampMouse(int x, int y) const {
@@ -166,6 +180,16 @@ void PlaydateEventSource::updatePointer(uint32 buttons, uint32 pushed) {
 		_mouseSpeed = kMouseSpeedMin;
 		return;
 	}
+
+	// Throttle cursor movement to at most one step per frame. pollEvent() is
+	// called in a tight drain loop by the engine; without this, a held
+	// direction would push a MOUSEMOVE on every call, so the loop would
+	// never see an empty queue, never yield, and spin the whole frame (a
+	// beach ball on device). One move per ~frame keeps the loop terminating.
+	const uint32 nowMs = _system->getMillis();
+	if (nowMs - _pointerLastMoveMs < kPointerMoveIntervalMs)
+		return;
+	_pointerLastMoveMs = nowMs;
 
 	_mouseSpeed = MIN(_mouseSpeed + kMouseAccel, kMouseSpeedMax);
 

@@ -67,10 +67,16 @@ private:
 
 } // End of anonymous namespace
 
+// Typed handle to the singleton backend. g_system is an OSystem* and cannot
+// be cross-cast to OSystem_Playdate (virtual base, and RTTI is disabled), so
+// engine code that needs the Playdate backend reaches it through this.
+OSystem_Playdate *g_playdateSystem = nullptr;
+
 OSystem_Playdate::OSystem_Playdate(PlaydateAPI *pd)
 	: _pd(pd), _eventSource(nullptr), _startTime(0) {
 	_fsFactory = new PlaydateFilesystemFactory(pd);
 	_startTime = pd->system->getCurrentTimeMilliseconds();
+	g_playdateSystem = this;
 }
 
 OSystem_Playdate::~OSystem_Playdate() {

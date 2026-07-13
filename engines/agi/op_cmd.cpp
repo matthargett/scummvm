@@ -2385,8 +2385,21 @@ void cmdAgi256LoadPic(AgiGame *state, AgiEngine *vm, uint8 *parameter) {
 // The AGIMOUSE interpreter modified opcode 171 to set variables 27-29 to mouse state
 void cmdAgiMouseGetMouseState(AgiGame *state, AgiEngine *vm, uint8 *parameter) {
 	vm->setVar(VM_VAR_MOUSE_BUTTONSTATE, vm->_mouse.button);
-	vm->setVar(VM_VAR_MOUSE_X, vm->_mouse.pos.x / 2);
-	vm->setVar(VM_VAR_MOUSE_Y, vm->_mouse.pos.y);
+	// _mouse.pos is in display coordinates. On most render modes the game
+	// screen is 320x200, so the classic mapping is x/2, y. In kRenderPlaydate
+	// the display is 400x240 with the game area scaled and centered, so map
+	// the pointer back to the 160x200 game screen properly - otherwise
+	// mouse-driven games (Manhunter) see clicks at the wrong spot.
+	if (vm->_renderMode == Common::kRenderPlaydate) {
+		int16 mx = vm->_mouse.pos.x;
+		int16 my = vm->_mouse.pos.y;
+		vm->_gfx->translateDisplayPosToGameScreen(mx, my);
+		vm->setVar(VM_VAR_MOUSE_X, mx);
+		vm->setVar(VM_VAR_MOUSE_Y, my);
+	} else {
+		vm->setVar(VM_VAR_MOUSE_X, vm->_mouse.pos.x / 2);
+		vm->setVar(VM_VAR_MOUSE_Y, vm->_mouse.pos.y);
+	}
 }
 
 void cmdUnknown(AgiGame *state, AgiEngine *vm, uint8 *parameter) {

@@ -63,10 +63,27 @@ public:
 
 	PlaydateAPI *getPlaydateAPI() const { return _pd; }
 
+	/**
+	 * Whether the running AGI game is a keyboard/parser game (typing
+	 * commands) rather than a mouse/menu game. The AGI picker sets this once
+	 * it sees the parser in use. The event source uses it to pick the
+	 * default control scheme: parser games default to keyboard mode (d-pad
+	 * moves the ego, A submits), mouse/menu games default to pointer mode
+	 * (d-pad moves a cursor, A clicks) so titles like Manhunter are playable
+	 * without the player first discovering the hold-B toggle.
+	 */
+	void setAgiParserGame(bool v) { _agiParserGame = v; }
+	bool agiParserGame() const { return _agiParserGame; }
+
 private:
 	PlaydateAPI *_pd;
 	PlaydateEventSource *_eventSource;
 	uint32 _startTime;
+	bool _agiParserGame = false;
 };
+
+// The one backend instance, for engine code that needs Playdate-specific
+// hooks (g_system is an OSystem* that cannot be cross-cast here).
+extern OSystem_Playdate *g_playdateSystem;
 
 #endif
