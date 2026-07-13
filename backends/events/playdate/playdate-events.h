@@ -70,7 +70,6 @@ private:
 	int _mouseX, _mouseY;
 	float _mouseSpeed;
 	bool _pointerMode;
-	bool _pointerModeUserSet; // true once the player toggles it manually
 	uint32 _pointerLastMoveMs; // throttles cursor movement to one step per frame
 
 	// B button hold detection (short press = Escape / right click,

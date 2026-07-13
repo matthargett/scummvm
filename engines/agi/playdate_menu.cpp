@@ -25,8 +25,6 @@
 #include "agi/keyboard.h"
 #include "agi/words.h"
 
-#include "backends/platform/playdate/osystem_playdate.h"
-
 namespace Agi {
 
 PlaydateMenu::PlaydateMenu(AgiEngine *vm) :
@@ -126,14 +124,7 @@ void PlaydateMenu::addSaidPhrase(const uint16 *ids, uint count) {
 
 	// Seeing any said() phrase proves this game uses the parser, so the
 	// picker becomes active for the rest of the session.
-	if (!_parserGame) {
-		_parserGame = true;
-		// Tell the backend this is a keyboard/parser game so the event
-		// source defaults to key mode (d-pad walks the ego) rather than
-		// pointer mode.
-		if (g_playdateSystem)
-			g_playdateSystem->setAgiParserGame(true);
-	}
+	_parserGame = true;
 
 	// A newly seen verb should appear in the verb list right away.
 	if (_mode == kModeVerb)

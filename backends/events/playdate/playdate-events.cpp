@@ -49,7 +49,6 @@ PlaydateEventSource::PlaydateEventSource(OSystem_Playdate *system)
 	  _mouseY(LCD_ROWS / 2),
 	  _mouseSpeed(kMouseSpeedMin),
 	  _pointerMode(false),
-	  _pointerModeUserSet(false),
 	  _pointerLastMoveMs(0),
 	  _buttonBDownTime(0),
 	  _buttonBHeld(false),
@@ -112,10 +111,7 @@ bool PlaydateEventSource::pollEvent(Common::Event &event) {
 	if (_buttonBHeld && !_buttonBLongPressFired &&
 	    (_system->getMillis() - _buttonBDownTime) >= kLongPressMs) {
 		_buttonBLongPressFired = true;
-		// Manual override: flip away from whatever mode is currently in
-		// effect (auto or previously chosen) and remember the player's choice.
-		_pointerMode = !pointerModeActive();
-		_pointerModeUserSet = true;
+		_pointerMode = !_pointerMode;
 	}
 	if (released & kButtonB) {
 		if (_buttonBHeld && !_buttonBLongPressFired) {
@@ -141,15 +137,13 @@ bool PlaydateEventSource::pollEvent(Common::Event &event) {
 }
 
 bool PlaydateEventSource::pointerModeActive() const {
-	// Once the player toggles the mode by hand (hold B), honor that choice.
-	// Until then, pick automatically: keyboard/parser AGI games (typed
-	// commands, d-pad walks the ego) default to key mode, while mouse/menu
-	// games such as Manhunter default to pointer mode so they are playable
-	// out of the box (d-pad moves a cursor, A clicks) rather than appearing
-	// frozen when A does nothing.
-	if (_pointerModeUserSet)
-		return _pointerMode;
-	return !_system->agiParserGame();
+	// Keyboard mode is the default. The targeted AGI games - parser games
+	// (typed commands, d-pad walks the ego) and the keyboard-navigable
+	// mouse games like Manhunter (d-pad moves the crosshair, A = Enter,
+	// which the AGI engine maps to the game's confirm key) - all play with
+	// the buttons, and no software cursor shows. Pointer mode (hold B) is
+	// the opt-in for genuinely pointer-only moments.
+	return _pointerMode;
 }
 
 Common::Point PlaydateEventSource::clampMouse(int x, int y) const {
