@@ -88,16 +88,58 @@ static bool readAutorunTarget() {
 	return s_autorunTarget[0] != '\0';
 }
 
+// Without an autorun file, the first (alphabetically) subdirectory of
+// "games/" - inside the pdx bundle or the data directory - is detected
+// and started directly, so a pdx with game data boots straight into a
+// game instead of the ScummVM launcher, which is neither legible nor
+// operable on a 1-bit, keyboard-less handheld.
+static char s_firstGameDir[64];
+
+static void firstGameDirCallback(const char *filename, void *userdata) {
+	(void)userdata;
+
+	// Directories are reported with a trailing slash.
+	size_t len = strlen(filename);
+	if (len < 2 || len >= sizeof(s_firstGameDir) || filename[len - 1] != '/')
+		return;
+	if (filename[0] == '.')
+		return;
+
+	// Keep the alphabetically first directory so the pick is stable.
+	if (s_firstGameDir[0] != '\0' && strcmp(filename, s_firstGameDir) >= 0)
+		return;
+
+	memcpy(s_firstGameDir, filename, len - 1);
+	s_firstGameDir[len - 1] = '\0';
+}
+
+static bool findFirstGameDir() {
+	s_firstGameDir[0] = '\0';
+	s_pd->file->listfiles("games", firstGameDirCallback, nullptr, 0);
+	return s_firstGameDir[0] != '\0';
+}
+
 // Coroutine entry: runs the whole of ScummVM. Never returns; when
 // ScummVM exits we idle, yielding a frame at a time.
 static void emuMain() {
 	OSystem_Playdate *system = new OSystem_Playdate(s_pd);
 	g_system = system;
 
-	const char *argv[] = { "scummvm", nullptr, nullptr };
+	static char s_gamePathArg[80];
+
+	const char *argv[] = { "scummvm", nullptr, nullptr, nullptr };
 	int argc = 1;
-	if (readAutorunTarget())
+	if (readAutorunTarget()) {
+		// Explicit target (needs a matching scummvm.ini section).
+		s_pd->system->logToConsole("autorun target: %s", s_autorunTarget);
 		argv[argc++] = s_autorunTarget;
+	} else if (findFirstGameDir()) {
+		// Detect and start the game in games/<dir>.
+		snprintf(s_gamePathArg, sizeof(s_gamePathArg), "--path=/games/%s", s_firstGameDir);
+		s_pd->system->logToConsole("booting first game: %s", s_gamePathArg);
+		argv[argc++] = "--auto-detect";
+		argv[argc++] = s_gamePathArg;
+	}
 
 	int res = scummvm_main(argc, const_cast<char **>(argv));
 

@@ -78,7 +78,10 @@ OSystem_Playdate::~OSystem_Playdate() {
 
 void OSystem_Playdate::initBackend() {
 	ConfMan.registerDefault("gui_scale", 100);
-	ConfMan.registerDefault("gui_return_to_launcher_at_exit", true);
+	// The ScummVM launcher is not usable on the 1-bit, keyboard-less
+	// Playdate (games boot directly, see main.cpp); quitting a game
+	// should exit rather than fall back into it.
+	ConfMan.registerDefault("gui_return_to_launcher_at_exit", false);
 	ConfMan.registerDefault("themepath", Common::Path("/themes"));
 
 	// Render AGI games in the period-correct 1-bit Hercules mode, sized
