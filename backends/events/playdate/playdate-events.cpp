@@ -53,7 +53,8 @@ PlaydateEventSource::PlaydateEventSource(OSystem_Playdate *system)
 	  _buttonBDownTime(0),
 	  _buttonBHeld(false),
 	  _buttonBLongPressFired(false),
-	  _crankAccum(0.0f) {
+	  _crankAccum(0.0f),
+	  _prevButtons(0) {
 }
 
 bool PlaydateEventSource::pollEvent(Common::Event &event) {
@@ -67,16 +68,27 @@ bool PlaydateEventSource::pollEvent(Common::Event &event) {
 	PDButtons current, pushed, released;
 	_pd->system->getButtonState(&current, &pushed, &released);
 
+	// getButtonState()'s pushed/released are accumulated per OS frame and are
+	// returned unchanged on every call within that frame. The engine drains
+	// events in tight loops (e.g. runLogic() calls processScummVMEvents() per
+	// opcode), so using them directly re-queues the same press on every call;
+	// because that spin never yields, the frame never advances and the bit
+	// never clears - a hang. Derive edges from the instantaneous `current`
+	// state tracked across calls instead, so each transition fires exactly once.
+	const uint32 pushed_ = (uint32)current & ~_prevButtons;
+	const uint32 released_ = ~(uint32)current & _prevButtons;
+	_prevButtons = (uint32)current;
+
 	const bool pointer = pointerModeActive();
 	// Keep the software cursor visible exactly when pointer mode is active.
 	((PlaydateGraphicsManager *)_system->getGraphicsManager())->setPointerMode(pointer);
 
 	if (pointer) {
-		updatePointer(current, pushed);
+		updatePointer(current, pushed_);
 
-		if (pushed & kButtonA)
+		if (pushed_ & kButtonA)
 			queueMouseButton(Common::EVENT_LBUTTONDOWN);
-		if (released & kButtonA)
+		if (released_ & kButtonA)
 			queueMouseButton(Common::EVENT_LBUTTONUP);
 	} else {
 		static const struct {
@@ -90,20 +102,20 @@ bool PlaydateEventSource::pollEvent(Common::Event &event) {
 		};
 
 		for (uint i = 0; i < ARRAYSIZE(dpadMap); i++) {
-			if (pushed & dpadMap[i].button)
+			if (pushed_ & dpadMap[i].button)
 				queueKey(dpadMap[i].keycode, 0, true);
-			if (released & dpadMap[i].button)
+			if (released_ & dpadMap[i].button)
 				queueKey(dpadMap[i].keycode, 0, false);
 		}
 
-		if (pushed & kButtonA)
+		if (pushed_ & kButtonA)
 			queueKey(Common::KEYCODE_RETURN, Common::ASCII_RETURN, true);
-		if (released & kButtonA)
+		if (released_ & kButtonA)
 			queueKey(Common::KEYCODE_RETURN, Common::ASCII_RETURN, false);
 	}
 
 	// B button: short press acts, long press toggles pointer mode
-	if (pushed & kButtonB) {
+	if (pushed_ & kButtonB) {
 		_buttonBHeld = true;
 		_buttonBLongPressFired = false;
 		_buttonBDownTime = _system->getMillis();
@@ -113,7 +125,7 @@ bool PlaydateEventSource::pollEvent(Common::Event &event) {
 		_buttonBLongPressFired = true;
 		_pointerMode = !_pointerMode;
 	}
-	if (released & kButtonB) {
+	if (released_ & kButtonB) {
 		if (_buttonBHeld && !_buttonBLongPressFired) {
 			if (pointer && !_system->getGraphicsManager()->isOverlayVisible()) {
 				// In-game pointer mode: right click

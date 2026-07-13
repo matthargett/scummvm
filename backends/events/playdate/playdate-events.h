@@ -80,6 +80,11 @@ private:
 
 	// Crank accumulator, in degrees
 	float _crankAccum;
+
+	// Previous raw button bitmask, so button edges are derived from the
+	// instantaneous state across every poll rather than from getButtonState's
+	// per-frame pushed/released (which repeat on every call within a frame).
+	uint32 _prevButtons;
 };
 
 #endif
