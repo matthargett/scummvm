@@ -1737,129 +1737,44 @@ void GfxMgr::setCursorPalette(bool amigaStyleCursor) {
 	}
 }
 #endif
-// Native Playdate dither patterns - 8x8 tiles designed for 400x240 native resolution.
-// Playdate has lower pixel density than Hercules, so patterns are adjusted for
-// equivalent perceived contrast. Each pattern must be visually distinct from others.
-// Format: 16 colors × 8 rows = 128 bytes
-// Bit layout: 0x80=bit7(left), 0x01=bit0(right), 1=white pixel, 0=black pixel
+// Playdate dither patterns: the authentic Sierra Hercules dither cells
+// (identical values to herculesColorMapping above), so every AGI color maps to
+// the exact same grey level and texture Sierra shipped for real Hercules cards.
+//
+// An earlier revision used a bespoke, hand-tuned table here. Measuring it
+// against the genuine Hercules coverage showed it had drifted: colour 1 was
+// twice as dense (12.5% vs 6.25%), colour 5 half as dense, colour 8 double, and
+// colour 4 had been turned into solid vertical bars instead of Sierra's light
+// dashed verticals. Those deviations are exactly what made the fills look wrong
+// next to the Hercules reference. Rendering the two tables side by side on the
+// same input confirmed the authentic values track the reference and stay
+// moire-free under the display-locked tiling below, so we use them verbatim.
+//
+// Only the on-screen tiling differs from a real Hercules card: the Playdate
+// game area is 320 px wide (2x the 160-px AGI game width) versus Hercules' 640
+// (4x), so each cell is drawn twice as wide. That uniformly coarsens the
+// texture but preserves its grey level, direction and regularity - the
+// closest faithful translation possible at the Playdate's lower pixel density.
+//
+// Format: 16 colors x 8 rows = 128 bytes.
+// Bit layout: 0x80=bit7(left), 0x01=bit0(right), 1=white pixel, 0=black pixel.
 static const uint8 playdatePatterns[] = {
-	// Color 0: Black (0%) - solid black
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-
-	// Color 1: Very sparse (~12%) - dots with 2 empty rows (denser for Playdate)
-	// X . . . X . . .    0x88
-	// . . . . . . . .    0x00
-	// . . X . . . X .    0x22
-	// . . . . . . . .    0x00
-	0x88, 0x00, 0x22, 0x00, 0x88, 0x00, 0x22, 0x00,
-
-	// Color 2: Sparse diagonal (~16%) - Herc pattern plus extra dots for density
-	// X . . . . . . .    0x80
-	// . . . . X . . .    0x10
-	// . . . . . . X .    0x02
-	// . . X . . . . X    0x21
-	// . . . . . . . X    0x01
-	// . . . X . . . .    0x08
-	// . X . . . . . .    0x40
-	// X . . . . X . .    0x84
-	0x80, 0x10, 0x02, 0x21, 0x01, 0x08, 0x40, 0x84,
-
-	// Color 3: Horizontal lines (~25%) - dashed horizontal
-	// X . X . X . X .    0xAA
-	// . . . . . . . .    0x00
-	// X . X . X . X .    0xAA
-	// . . . . . . . .    0x00
-	0xAA, 0x00, 0xAA, 0x00, 0xAA, 0x00, 0xAA, 0x00,
-
-	// Color 4: Vertical stripes (~25%) - true vertical columns
-	// Herc original: 0x22/0x88 alternating, but that's needed for Color 8
-	// Playdate: use actual vertical stripes (same cols every row)
-	// . X . . . X . .    0x44
-	// . X . . . X . .    0x44
-	// . X . . . X . .    0x44
-	// . X . . . X . .    0x44
-	0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44, 0x44,
-
-	// Color 5: Sparse grid (~12%) - regular dot grid, sparser than color 1
-	// X . . . X . . .    0x88
-	// . . . . . . . .    0x00
-	// . . . . . . . .    0x00
-	// . . . . . . . .    0x00
-	0x88, 0x00, 0x00, 0x00, 0x88, 0x00, 0x00, 0x00,
-
-	// Color 6: Diagonal lines / (~25%) - single pixel diagonal (matches Herc)
-	// . . . X . . . X    0x11
-	// . . X . . . X .    0x22
-	// . X . . . X . .    0x44
-	// X . . . X . . .    0x88
-	0x11, 0x22, 0x44, 0x88, 0x11, 0x22, 0x44, 0x88,
-
-	// Color 7: Checkerboard (~50%) - classic 50% dither
-	// . X . X . X . X    0x55
-	// X . X . X . X .    0xAA
-	0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA,
-
-	// Color 8: Staggered dots (~25%) - Herc brick offset pattern
-	// Herc original: 0x22, 0x00, 0x88, 0x00 (brick offset with empty rows)
-	// Playdate: same pattern without empty rows (Color 4 now differs)
-	// . . X . . . X .    0x22 - cols 2, 6
-	// X . . . X . . .    0x88 - cols 0, 4
-	// . . X . . . X .    0x22 - cols 2, 6
-	// X . . . X . . .    0x88 - cols 0, 4
-	0x22, 0x88, 0x22, 0x88, 0x22, 0x88, 0x22, 0x88,
-
-	// Color 9: Dense fill (~91%) - matches Herc light blue pattern
-	// X X . X . X X X    0xD7
-	// X X X X X X X X    0xFF
-	// . X X X X X . X    0x7D
-	// X X X X X X X X    0xFF
-	0xD7, 0xFF, 0x7D, 0xFF, 0xD7, 0xFF, 0x7D, 0xFF,
-
-	// Color 10: Crosshatch (~50%) - overlapping lines pattern
-	// X X . X X X . X    0xDD
-	// . X . X . X . X    0x55
-	// . X X X . X X X    0x77
-	// X . X . X . X .    0xAA
-	0xDD, 0x55, 0x77, 0xAA, 0xDD, 0x55, 0x77, 0xAA,
-
-	// Color 11: Inverse diagonal (~75%) - dense with diagonal gaps
-	// . X X X X X X X    0x7F
-	// X X X . X X X X    0xEF
-	// X X X X X X . X    0xFD
-	// X X . X X X X X    0xDF
-	// X X X X X X X .    0xFE
-	// X X X X . X X X    0xF7
-	// X . X X X X X X    0xBF
-	// X X X X X . X X    0xFB
-	0x7F, 0xEF, 0xFD, 0xDF, 0xFE, 0xF7, 0xBF, 0xFB,
-
-	// Color 12: Dense horizontal (~75%) - solid rows with gaps
-	// X . X . X . X .    0xAA
-	// X X X X X X X X    0xFF
-	// X . X . X . X .    0xAA
-	// X X X X X X X X    0xFF
-	0xAA, 0xFF, 0xAA, 0xFF, 0xAA, 0xFF, 0xAA, 0xFF,
-
-	// Color 13: Dense diagonal \ (~75%) - thick backslash
-	// . X X X . X X X    0x77
-	// X . X X X . X X    0xBB
-	// X X . X X X . X    0xDD
-	// X X X . X X X .    0xEE
-	0x77, 0xBB, 0xDD, 0xEE, 0x77, 0xBB, 0xDD, 0xEE,
-
-	// Color 14: Nearly solid (~88%) - sparse holes
-	// . X X X X X X X    0x7F
-	// X X X X X X X X    0xFF
-	// X X X X X X X X    0xFF
-	// X X X X . X X X    0xF7
-	// X X X X X X X .    0xFE
-	// X X X X X X X X    0xFF
-	// X X X X X X X X    0xFF
-	// X X . X X X X X    0xDF
-	0x7F, 0xFF, 0xFF, 0xF7, 0xFE, 0xFF, 0xFF, 0xDF,
-
-	// Color 15: White (100%) - solid white
-	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 0  black (0%)
+	0x88, 0x00, 0x00, 0x00, 0x22, 0x00, 0x00, 0x00, // 1  (6%)
+	0x80, 0x10, 0x02, 0x20, 0x01, 0x08, 0x40, 0x04, // 2  sparse diagonal (12%)
+	0xAA, 0x00, 0xAA, 0x00, 0xAA, 0x00, 0xAA, 0x00, // 3  dashed horizontal (25%)
+	0x22, 0x88, 0x22, 0x88, 0x22, 0x88, 0x22, 0x88, // 4  dashed vertical (25%)
+	0x88, 0x00, 0x88, 0x00, 0x88, 0x00, 0x88, 0x00, // 5  (12%)
+	0x11, 0x22, 0x44, 0x88, 0x11, 0x22, 0x44, 0x88, // 6  diagonal / (25%)
+	0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, // 7  checkerboard (50%)
+	0x22, 0x00, 0x88, 0x00, 0x22, 0x00, 0x88, 0x00, // 8  brick offset (12%)
+	0xD7, 0xFF, 0x7D, 0xFF, 0xD7, 0xFF, 0x7D, 0xFF, // 9  dense fill (87%)
+	0xDD, 0x55, 0x77, 0xAA, 0xDD, 0x55, 0x77, 0xAA, // 10 crosshatch (62%)
+	0x7F, 0xEF, 0xFD, 0xDF, 0xFE, 0xF7, 0xBF, 0xFB, // 11 inverse diagonal (87%)
+	0xAA, 0xFF, 0xAA, 0xFF, 0xAA, 0xFF, 0xAA, 0xFF, // 12 dense horizontal (75%)
+	0x77, 0xBB, 0xDD, 0xEE, 0x77, 0xBB, 0xDD, 0xEE, // 13 dense diagonal \ (75%)
+	0x77, 0xFF, 0xFF, 0xFF, 0xDD, 0xFF, 0xFF, 0xFF, // 14 nearly solid (93%)
+	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 15 white (100%)
 };
 
 void GfxMgr::render_BlockPlaydate(int16 x, int16 y, int16 width, int16 height) {
