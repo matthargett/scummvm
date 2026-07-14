@@ -94,7 +94,9 @@ private:
 	};
 
 	void enterVerbMode();
-	void enterNounMode(uint16 verbId, const Common::String &verbWord);
+	// verbWord is by value, not by reference: the caller passes an element of
+	// _listWords, which this function clears before using verbWord again.
+	void enterNounMode(uint16 verbId, Common::String verbWord);
 	void enterCharMode(bool isNumber);
 	void select();
 	void back();

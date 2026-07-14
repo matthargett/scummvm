@@ -180,7 +180,14 @@ Common::String PlaydateMenu::phraseText(const Common::Array<uint16> &ids, uint f
 	return out;
 }
 
-void PlaydateMenu::enterNounMode(uint16 verbId, const Common::String &verbWord) {
+// verbWord is taken BY VALUE on purpose. The caller passes _listWords[selected]
+// (select() does enterNounMode(_listIds[i], _listWords[i])), and the first thing
+// we do is _listWords.clear() - which frees that very element. A const-reference
+// parameter would then dangle, and the "verb-only phrase" branch below
+// (label = verbWord) would copy a freed String: harmless-looking on some
+// allocators, but a null _str / assert-abort on others (e.g. the macOS
+// simulator). Copying the argument up front sidesteps the lifetime problem.
+void PlaydateMenu::enterNounMode(uint16 verbId, Common::String verbWord) {
 	_mode = kModeNoun;
 	_verbId = verbId;
 	_verbWord = verbWord;
