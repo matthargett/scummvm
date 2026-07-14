@@ -1432,7 +1432,16 @@ void GfxMgr::updateScreen() {
 		// letterboxed. When the layout flips, re-render at the new offset.
 		const bool pickerVisible = _vm->_playdateMenu->isVisible();
 		const uint16 wantOffset = pickerVisible ? 0 : ((_displayScreenWidth - _playdateGameWidth) / 2);
-		if (wantOffset != _playdateGameOffsetX) {
+		// Relayout only in graphics mode. redrawScreen() forces gfxMode on and
+		// repaints the picture, so doing it while a text screen is up - e.g. the
+		// Space Quest "Welcome Aboard Arcada / First Name:" name-entry prompt,
+		// which is drawn through the text system, not a picture - would erase the
+		// text and leave the stale picture (the game logo) on screen. The picker
+		// turns into an on-screen keyboard for that prompt, so it wants to be
+		// visible, but the game area must stay put until we are back in graphics.
+		// The keyboard column is drawn on the right regardless (below); a text
+		// prompt's content sits well left of it, so there is no overlap.
+		if (wantOffset != _playdateGameOffsetX && _vm->_game.gfxMode) {
 			_playdateGameOffsetX = wantOffset;
 			// Clear the whole display so no stale pixels remain in the
 			// letterbox bars or the old game area, push the cleared frame,
