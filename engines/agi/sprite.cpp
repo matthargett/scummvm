@@ -239,6 +239,36 @@ void SpritesMgr::drawCel(ScreenObjEntry *screenObj) {
 	// Adjust vertical position, given yPos is lower left, but we need upper left
 	curY = curY - celPtr->height + 1;
 
+	// Playdate: give the sprite a 1px black outline so it reads clearly against
+	// the dithered 1-bit background (ego, the KQ1 alligators, ...). The outline
+	// is drawn on the cel's own transparent pixels that touch an opaque pixel,
+	// so it stays strictly inside the cel's WxH footprint - the normal sprite
+	// erase/redraw already covers that footprint, so it leaves no trail as the
+	// sprite moves. It is applied before the opaque pixels below (which paint
+	// over any shared edge) and only where the background priority lets the
+	// sprite show, so an occluded sprite's outline is occluded too.
+	if (_vm->_renderMode == Common::kRenderPlaydate) {
+		const byte *bmp = celPtr->rawBitmap;
+		const int16 celHeightI = celPtr->height;
+		for (int16 cy = 0; cy < celHeightI; cy++) {
+			for (int16 cx = 0; cx < celWidth; cx++) {
+				if (bmp[cy * celWidth + cx] != celClearKey)
+					continue; // outline only the transparent pixels
+				const bool touchesOpaque =
+					(cx > 0              && bmp[cy * celWidth + cx - 1] != celClearKey) ||
+					(cx < celWidth - 1   && bmp[cy * celWidth + cx + 1] != celClearKey) ||
+					(cy > 0              && bmp[(cy - 1) * celWidth + cx] != celClearKey) ||
+					(cy < celHeightI - 1 && bmp[(cy + 1) * celWidth + cx] != celClearKey);
+				if (!touchesOpaque)
+					continue;
+				const int16 px = baseX + cx;
+				const int16 py = curY + cy;
+				if (_gfx->getPriority(px, py) <= viewPriority)
+					_gfx->putPixel(px, py, GFX_SCREEN_MASK_VISUAL, 0, 0); // black
+			}
+		}
+	}
+
 	while (remainingCelHeight) {
 		for (int16 loopX = 0; loopX < celWidth; loopX++) {
 			curColor = *celDataPtr++;
