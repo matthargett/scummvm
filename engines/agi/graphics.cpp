@@ -40,6 +40,15 @@ namespace Agi {
 
 #include "agi/font.h"
 
+// Playdate vertical mapping: how many of the 400x240 display's rows the 200 AGI
+// visual rows occupy. 240 is the aspect-correct 1.2x, but because we upscale a
+// 160x168 canvas that duplicates 1 in every 5 rows, which mangles animated
+// sprites in several places as they walk. 200 is a native 1.0x: every visual
+// row maps to exactly one display row - no duplication, perfectly even dither,
+// the vertical axis is no longer upscaled at all - at the cost of slightly
+// squat (2:1) pixels and ~40px of unused black below the game. Retune here.
+static const int kPlaydateDisplayRowsFor200 = 200; // 240 = 1.2x, 200 = 1.0x
+
 GfxMgr::GfxMgr(AgiBase *vm, GfxFont *font) : _vm(vm), _font(font) {
 	memset(&_paletteGfxMode, 0, sizeof(_paletteGfxMode));
 	memset(&_paletteTextMode, 0, sizeof(_paletteTextMode));
@@ -166,7 +175,7 @@ void GfxMgr::initVideo() {
 		_playdateGameWidth = 320;
 		_playdateGameOffsetX = (_displayScreenWidth - _playdateGameWidth) / 2;
 		_displayFontWidth = 8;  // FONT_VISUAL_WIDTH(4) * 320 / 160
-		_displayFontHeight = 10; // FONT_VISUAL_HEIGHT(8) * 240 / 200 rounded
+		_displayFontHeight = (FONT_VISUAL_HEIGHT * kPlaydateDisplayRowsFor200 + 100) / 200; // 1.2x->10, 1.0x->8
 		_displayWidthMulAdjust = 0;
 		_displayHeightMulAdjust = 0;
 		break;
@@ -265,7 +274,7 @@ void GfxMgr::setRenderStartOffset(uint16 offsetY) {
 	_renderStartVisualOffsetY = offsetY;
 	if (_vm->_renderMode == Common::kRenderPlaydate) {
 		// Playdate: scale offset by 1.2x (240/200)
-		_renderStartDisplayOffsetY = (offsetY * 240) / 200;
+		_renderStartDisplayOffsetY = (offsetY * kPlaydateDisplayRowsFor200) / 200;
 	} else {
 		_renderStartDisplayOffsetY = offsetY * (1 + _displayHeightMulAdjust);
 	}
@@ -282,7 +291,7 @@ uint16 GfxMgr::getRenderStartDisplayOffsetY() const {
 void GfxMgr::translateGamePosToDisplayScreen(int16 &x, int16 &y) const {
 	if (_vm->_renderMode == Common::kRenderPlaydate) {
 		x = _playdateGameOffsetX + (x * _playdateGameWidth) / 160;
-		y = ((y + _renderStartVisualOffsetY) * 240) / 200;
+		y = ((y + _renderStartVisualOffsetY) * kPlaydateDisplayRowsFor200) / 200;
 	} else {
 		x = x * (2 + _displayWidthMulAdjust);
 		y = y * (1 + _displayHeightMulAdjust) + _renderStartDisplayOffsetY;
@@ -296,7 +305,7 @@ void GfxMgr::translateGamePosToDisplayScreen(int16 &x, int16 &y) const {
 void GfxMgr::translateVisualPosToDisplayScreen(int16 &x, int16 &y) const {
 	if (_vm->_renderMode == Common::kRenderPlaydate) {
 		x = _playdateGameOffsetX + (x * _playdateGameWidth) / 160;
-		y = (y * 240) / 200;
+		y = (y * kPlaydateDisplayRowsFor200) / 200;
 	} else {
 		x = x * (2 + _displayWidthMulAdjust);
 		y = y * (1 + _displayHeightMulAdjust);
@@ -310,7 +319,7 @@ void GfxMgr::translateVisualPosToDisplayScreen(int16 &x, int16 &y) const {
 void GfxMgr::translateDisplayPosToGameScreen(int16 &x, int16 &y) const {
 	if (_vm->_renderMode == Common::kRenderPlaydate) {
 		x = ((x - _playdateGameOffsetX) * 160) / _playdateGameWidth;
-		y = (y * 200) / 240 - _renderStartVisualOffsetY;
+		y = (y * 200) / kPlaydateDisplayRowsFor200 - _renderStartVisualOffsetY;
 	} else {
 		y -= _renderStartDisplayOffsetY; // remove status bar line
 		x = x / (2 + _displayWidthMulAdjust);
@@ -327,7 +336,7 @@ void GfxMgr::translateVisualDimensionToDisplayScreen(int16 &width, int16 &height
 	if (_vm->_renderMode == Common::kRenderPlaydate) {
 		// Use ceiling division to ensure full coverage
 		width = (width * _playdateGameWidth + 159) / 160;
-		height = (height * 240 + 199) / 200;
+		height = (height * kPlaydateDisplayRowsFor200 + 199) / 200;
 	} else {
 		width = width * (2 + _displayWidthMulAdjust);
 		height = height * (1 + _displayHeightMulAdjust);
@@ -338,7 +347,7 @@ void GfxMgr::translateVisualDimensionToDisplayScreen(int16 &width, int16 &height
 void GfxMgr::translateDisplayDimensionToVisualScreen(int16 &width, int16 &height) const {
 	if (_vm->_renderMode == Common::kRenderPlaydate) {
 		width = (width * 160) / _playdateGameWidth;
-		height = (height * 200) / 240;
+		height = (height * 200) / kPlaydateDisplayRowsFor200;
 	} else {
 		width = width / (2 + _displayWidthMulAdjust);
 		height = height / (1 + _displayHeightMulAdjust);
@@ -429,7 +438,7 @@ void GfxMgr::translateFontPosToDisplayScreen(int16 &x, int16 &y) const {
 		// Playdate: scale font positions using the same ratios as visual coords
 		// This keeps text aligned with dialog boxes which use visual coordinates
 		x = _playdateGameOffsetX + (x * FONT_VISUAL_WIDTH * _playdateGameWidth) / 160; // col * 4 * 2 = col * 8
-		y = (y * FONT_VISUAL_HEIGHT * 240) / 200;  // row * 8 * 1.2 = row * 9.6
+		y = (y * FONT_VISUAL_HEIGHT * kPlaydateDisplayRowsFor200) / 200;  // row * 8 * 1.2 = row * 9.6
 	} else {
 		x *= _displayFontWidth;
 		y *= _displayFontHeight;
@@ -447,7 +456,7 @@ void GfxMgr::translateFontDimensionToDisplayScreen(int16 &width, int16 &height) 
 	if (_vm->_renderMode == Common::kRenderPlaydate) {
 		// Playdate: use ceiling division for dimensions to ensure full coverage
 		width = (width * FONT_VISUAL_WIDTH * _playdateGameWidth + 159) / 160;
-		height = (height * FONT_VISUAL_HEIGHT * 240 + 199) / 200;
+		height = (height * FONT_VISUAL_HEIGHT * kPlaydateDisplayRowsFor200 + 199) / 200;
 	} else {
 		width *= _displayFontWidth;
 		height *= _displayFontHeight;
@@ -663,8 +672,8 @@ void GfxMgr::render_Block(int16 x, int16 y, int16 width, int16 height, bool copy
 			// the 1px vertical widening it applies (see there), so the restored
 			// seam actually reaches the framebuffer.
 			const int displayX = _playdateGameOffsetX + (x * _playdateGameWidth) / 160;
-			int displayY = ((y + _renderStartVisualOffsetY) * 240) / 200;
-			int displayYEnd = ((y + _renderStartVisualOffsetY + height) * 240 + 199) / 200;
+			int displayY = ((y + _renderStartVisualOffsetY) * kPlaydateDisplayRowsFor200) / 200;
+			int displayYEnd = ((y + _renderStartVisualOffsetY + height) * kPlaydateDisplayRowsFor200 + 199) / 200;
 			if (displayY > 0)
 				displayY--;
 			displayYEnd = MIN<int>(displayYEnd + 1, _displayScreenHeight);
@@ -1810,8 +1819,8 @@ void GfxMgr::render_BlockPlaydate(int16 x, int16 y, int16 width, int16 height) {
 	// Use floor for start and ceiling for end to ensure full coverage
 	const int displayX0 = _playdateGameOffsetX + (x * _playdateGameWidth) / 160;
 	const int displayX1 = _playdateGameOffsetX + ((x + width) * _playdateGameWidth + 159) / 160;  // ceiling division
-	int displayY0 = ((y + _renderStartVisualOffsetY) * 240) / 200;
-	int displayY1 = ((y + _renderStartVisualOffsetY + height) * 240 + 199) / 200;  // ceiling division
+	int displayY0 = ((y + _renderStartVisualOffsetY) * kPlaydateDisplayRowsFor200) / 200;
+	int displayY1 = ((y + _renderStartVisualOffsetY + height) * kPlaydateDisplayRowsFor200 + 199) / 200;  // ceiling division
 
 	// Widen the vertical span by one display row each way. The message-box draw
 	// path (drawBox) truncates the 1.2x vertical scale of y and the render-start
@@ -1826,7 +1835,7 @@ void GfxMgr::render_BlockPlaydate(int16 x, int16 y, int16 width, int16 height) {
 
 	for (int displayY = displayY0; displayY < displayY1 && displayY < _displayScreenHeight; ++displayY) {
 		// Map display Y to AGI Y
-		const int agiY = ((displayY * 200) / 240) - _renderStartVisualOffsetY;
+		const int agiY = ((displayY * 200) / kPlaydateDisplayRowsFor200) - _renderStartVisualOffsetY;
 		if (agiY < 0 || agiY >= SCRIPT_HEIGHT)
 			continue;
 
