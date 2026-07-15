@@ -659,11 +659,17 @@ void GfxMgr::render_Block(int16 x, int16 y, int16 width, int16 height, bool copy
 		render_BlockPlaydate(x, y, width, height);
 		if (copyToScreen) {
 			// For Playdate, compute display rect exactly as render_BlockPlaydate does
-			// to ensure the copy matches the rendered area precisely
+			// to ensure the copy matches the rendered area precisely - including
+			// the 1px vertical widening it applies (see there), so the restored
+			// seam actually reaches the framebuffer.
 			const int displayX = _playdateGameOffsetX + (x * _playdateGameWidth) / 160;
-			const int displayY = ((y + _renderStartVisualOffsetY) * 240) / 200;
+			int displayY = ((y + _renderStartVisualOffsetY) * 240) / 200;
+			int displayYEnd = ((y + _renderStartVisualOffsetY + height) * 240 + 199) / 200;
+			if (displayY > 0)
+				displayY--;
+			displayYEnd = MIN<int>(displayYEnd + 1, _displayScreenHeight);
 			const int displayW = _playdateGameOffsetX + ((x + width) * _playdateGameWidth + 159) / 160 - displayX;
-			const int displayH = ((y + _renderStartVisualOffsetY + height) * 240 + 199) / 200 - displayY;
+			const int displayH = displayYEnd - displayY;
 			_vm->_system->copyRectToScreen(_displayScreen + displayY * _displayScreenWidth + displayX,
 				_displayScreenWidth, displayX, displayY, displayW, displayH);
 		}
@@ -1804,8 +1810,19 @@ void GfxMgr::render_BlockPlaydate(int16 x, int16 y, int16 width, int16 height) {
 	// Use floor for start and ceiling for end to ensure full coverage
 	const int displayX0 = _playdateGameOffsetX + (x * _playdateGameWidth) / 160;
 	const int displayX1 = _playdateGameOffsetX + ((x + width) * _playdateGameWidth + 159) / 160;  // ceiling division
-	const int displayY0 = ((y + _renderStartVisualOffsetY) * 240) / 200;
-	const int displayY1 = ((y + _renderStartVisualOffsetY + height) * 240 + 199) / 200;  // ceiling division
+	int displayY0 = ((y + _renderStartVisualOffsetY) * 240) / 200;
+	int displayY1 = ((y + _renderStartVisualOffsetY + height) * 240 + 199) / 200;  // ceiling division
+
+	// Widen the vertical span by one display row each way. The message-box draw
+	// path (drawBox) truncates the 1.2x vertical scale of y and the render-start
+	// offset separately, while we combine them, so a drawn box can extend up to
+	// 1px past this rect - closing the window would then leave a 1px seam where
+	// its top border was. Rows that map outside the game screen are skipped
+	// below and extra rows just repaint identical content, so this is safe for
+	// every caller (full-screen redraws clamp to the same bounds).
+	if (displayY0 > 0)
+		displayY0--;
+	displayY1++;
 
 	for (int displayY = displayY0; displayY < displayY1 && displayY < _displayScreenHeight; ++displayY) {
 		// Map display Y to AGI Y
