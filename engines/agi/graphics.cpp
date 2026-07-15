@@ -72,6 +72,7 @@ GfxMgr::GfxMgr(AgiBase *vm, GfxFont *font) : _vm(vm), _font(font) {
 	_playdatePicture = nullptr;
 	_playdatePicW = 0;
 	_playdatePicH = 0;
+	_playdateBasePicNr = -1;
 	_playdatePictureMgr = nullptr;
 	_playdateSprite = nullptr;
 	_nativeSpriteOriginNX = 0;
@@ -1855,6 +1856,19 @@ void GfxMgr::decodePlaydateNative(int16 resourceNr) {
 	if (!_playdatePictureMgr)
 		_playdatePictureMgr = new PictureMgr_Playdate(_vm, this);
 	_playdatePictureMgr->decodeToNative(resourceNr, _playdatePicture, nw, nh);
+	_playdateBasePicNr = resourceNr;
+}
+
+// Rebuild the native background after an overlay.pic. The game screen already
+// holds base+overlay, so a single reseed captures every fill; we then re-draw
+// the base picture's lines and the overlay's lines crisp on top (the overlay
+// pass skips the reseed so it does not wipe the base lines).
+void GfxMgr::overlayPlaydateNative(int16 overlayResourceNr) {
+	if (!_playdatePicture || !_playdatePictureMgr)
+		return; // no native background yet (no base picture drawn)
+	if (_playdateBasePicNr >= 0)
+		_playdatePictureMgr->decodeToNative(_playdateBasePicNr, _playdatePicture, _playdatePicW, _playdatePicH, true);
+	_playdatePictureMgr->decodeToNative(overlayResourceNr, _playdatePicture, _playdatePicW, _playdatePicH, false);
 }
 
 // Dither the native-resolution picture 1:1 to the display (no upscale),

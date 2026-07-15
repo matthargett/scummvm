@@ -784,10 +784,17 @@ void PictureMgr::decodePicture(int16 resourceNr, bool clearScreen, bool agi256, 
 	_vm->recordImageStackCall(ADD_PIC, resourceNr, clearScreen, agi256, 0, 0, 0, 0);
 
 	// Playdate: also rasterize the picture at native display resolution for a
-	// crisp background (see PictureMgr_Playdate). Only whole-picture draws
-	// (clearScreen) are mirrored; overlays keep the previous native buffer.
-	if (_vm->_renderMode == Common::kRenderPlaydate && !agi256 && clearScreen)
-		_gfx->decodePlaydateNative(resourceNr);
+	// crisp background (see PictureMgr_Playdate). A whole-picture draw
+	// (clearScreen) rebuilds the native background from scratch; an overlay
+	// (overlay.pic, e.g. SQ1's elevator doors closing) rebuilds it so the
+	// change is reflected there too - otherwise sprite erases would restore the
+	// stale pre-overlay background and trail it behind moving objects.
+	if (_vm->_renderMode == Common::kRenderPlaydate && !agi256) {
+		if (clearScreen)
+			_gfx->decodePlaydateNative(resourceNr);
+		else
+			_gfx->overlayPlaydateNative(resourceNr);
+	}
 }
 
 /**
@@ -880,7 +887,7 @@ byte PictureMgr_Playdate::nget(int nx, int ny) const {
 	return 0;
 }
 
-void PictureMgr_Playdate::decodeToNative(int16 resourceNr, byte *nbuf, int16 nw, int16 nh) {
+void PictureMgr_Playdate::decodeToNative(int16 resourceNr, byte *nbuf, int16 nw, int16 nh, bool reseed) {
 	_resourceNr = resourceNr;
 	_data = _vm->_game.pictures[resourceNr].rdata;
 	_dataSize = _vm->_game.dirPic[resourceNr].len;
@@ -896,11 +903,18 @@ void PictureMgr_Playdate::decodeToNative(int16 resourceNr, byte *nbuf, int16 nw,
 	// re-run the vector commands drawing only the LINES at native resolution on
 	// top, giving crisp edges without the fill-leak risk that re-flooding at the
 	// finer resolution introduces (draw_Fill is a no-op here).
-	for (int ny = 0; ny < nh; ny++) {
-		const int sy = (ny * _DEFAULT_HEIGHT) / nh;
-		for (int nx = 0; nx < nw; nx++) {
-			const int sx = (nx * _DEFAULT_WIDTH) / nw;
-			nbuf[ny * nw + nx] = _gfx->getColor(sx, sy);
+	//
+	// reseed is false when replaying an overlay picture on top of an already
+	// seeded buffer: the seed (which now reflects the overlaid game screen) has
+	// already been taken for the base pass, so here we only add the overlay's
+	// crisp lines and must not wipe the base picture's lines with another seed.
+	if (reseed) {
+		for (int ny = 0; ny < nh; ny++) {
+			const int sy = (ny * _DEFAULT_HEIGHT) / nh;
+			for (int nx = 0; nx < nw; nx++) {
+				const int sx = (nx * _DEFAULT_WIDTH) / nw;
+				nbuf[ny * nw + nx] = _gfx->getColor(sx, sy);
+			}
 		}
 	}
 

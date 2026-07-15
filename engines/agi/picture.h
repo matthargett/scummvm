@@ -136,7 +136,9 @@ public:
 
 	// Decode the given picture resource into nbuf (nw x nh, one byte colour
 	// index per pixel), scaling the 160x168 vector coordinates to fill it.
-	void decodeToNative(int16 resourceNr, byte *nbuf, int16 nw, int16 nh);
+	// reseed=false skips re-seeding fills from the game screen, so an overlay
+	// picture's crisp lines can be added on top of an already-seeded buffer.
+	void decodeToNative(int16 resourceNr, byte *nbuf, int16 nw, int16 nh, bool reseed = true);
 
 protected:
 	void putVirtPixel(int16 x, int16 y) override;

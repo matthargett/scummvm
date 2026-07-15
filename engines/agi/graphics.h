@@ -136,6 +136,7 @@ private:
 	// scaling up the 160x168 buffer. Null until the first picture is decoded.
 	byte *_playdatePicture;
 	int16 _playdatePicW, _playdatePicH;
+	int16 _playdateBasePicNr; // last whole-picture (clearScreen) resource, for overlay replay
 	class PictureMgr_Playdate *_playdatePictureMgr;
 
 	// Native-resolution sprite layer, same dimensions as _playdatePicture. One
@@ -223,6 +224,9 @@ public:
 	// background buffer. Called by PictureMgr::decodePicture after the normal
 	// 160x168 decode when running in Playdate render mode.
 	void decodePlaydateNative(int16 resourceNr);
+	// Rebuild the native background after an overlay.pic, so the overlaid change
+	// (e.g. closing doors) is reflected in the crisp background as well.
+	void overlayPlaydateNative(int16 overlayResourceNr);
 
 	// --- Playdate native sprite layer ---
 	bool hasNativeBackground() const { return _playdatePicture != nullptr; }
