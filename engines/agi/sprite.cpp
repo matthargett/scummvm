@@ -238,16 +238,25 @@ void SpritesMgr::drawCel(ScreenObjEntry *screenObj) {
 
 	// Adjust vertical position, given yPos is lower left, but we need upper left
 	curY = curY - celPtr->height + 1;
+	const int16 topY = curY;
 
-	// Playdate: give the sprite a 1px black outline so it reads clearly against
-	// the dithered 1-bit background (ego, the KQ1 alligators, ...). The outline
-	// is drawn on the cel's own transparent pixels that touch an opaque pixel,
-	// so it stays strictly inside the cel's WxH footprint - the normal sprite
-	// erase/redraw already covers that footprint, so it leaves no trail as the
-	// sprite moves. It is applied before the opaque pixels below (which paint
-	// over any shared edge) and only where the background priority lets the
-	// sprite show, so an occluded sprite's outline is occluded too.
-	if (_vm->_renderMode == Common::kRenderPlaydate) {
+	// Playdate: composite this cel into the native sprite layer (see
+	// GfxMgr::putNativeSpritePixel) at display resolution, so it reads crisply
+	// over the native background instead of being upscaled from 160x168. The
+	// visibility test below (priority / control pixels) still gates it, so the
+	// native copy is occluded exactly like the game-screen copy.
+	const bool nativeSprite = _vm->_renderMode == Common::kRenderPlaydate &&
+		!_bakingToPicture && _gfx->hasNativeBackground();
+	if (nativeSprite)
+		_gfx->beginNativeSprite(baseX, topY);
+
+	// Playdate without a native background (e.g. AGI256): give the sprite a 1px
+	// black outline in the game screen so it reads clearly against the dithered
+	// 1-bit background. Drawn on the cel's own transparent pixels that touch an
+	// opaque pixel, so it stays inside the cel footprint and leaves no trail.
+	// (With a native background the outline is drawn into the native layer after
+	// the opaque pass instead - see below.)
+	if (_vm->_renderMode == Common::kRenderPlaydate && !nativeSprite) {
 		const byte *bmp = celPtr->rawBitmap;
 		const int16 celHeightI = celPtr->height;
 		for (int16 cy = 0; cy < celHeightI; cy++) {
@@ -279,10 +288,14 @@ void SpritesMgr::drawCel(ScreenObjEntry *screenObj) {
 					// control data found
 					if (_gfx->checkControlPixel(curX, curY, viewPriority)) {
 						_gfx->putPixel(curX, curY, GFX_SCREEN_MASK_VISUAL, curColor, 0);
+						if (nativeSprite)
+							_gfx->putNativeSpritePixel(curX, curY, curColor);
 						isViewHidden = false;
 					}
 				} else if (screenPriority <= viewPriority) {
 					_gfx->putPixel(curX, curY, GFX_SCREEN_MASK_ALL, curColor, viewPriority);
+					if (nativeSprite)
+						_gfx->putNativeSpritePixel(curX, curY, curColor);
 					isViewHidden = false;
 				}
 
@@ -294,6 +307,38 @@ void SpritesMgr::drawCel(ScreenObjEntry *screenObj) {
 		remainingCelHeight--;
 		curX = baseX;
 		curY++;
+	}
+
+	// Native outline: after the opaque pass, so we can restrict it to the border
+	// pixels that actually touch a VISIBLE sprite pixel. This keeps the outline
+	// off of occluded parts of the sprite (no 1px halo poking past an occluder)
+	// and off of any pixel a higher-priority foreground owns.
+	if (nativeSprite) {
+		const byte *bmp = celPtr->rawBitmap;
+		const int16 celHeightI = celPtr->height;
+		for (int16 cy = 0; cy < celHeightI; cy++) {
+			for (int16 cx = 0; cx < celWidth; cx++) {
+				if (bmp[cy * celWidth + cx] != celClearKey)
+					continue; // outline only the transparent pixels
+				const bool touchesOpaque =
+					(cx > 0              && bmp[cy * celWidth + cx - 1] != celClearKey) ||
+					(cx < celWidth - 1   && bmp[cy * celWidth + cx + 1] != celClearKey) ||
+					(cy > 0              && bmp[(cy - 1) * celWidth + cx] != celClearKey) ||
+					(cy < celHeightI - 1 && bmp[(cy + 1) * celWidth + cx] != celClearKey);
+				if (!touchesOpaque)
+					continue;
+				const int16 px = baseX + cx;
+				const int16 py = topY + cy;
+				if (px < 0 || py < 0 || px >= SCRIPT_WIDTH || py >= SCRIPT_HEIGHT)
+					continue;
+				if (_gfx->getPriority(px, py) > viewPriority)
+					continue; // a foreground object owns this pixel
+				if (!(_gfx->hasNativeSpriteAt(px - 1, py) || _gfx->hasNativeSpriteAt(px + 1, py) ||
+				      _gfx->hasNativeSpriteAt(px, py - 1) || _gfx->hasNativeSpriteAt(px, py + 1)))
+					continue; // not bordering a visible sprite pixel
+				_gfx->putNativeOutlinePixel(px, py);
+			}
+		}
 	}
 
 	if (screenObj->objectNr == 0) { // if ego, update if ego is visible at the moment
@@ -376,7 +421,10 @@ void SpritesMgr::showSprite(ScreenObjEntry *screenObj) {
 
 	// render this block
 	int16 upperY = y - height + 1;
-	_gfx->render_Block(x, upperY, width, height);
+	if (_vm->_renderMode == Common::kRenderPlaydate && _gfx->hasNativeBackground())
+		_gfx->renderNativeSpriteRegion(x, upperY, width, height);
+	else
+		_gfx->render_Block(x, upperY, width, height);
 }
 
 void SpritesMgr::showSprites(SpriteList &spriteList) {
@@ -498,7 +546,16 @@ void SpritesMgr::addToPic(int16 viewNr, int16 loopNr, int16 celNr, int16 xPos, i
 	if (screenObj->priority == 0) {
 		screenObj->priority = _gfx->priorityFromY(screenObj->yPos);
 	}
+	// add.to.pic views are permanent scenery, not moving sprites: bake them into
+	// the Playdate native background rather than the transient native sprite
+	// layer (which is cleared every frame).
+	_bakingToPicture = true;
 	drawCel(screenObj);
+	_bakingToPicture = false;
+	if (_vm->_renderMode == Common::kRenderPlaydate && _gfx->hasNativeBackground()) {
+		const int16 top = screenObj->yPos - screenObj->ySize + 1;
+		_gfx->bakeNativeBackgroundRegion(screenObj->xPos, top, screenObj->xSize, screenObj->ySize);
+	}
 
 	if (border <= 3) {
 		// Create priority-box

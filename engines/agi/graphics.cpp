@@ -73,6 +73,9 @@ GfxMgr::GfxMgr(AgiBase *vm, GfxFont *font) : _vm(vm), _font(font) {
 	_playdatePicW = 0;
 	_playdatePicH = 0;
 	_playdatePictureMgr = nullptr;
+	_playdateSprite = nullptr;
+	_nativeSpriteOriginNX = 0;
+	_nativeSpriteOriginNY = 0;
 	_displayFontWidth = 8;
 	_displayFontHeight = 8;
 
@@ -272,6 +275,8 @@ void GfxMgr::deinitVideo() {
 
 	free(_playdatePicture);
 	_playdatePicture = nullptr;
+	free(_playdateSprite);
+	_playdateSprite = nullptr;
 	delete _playdatePictureMgr;
 	_playdatePictureMgr = nullptr;
 }
@@ -1155,6 +1160,11 @@ void GfxMgr::block_restore(int16 x, int16 y, int16 width, int16 height, byte *bu
 		curBufferPtr += width;
 		remainingHeight--;
 	}
+
+	// Restoring the background also removes any sprite that was here, so drop
+	// its pixels from the Playdate native sprite layer.
+	if (_vm->_renderMode == Common::kRenderPlaydate)
+		clearNativeSpriteRegion(x, y, width, height);
 }
 
 /**
@@ -1827,18 +1837,23 @@ void GfxMgr::decodePlaydateNative(int16 resourceNr) {
 	const int16 nh = (SCRIPT_HEIGHT * kPlaydateDisplayRowsFor200 + 100) / 200;
 	if (!_playdatePicture || _playdatePicW != nw || _playdatePicH != nh) {
 		free(_playdatePicture);
+		free(_playdateSprite);
 		_playdatePicture = (byte *)malloc((size_t)nw * nh);
+		_playdateSprite = (byte *)malloc((size_t)nw * nh);
 		_playdatePicW = nw;
 		_playdatePicH = nh;
 	}
-	if (!_playdatePicture)
+	if (!_playdatePicture || !_playdateSprite)
 		return;
+	// A fresh picture has no sprites yet; they are composited afterwards.
+	memset(_playdateSprite, 0, (size_t)nw * nh);
 	if (!_playdatePictureMgr)
 		_playdatePictureMgr = new PictureMgr_Playdate(_vm, this);
 	_playdatePictureMgr->decodeToNative(resourceNr, _playdatePicture, nw, nh);
 }
 
-// Dither the native-resolution picture 1:1 to the display (no upscale).
+// Dither the native-resolution picture 1:1 to the display (no upscale),
+// overlaying any composited sprite pixels.
 void GfxMgr::renderNativePicture() {
 	if (!_playdatePicture)
 		return;
@@ -1850,15 +1865,169 @@ void GfxMgr::renderNativePicture() {
 		const int patternRow = displayY & 0x07;
 		byte *drow = _displayScreen + displayY * _displayScreenWidth;
 		const byte *nrow = _playdatePicture + ry * _playdatePicW;
+		const byte *srow = _playdateSprite ? _playdateSprite + ry * _playdatePicW : nullptr;
 		for (int rx = 0; rx < _playdatePicW; rx++) {
 			const int displayX = _playdateGameOffsetX + rx;
 			if (displayX < 0 || displayX >= _displayScreenWidth)
 				continue;
+			if (srow && srow[rx]) {
+				drow[displayX] = (srow[rx] == 2) ? 1 : 0;
+				continue;
+			}
 			const byte color = nrow[rx] & 0x0F;
 			const byte pat = playdatePatterns[color * 8 + patternRow];
 			drow[displayX] = (pat >> (7 - (displayX & 0x07))) & 1;
 		}
 	}
+}
+
+// --- Playdate native sprite layer ---
+
+void GfxMgr::beginNativeSprite(int16 originGameX, int16 originGameY) {
+	if (!_playdatePicture)
+		return;
+	_nativeSpriteOriginNX = (originGameX * _playdatePicW) / SCRIPT_WIDTH;
+	_nativeSpriteOriginNY = (originGameY * _playdatePicH) / SCRIPT_HEIGHT;
+}
+
+void GfxMgr::putNativeSpritePixel(int16 gameX, int16 gameY, byte color) {
+	if (!_playdateSprite)
+		return;
+	const int nx0 = (gameX * _playdatePicW) / SCRIPT_WIDTH;
+	const int nx1 = ((gameX + 1) * _playdatePicW) / SCRIPT_WIDTH;
+	const int ny0 = (gameY * _playdatePicH) / SCRIPT_HEIGHT;
+	const int ny1 = ((gameY + 1) * _playdatePicH) / SCRIPT_HEIGHT;
+	const byte colorIdx = color & 0x0F;
+	for (int ny = ny0; ny < ny1; ny++) {
+		if (ny < 0 || ny >= _playdatePicH)
+			continue;
+		// Sprite-local pattern phase: anchored to the cel origin, so the interior
+		// dither travels with the sprite instead of shimmering against a fixed
+		// screen grid. The black outline hides the phase seam at the edge.
+		const int localY = ny - _nativeSpriteOriginNY;
+		const byte pat = playdatePatterns[colorIdx * 8 + (localY & 0x07)];
+		byte *srow = _playdateSprite + ny * _playdatePicW;
+		for (int nx = nx0; nx < nx1; nx++) {
+			if (nx < 0 || nx >= _playdatePicW)
+				continue;
+			const int localX = nx - _nativeSpriteOriginNX;
+			const byte bit = (pat >> (7 - (localX & 0x07))) & 1;
+			srow[nx] = bit ? 2 : 1;
+		}
+	}
+}
+
+void GfxMgr::putNativeOutlinePixel(int16 gameX, int16 gameY) {
+	if (!_playdateSprite)
+		return;
+	const int nx0 = (gameX * _playdatePicW) / SCRIPT_WIDTH;
+	const int nx1 = ((gameX + 1) * _playdatePicW) / SCRIPT_WIDTH;
+	const int ny0 = (gameY * _playdatePicH) / SCRIPT_HEIGHT;
+	const int ny1 = ((gameY + 1) * _playdatePicH) / SCRIPT_HEIGHT;
+	for (int ny = ny0; ny < ny1; ny++) {
+		if (ny < 0 || ny >= _playdatePicH)
+			continue;
+		byte *srow = _playdateSprite + ny * _playdatePicW;
+		for (int nx = nx0; nx < nx1; nx++) {
+			if (nx >= 0 && nx < _playdatePicW && !srow[nx]) // don't overwrite a sprite body pixel
+				srow[nx] = 1; // black
+		}
+	}
+}
+
+bool GfxMgr::hasNativeSpriteAt(int16 gameX, int16 gameY) const {
+	if (!_playdateSprite || gameX < 0 || gameY < 0 || gameX >= SCRIPT_WIDTH || gameY >= SCRIPT_HEIGHT)
+		return false;
+	const int nx = (gameX * _playdatePicW + _playdatePicW / 2) / SCRIPT_WIDTH;
+	const int ny = (gameY * _playdatePicH + _playdatePicH / 2) / SCRIPT_HEIGHT;
+	if (nx < 0 || nx >= _playdatePicW || ny < 0 || ny >= _playdatePicH)
+		return false;
+	return _playdateSprite[ny * _playdatePicW + nx] != 0;
+}
+
+void GfxMgr::clearNativeSpriteRegion(int16 gameX, int16 gameY, int16 gameW, int16 gameH) {
+	if (!_playdateSprite)
+		return;
+	int nx0 = (gameX * _playdatePicW) / SCRIPT_WIDTH;
+	int nx1 = ((gameX + gameW) * _playdatePicW + SCRIPT_WIDTH - 1) / SCRIPT_WIDTH;
+	int ny0 = (gameY * _playdatePicH) / SCRIPT_HEIGHT;
+	int ny1 = ((gameY + gameH) * _playdatePicH + SCRIPT_HEIGHT - 1) / SCRIPT_HEIGHT;
+	nx0 = CLIP<int>(nx0, 0, _playdatePicW);
+	nx1 = CLIP<int>(nx1, 0, _playdatePicW);
+	ny0 = CLIP<int>(ny0, 0, _playdatePicH);
+	ny1 = CLIP<int>(ny1, 0, _playdatePicH);
+	for (int ny = ny0; ny < ny1; ny++)
+		memset(_playdateSprite + ny * _playdatePicW + nx0, 0, nx1 - nx0);
+}
+
+void GfxMgr::bakeNativeBackgroundRegion(int16 gameX, int16 gameY, int16 gameW, int16 gameH) {
+	if (!_playdatePicture)
+		return;
+	int nx0 = (gameX * _playdatePicW) / SCRIPT_WIDTH;
+	int nx1 = ((gameX + gameW) * _playdatePicW + SCRIPT_WIDTH - 1) / SCRIPT_WIDTH;
+	int ny0 = (gameY * _playdatePicH) / SCRIPT_HEIGHT;
+	int ny1 = ((gameY + gameH) * _playdatePicH + SCRIPT_HEIGHT - 1) / SCRIPT_HEIGHT;
+	nx0 = CLIP<int>(nx0, 0, _playdatePicW);
+	nx1 = CLIP<int>(nx1, 0, _playdatePicW);
+	ny0 = CLIP<int>(ny0, 0, _playdatePicH);
+	ny1 = CLIP<int>(ny1, 0, _playdatePicH);
+	for (int ny = ny0; ny < ny1; ny++) {
+		const int sy = (ny * SCRIPT_HEIGHT) / _playdatePicH;
+		for (int nx = nx0; nx < nx1; nx++) {
+			const int sx = (nx * SCRIPT_WIDTH) / _playdatePicW;
+			_playdatePicture[ny * _playdatePicW + nx] = getColor(sx, sy);
+		}
+	}
+}
+
+// Dither background+sprites for a game-space rectangle to the display and push
+// it to the backend. Used in place of render_Block for sprite updates so cels
+// composite over the crisp native background at native resolution.
+void GfxMgr::renderNativeSpriteRegion(int16 gameX, int16 gameY, int16 gameW, int16 gameH) {
+	if (!_playdatePicture || !_playdateSprite)
+		return;
+
+	int nx0 = (gameX * _playdatePicW) / SCRIPT_WIDTH;
+	int nx1 = ((gameX + gameW) * _playdatePicW + SCRIPT_WIDTH - 1) / SCRIPT_WIDTH;
+	int ny0 = (gameY * _playdatePicH) / SCRIPT_HEIGHT;
+	int ny1 = ((gameY + gameH) * _playdatePicH + SCRIPT_HEIGHT - 1) / SCRIPT_HEIGHT;
+	nx0 = CLIP<int>(nx0, 0, _playdatePicW);
+	nx1 = CLIP<int>(nx1, 0, _playdatePicW);
+	ny0 = CLIP<int>(ny0, 0, _playdatePicH);
+	ny1 = CLIP<int>(ny1, 0, _playdatePicH);
+
+	const int startY = _renderStartDisplayOffsetY;
+	int minDX = _displayScreenWidth, maxDX = -1;
+	int minDY = _displayScreenHeight, maxDY = -1;
+	for (int ny = ny0; ny < ny1; ny++) {
+		const int displayY = startY + ny;
+		if (displayY < 0 || displayY >= _displayScreenHeight)
+			continue;
+		const int patternRow = displayY & 0x07;
+		byte *drow = _displayScreen + displayY * _displayScreenWidth;
+		const byte *nrow = _playdatePicture + ny * _playdatePicW;
+		const byte *srow = _playdateSprite + ny * _playdatePicW;
+		for (int nx = nx0; nx < nx1; nx++) {
+			const int displayX = _playdateGameOffsetX + nx;
+			if (displayX < 0 || displayX >= _displayScreenWidth)
+				continue;
+			if (srow[nx]) {
+				drow[displayX] = (srow[nx] == 2) ? 1 : 0;
+			} else {
+				const byte color = nrow[nx] & 0x0F;
+				const byte pat = playdatePatterns[color * 8 + patternRow];
+				drow[displayX] = (pat >> (7 - (displayX & 0x07))) & 1;
+			}
+			if (displayX < minDX) minDX = displayX;
+			if (displayX > maxDX) maxDX = displayX;
+			if (displayY < minDY) minDY = displayY;
+			if (displayY > maxDY) maxDY = displayY;
+		}
+	}
+
+	if (maxDX >= minDX && maxDY >= minDY)
+		_vm->_system->copyRectToScreen(_displayScreen + minDY * _displayScreenWidth + minDX,
+			_displayScreenWidth, minDX, minDY, maxDX - minDX + 1, maxDY - minDY + 1);
 }
 
 void GfxMgr::render_BlockPlaydate(int16 x, int16 y, int16 width, int16 height) {

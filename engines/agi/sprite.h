@@ -60,6 +60,11 @@ private:
 	SpriteList _spriteRegularList;
 	SpriteList _spriteStaticList;
 
+	// When true (during add.to.pic), drawCel bakes into the Playdate native
+	// background instead of the transient native sprite layer, since add.to.pic
+	// views become permanent scenery rather than moving sprites.
+	bool _bakingToPicture = false;
+
 public:
 	void buildRegularSpriteList();
 	void buildStaticSpriteList();

@@ -138,6 +138,15 @@ private:
 	int16 _playdatePicW, _playdatePicH;
 	class PictureMgr_Playdate *_playdatePictureMgr;
 
+	// Native-resolution sprite layer, same dimensions as _playdatePicture. One
+	// byte per native pixel: 0 = no sprite (show background), 1 = sprite black,
+	// 2 = sprite white. Cels are dithered into this at native resolution with a
+	// sprite-local pattern phase so their interior is stable as they move, and
+	// composited over the crisp background instead of upscaling the mixed
+	// 160x168 game screen. Null until the first picture is decoded.
+	byte *_playdateSprite;
+	int16 _nativeSpriteOriginNX, _nativeSpriteOriginNY; // sprite-local dither anchor
+
 	uint16 _displayFontWidth;
 	uint16 _displayFontHeight;
 
@@ -204,6 +213,26 @@ public:
 	// background buffer. Called by PictureMgr::decodePicture after the normal
 	// 160x168 decode when running in Playdate render mode.
 	void decodePlaydateNative(int16 resourceNr);
+
+	// --- Playdate native sprite layer ---
+	bool hasNativeBackground() const { return _playdatePicture != nullptr; }
+	// Anchor subsequent putNativeSpritePixel calls to this cel's top-left game
+	// position, so the interior dither phase moves with the sprite (no shimmer).
+	void beginNativeSprite(int16 originGameX, int16 originGameY);
+	// Composite one visible cel pixel (game coords) into the native sprite layer.
+	void putNativeSpritePixel(int16 gameX, int16 gameY, byte color);
+	// Mark one game pixel as a black sprite outline in the native sprite layer.
+	void putNativeOutlinePixel(int16 gameX, int16 gameY);
+	// True if the native sprite layer holds a sprite pixel for this game pixel.
+	bool hasNativeSpriteAt(int16 gameX, int16 gameY) const;
+	// Clear the native sprite layer for a game-space rectangle (top-left origin).
+	void clearNativeSpriteRegion(int16 gameX, int16 gameY, int16 gameW, int16 gameH);
+	// Dither background+sprites for a game-space rectangle to the display and
+	// push it to the backend. Used in place of render_Block for sprite updates.
+	void renderNativeSpriteRegion(int16 gameX, int16 gameY, int16 gameW, int16 gameH);
+	// Bake the current game-screen contents of a rectangle into the native
+	// background (for add.to.pic, whose views become part of the scenery).
+	void bakeNativeBackgroundRegion(int16 gameX, int16 gameY, int16 gameW, int16 gameH);
 
 	void transition_Amiga();
 	void transition_AtariSt();
