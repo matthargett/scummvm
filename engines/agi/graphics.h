@@ -147,6 +147,16 @@ private:
 	byte *_playdateSprite;
 	int16 _nativeSpriteOriginNX, _nativeSpriteOriginNY; // sprite-local dither anchor
 
+	// Per-sprite vertical scaling map (see beginNativeSprite). The vertical 1.2x
+	// aspect stretch is absorbed into the bottom half of the sprite, leaving the
+	// face/torso at 1:1 for a crisp, period-accurate, shimmer-free head. Feet
+	// stay anchored to the background ground row.
+	int16 _nsTopGameY;   // game row of the sprite's top edge
+	int16 _nsHeight;     // sprite height in game rows
+	int16 _nsTopNative;  // native row of the sprite's top edge
+	int16 _nsStretchRows;   // number of bottom game rows that absorb the stretch
+	int16 _nsExtraNative;   // extra native rows distributed across those bottom rows
+
 	uint16 _displayFontWidth;
 	uint16 _displayFontHeight;
 
@@ -216,9 +226,13 @@ public:
 
 	// --- Playdate native sprite layer ---
 	bool hasNativeBackground() const { return _playdatePicture != nullptr; }
-	// Anchor subsequent putNativeSpritePixel calls to this cel's top-left game
-	// position, so the interior dither phase moves with the sprite (no shimmer).
-	void beginNativeSprite(int16 originGameX, int16 originGameY);
+	// Set up the vertical scaling map and dither anchor for a cel occupying the
+	// given game-space rectangle, so its interior is crisp and stable as it
+	// moves. Call once before the cel's putNativeSpritePixel/OutlinePixel calls.
+	void beginNativeSprite(int16 topGameX, int16 topGameY, int16 height);
+	// Native row span [ny0, ny1) that a given sprite game row maps to under the
+	// current beginNativeSprite() map.
+	void nativeSpriteRowRange(int16 gameY, int &ny0, int &ny1) const;
 	// Composite one visible cel pixel (game coords) into the native sprite layer.
 	void putNativeSpritePixel(int16 gameX, int16 gameY, byte color);
 	// Mark one game pixel as a black sprite outline in the native sprite layer.

@@ -76,6 +76,11 @@ GfxMgr::GfxMgr(AgiBase *vm, GfxFont *font) : _vm(vm), _font(font) {
 	_playdateSprite = nullptr;
 	_nativeSpriteOriginNX = 0;
 	_nativeSpriteOriginNY = 0;
+	_nsTopGameY = 0;
+	_nsHeight = 0;
+	_nsTopNative = 0;
+	_nsStretchRows = 0;
+	_nsExtraNative = 0;
 	_displayFontWidth = 8;
 	_displayFontHeight = 8;
 
@@ -1883,11 +1888,53 @@ void GfxMgr::renderNativePicture() {
 
 // --- Playdate native sprite layer ---
 
-void GfxMgr::beginNativeSprite(int16 originGameX, int16 originGameY) {
+void GfxMgr::beginNativeSprite(int16 topGameX, int16 topGameY, int16 height) {
 	if (!_playdatePicture)
 		return;
-	_nativeSpriteOriginNX = (originGameX * _playdatePicW) / SCRIPT_WIDTH;
-	_nativeSpriteOriginNY = (originGameY * _playdatePicH) / SCRIPT_HEIGHT;
+	_nativeSpriteOriginNX = (topGameX * _playdatePicW) / SCRIPT_WIDTH;
+
+	_nsTopGameY = topGameY;
+	_nsHeight = height;
+	_nsTopNative = (topGameY * _playdatePicH) / SCRIPT_HEIGHT;
+	_nativeSpriteOriginNY = _nsTopNative; // dither phase anchor (top edge)
+
+	// How many native rows the sprite should occupy to match the background's
+	// vertical scale, and how many are "extra" beyond a 1:1 mapping.
+	const int bottomNative = ((topGameY + height) * _playdatePicH) / SCRIPT_HEIGHT;
+	const int totalNative = bottomNative - _nsTopNative;
+	int extra = totalNative - height; // 0 at 1.0x, ~0.2*height at 1.2x
+
+	if (extra <= 0 || height <= 1) {
+		// No stretch (1.0x): every game row maps to exactly one native row.
+		_nsStretchRows = 0;
+		_nsExtraNative = 0;
+		return;
+	}
+	// Absorb the stretch into the bottom half, so the face/torso stay 1:1. The
+	// bottom half is always wide enough to hold `extra` extra rows without any
+	// single row needing to more than double.
+	_nsStretchRows = MAX<int16>(1, height / 2);
+	if (extra > _nsStretchRows)
+		_nsStretchRows = MIN<int16>(height, extra);
+	_nsExtraNative = extra;
+}
+
+// Native row span [ny0, ny1) for one sprite game row, applying the bottom-half
+// stretch map. Top (height - stretchRows) rows are 1:1; the extra native rows
+// are spread evenly across the bottom stretchRows rows.
+void GfxMgr::nativeSpriteRowRange(int16 gameY, int &ny0, int &ny1) const {
+	const int idx = gameY - _nsTopGameY; // 0 = top row
+	const int plain = _nsHeight - _nsStretchRows; // 1:1 rows at the top
+	if (idx < plain || _nsStretchRows == 0) {
+		ny0 = _nsTopNative + idx;
+		ny1 = ny0 + 1;
+		return;
+	}
+	const int k = idx - plain; // 0-based index within the stretch region
+	const int before = (_nsExtraNative * k) / _nsStretchRows;      // extra rows before this one
+	const int through = (_nsExtraNative * (k + 1)) / _nsStretchRows; // ... up to and incl. this one
+	ny0 = _nsTopNative + plain + k + before;
+	ny1 = ny0 + 1 + (through - before);
 }
 
 void GfxMgr::putNativeSpritePixel(int16 gameX, int16 gameY, byte color) {
@@ -1895,8 +1942,8 @@ void GfxMgr::putNativeSpritePixel(int16 gameX, int16 gameY, byte color) {
 		return;
 	const int nx0 = (gameX * _playdatePicW) / SCRIPT_WIDTH;
 	const int nx1 = ((gameX + 1) * _playdatePicW) / SCRIPT_WIDTH;
-	const int ny0 = (gameY * _playdatePicH) / SCRIPT_HEIGHT;
-	const int ny1 = ((gameY + 1) * _playdatePicH) / SCRIPT_HEIGHT;
+	int ny0, ny1;
+	nativeSpriteRowRange(gameY, ny0, ny1);
 	const byte colorIdx = color & 0x0F;
 	for (int ny = ny0; ny < ny1; ny++) {
 		if (ny < 0 || ny >= _playdatePicH)
@@ -1922,8 +1969,8 @@ void GfxMgr::putNativeOutlinePixel(int16 gameX, int16 gameY) {
 		return;
 	const int nx0 = (gameX * _playdatePicW) / SCRIPT_WIDTH;
 	const int nx1 = ((gameX + 1) * _playdatePicW) / SCRIPT_WIDTH;
-	const int ny0 = (gameY * _playdatePicH) / SCRIPT_HEIGHT;
-	const int ny1 = ((gameY + 1) * _playdatePicH) / SCRIPT_HEIGHT;
+	int ny0, ny1;
+	nativeSpriteRowRange(gameY, ny0, ny1);
 	for (int ny = ny0; ny < ny1; ny++) {
 		if (ny < 0 || ny >= _playdatePicH)
 			continue;

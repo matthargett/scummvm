@@ -248,7 +248,7 @@ void SpritesMgr::drawCel(ScreenObjEntry *screenObj) {
 	const bool nativeSprite = _vm->_renderMode == Common::kRenderPlaydate &&
 		!_bakingToPicture && _gfx->hasNativeBackground();
 	if (nativeSprite)
-		_gfx->beginNativeSprite(baseX, topY);
+		_gfx->beginNativeSprite(baseX, topY, celPtr->height);
 
 	// Playdate without a native background (e.g. AGI256): give the sprite a 1px
 	// black outline in the game screen so it reads clearly against the dithered
