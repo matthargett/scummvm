@@ -69,6 +69,10 @@ GfxMgr::GfxMgr(AgiBase *vm, GfxFont *font) : _vm(vm), _font(font) {
 	_displayScreenHeight = DISPLAY_DEFAULT_HEIGHT;
 	_playdateGameWidth = 320;
 	_playdateGameOffsetX = 0;
+	_playdatePicture = nullptr;
+	_playdatePicW = 0;
+	_playdatePicH = 0;
+	_playdatePictureMgr = nullptr;
 	_displayFontWidth = 8;
 	_displayFontHeight = 8;
 
@@ -265,6 +269,11 @@ void GfxMgr::deinitVideo() {
 	free(_displayScreen);
 	free(_gameScreen);
 	free(_priorityScreen);
+
+	free(_playdatePicture);
+	_playdatePicture = nullptr;
+	delete _playdatePictureMgr;
+	_playdatePictureMgr = nullptr;
 }
 
 void GfxMgr::setRenderStartOffset(uint16 offsetY) {
@@ -1808,7 +1817,59 @@ static const uint8 playdatePatterns[] = {
 	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 15 white (100%)     QD
 };
 
+// Re-rasterize the current picture at native resolution into _playdatePicture.
+void GfxMgr::decodePlaydateNative(int16 resourceNr) {
+	const int16 nw = 320; // 2x the 160-px AGI game width
+	// The native background must use the SAME vertical scale as the rest of the
+	// layout (kPlaydateDisplayRowsFor200), otherwise sprites - placed by the
+	// upscale path at that scale - float off the ground drawn here. At 1.0x this
+	// is 168 rows; at 1.2x it would be ~202.
+	const int16 nh = (SCRIPT_HEIGHT * kPlaydateDisplayRowsFor200 + 100) / 200;
+	if (!_playdatePicture || _playdatePicW != nw || _playdatePicH != nh) {
+		free(_playdatePicture);
+		_playdatePicture = (byte *)malloc((size_t)nw * nh);
+		_playdatePicW = nw;
+		_playdatePicH = nh;
+	}
+	if (!_playdatePicture)
+		return;
+	if (!_playdatePictureMgr)
+		_playdatePictureMgr = new PictureMgr_Playdate(_vm, this);
+	_playdatePictureMgr->decodeToNative(resourceNr, _playdatePicture, nw, nh);
+}
+
+// Dither the native-resolution picture 1:1 to the display (no upscale).
+void GfxMgr::renderNativePicture() {
+	if (!_playdatePicture)
+		return;
+	const int startY = _renderStartDisplayOffsetY;
+	for (int ry = 0; ry < _playdatePicH; ry++) {
+		const int displayY = startY + ry;
+		if (displayY < 0 || displayY >= _displayScreenHeight)
+			continue;
+		const int patternRow = displayY & 0x07;
+		byte *drow = _displayScreen + displayY * _displayScreenWidth;
+		const byte *nrow = _playdatePicture + ry * _playdatePicW;
+		for (int rx = 0; rx < _playdatePicW; rx++) {
+			const int displayX = _playdateGameOffsetX + rx;
+			if (displayX < 0 || displayX >= _displayScreenWidth)
+				continue;
+			const byte color = nrow[rx] & 0x0F;
+			const byte pat = playdatePatterns[color * 8 + patternRow];
+			drow[displayX] = (pat >> (7 - (displayX & 0x07))) & 1;
+		}
+	}
+}
+
 void GfxMgr::render_BlockPlaydate(int16 x, int16 y, int16 width, int16 height) {
+	// Full-picture render: use the crisp native-resolution background instead
+	// of upscaling the 160x168 buffer. Partial (sprite) renders fall through to
+	// the upscale path below.
+	if (_playdatePicture && x <= 0 && y <= 0 && width >= SCRIPT_WIDTH && height >= SCRIPT_HEIGHT) {
+		renderNativePicture();
+		return;
+	}
+
 	// Render at native Playdate resolution (400x240) using native patterns.
 	// Patterns are 8x8 tiles that tile across the entire display.
 	// NO downsampling or scaling of patterns - they render at native dot pitch.

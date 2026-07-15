@@ -782,6 +782,12 @@ void PictureMgr::decodePicture(int16 resourceNr, bool clearScreen, bool agi256, 
 		_vm->clearImageStack();
 	}
 	_vm->recordImageStackCall(ADD_PIC, resourceNr, clearScreen, agi256, 0, 0, 0, 0);
+
+	// Playdate: also rasterize the picture at native display resolution for a
+	// crisp background (see PictureMgr_Playdate). Only whole-picture draws
+	// (clearScreen) are mirrored; overlays keep the previous native buffer.
+	if (_vm->_renderMode == Common::kRenderPlaydate && !agi256 && clearScreen)
+		_gfx->decodePlaydateNative(resourceNr);
 }
 
 /**
@@ -859,6 +865,104 @@ void PictureMgr::showPictureWithTransition() {
 	}
 
 	_gfx->render_Block(0, 0, SCRIPT_WIDTH, SCRIPT_HEIGHT);
+}
+
+// --- PictureMgr_Playdate: native-resolution background rasterization ---
+
+void PictureMgr_Playdate::nput(int nx, int ny, byte color) {
+	if (nx >= 0 && nx < _nw && ny >= 0 && ny < _nh)
+		_nbuf[ny * _nw + nx] = color;
+}
+
+byte PictureMgr_Playdate::nget(int nx, int ny) const {
+	if (nx >= 0 && nx < _nw && ny >= 0 && ny < _nh)
+		return _nbuf[ny * _nw + nx];
+	return 0;
+}
+
+void PictureMgr_Playdate::decodeToNative(int16 resourceNr, byte *nbuf, int16 nw, int16 nh) {
+	_resourceNr = resourceNr;
+	_data = _vm->_game.pictures[resourceNr].rdata;
+	_dataSize = _vm->_game.dirPic[resourceNr].len;
+	_width = _DEFAULT_WIDTH;   // interpreter reads coordinates in 160x168 space;
+	_height = _DEFAULT_HEIGHT; // the overrides below scale them to nbuf.
+	_nbuf = nbuf;
+	_nw = nw;
+	_nh = nh;
+
+	// Seed the native buffer from the already-decoded 160x168 visual screen
+	// (nearest-neighbour upscale). The flood fills were done there, where the
+	// artwork guarantees they don't leak, so we inherit clean fills. We then
+	// re-run the vector commands drawing only the LINES at native resolution on
+	// top, giving crisp edges without the fill-leak risk that re-flooding at the
+	// finer resolution introduces (draw_Fill is a no-op here).
+	for (int ny = 0; ny < nh; ny++) {
+		const int sy = (ny * _DEFAULT_HEIGHT) / nh;
+		for (int nx = 0; nx < nw; nx++) {
+			const int sx = (nx * _DEFAULT_WIDTH) / nw;
+			nbuf[ny * nw + nx] = _gfx->getColor(sx, sy);
+		}
+	}
+
+	if (!_data || !_dataSize)
+		return;
+	drawPicture(); // resets its own state; lines route to nbuf, fills are skipped
+}
+
+// A single 160x168 pixel maps to a block of the native buffer.
+void PictureMgr_Playdate::putVirtPixel(int16 x, int16 y) {
+	if (!_scrOn)
+		return;
+	const int nx0 = (x * _nw) / _DEFAULT_WIDTH;
+	const int nx1 = ((x + 1) * _nw) / _DEFAULT_WIDTH;
+	const int ny0 = (y * _nh) / _DEFAULT_HEIGHT;
+	const int ny1 = ((y + 1) * _nh) / _DEFAULT_HEIGHT;
+	for (int ny = ny0; ny < ny1; ny++)
+		for (int nx = nx0; nx < nx1; nx++)
+			nput(nx, ny, _scrColor);
+}
+
+// Rasterize the line at native resolution (crisp), not by upscaling 160-res
+// pixels. Only the visual screen is produced here; priority stays at 160x168.
+void PictureMgr_Playdate::draw_Line(int16 x1, int16 y1, int16 x2, int16 y2) {
+	if (!_scrOn)
+		return;
+
+	x1 = CLIP<int16>(x1, 0, _DEFAULT_WIDTH - 1);
+	x2 = CLIP<int16>(x2, 0, _DEFAULT_WIDTH - 1);
+	y1 = CLIP<int16>(y1, 0, _DEFAULT_HEIGHT - 1);
+	y2 = CLIP<int16>(y2, 0, _DEFAULT_HEIGHT - 1);
+
+	int nx1 = (x1 * _nw) / _DEFAULT_WIDTH, ny1 = (y1 * _nh) / _DEFAULT_HEIGHT;
+	int nx2 = (x2 * _nw) / _DEFAULT_WIDTH, ny2 = (y2 * _nh) / _DEFAULT_HEIGHT;
+
+	const int dx = ABS(nx2 - nx1), dy = ABS(ny2 - ny1);
+	const int stepX = nx1 < nx2 ? 1 : -1, stepY = ny1 < ny2 ? 1 : -1;
+	int err = dx - dy;
+	for (;;) {
+		nput(nx1, ny1, _scrColor);
+		if (nx1 == nx2 && ny1 == ny2)
+			break;
+		const int e2 = 2 * err;
+		bool steppedX = false;
+		if (e2 > -dy) { err -= dy; nx1 += stepX; steppedX = true; }
+		if (e2 < dx)  { err += dx; ny1 += stepY;
+			// A diagonal step would leave an 8-connected gap that a
+			// 4-connected flood fill leaks through. Bridge the corner so the
+			// line is 4-connected and stays a watertight fill boundary.
+			if (steppedX)
+				nput(nx1 - stepX, ny1, _scrColor);
+		}
+	}
+}
+
+// Fills are inherited from the 160x168 visual screen in decodeToNative (which
+// is leak-free), so re-flooding at native resolution is skipped entirely.
+bool PictureMgr_Playdate::draw_FillCheck(int16 x, int16 y, bool horizontalCheck) {
+	return false;
+}
+
+void PictureMgr_Playdate::draw_Fill(int16 x, int16 y) {
 }
 
 } // End of namespace Agi

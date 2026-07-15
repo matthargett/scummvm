@@ -55,7 +55,7 @@ public:
 protected:
 	virtual byte getInitialPriorityColor() const { return 4; }
 
-	void putVirtPixel(int16 x, int16 y);
+	virtual void putVirtPixel(int16 x, int16 y);
 	void xCorner(bool skipOtherCoords = false);
 	void yCorner(bool skipOtherCoords = false);
 	virtual void plotPattern(byte x, byte y);
@@ -117,6 +117,39 @@ protected:
 
 	int16 _width;
 	int16 _height;
+};
+
+/**
+ * Renders an AGI picture directly at the Playdate's display resolution, instead
+ * of rasterizing at 160x168 and upscaling. The vector commands are re-run with
+ * coordinates scaled to a native buffer, so lines get crisp native-resolution
+ * edges and the vertical aspect stretch introduces no duplicated rows (the way
+ * Sierra's Mac AGI interpreter fed coordinates to QuickDraw at native res).
+ *
+ * The 160x168 buffers are left to the base PictureMgr for game logic (priority,
+ * sprite occlusion); this only produces the display background, visual-only.
+ */
+class PictureMgr_Playdate : public PictureMgr {
+public:
+	PictureMgr_Playdate(AgiBase *agi, GfxMgr *gfx) : PictureMgr(agi, gfx),
+		_nbuf(nullptr), _nw(0), _nh(0) {}
+
+	// Decode the given picture resource into nbuf (nw x nh, one byte colour
+	// index per pixel), scaling the 160x168 vector coordinates to fill it.
+	void decodeToNative(int16 resourceNr, byte *nbuf, int16 nw, int16 nh);
+
+protected:
+	void putVirtPixel(int16 x, int16 y) override;
+	void draw_Line(int16 x1, int16 y1, int16 x2, int16 y2) override;
+	void draw_Fill(int16 x, int16 y) override;
+	bool draw_FillCheck(int16 x, int16 y, bool horizontalCheck) override;
+
+private:
+	void nput(int nx, int ny, byte color);
+	byte nget(int nx, int ny) const;
+
+	byte *_nbuf;
+	int16 _nw, _nh;
 };
 
 } // End of namespace Agi

@@ -131,6 +131,13 @@ private:
 	uint16 _playdateGameWidth;
 	uint16 _playdateGameOffsetX;
 
+	// Native-resolution background for Playdate: the picture re-rasterized at
+	// display resolution (crisp lines, no upscale row-doubling) instead of
+	// scaling up the 160x168 buffer. Null until the first picture is decoded.
+	byte *_playdatePicture;
+	int16 _playdatePicW, _playdatePicH;
+	class PictureMgr_Playdate *_playdatePictureMgr;
+
 	uint16 _displayFontWidth;
 	uint16 _displayFontHeight;
 
@@ -190,8 +197,14 @@ private:
 	void render_BlockCGA(int16 x, int16 y, int16 width, int16 height);
 	void render_BlockHercules(int16 x, int16 y, int16 width, int16 height);
 	void render_BlockPlaydate(int16 x, int16 y, int16 width, int16 height);
+	void renderNativePicture();
 
 public:
+	// Re-rasterize the given picture into the Playdate native-resolution
+	// background buffer. Called by PictureMgr::decodePicture after the normal
+	// 160x168 decode when running in Playdate render mode.
+	void decodePlaydateNative(int16 resourceNr);
+
 	void transition_Amiga();
 	void transition_AtariSt();
 
