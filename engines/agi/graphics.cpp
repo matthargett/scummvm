@@ -191,6 +191,16 @@ void GfxMgr::initVideo() {
 		_displayFontHeight = (FONT_VISUAL_HEIGHT * kPlaydateDisplayRowsFor200 + 100) / 200; // 1.2x->10, 1.0x->8
 		_displayWidthMulAdjust = 0;
 		_displayHeightMulAdjust = 0;
+		// The Playdate is 1-bit: the game screen (dither patterns) and the word
+		// picker both write colour index 1 for "lit", which the graphics palette
+		// (Hercules 2-colour) maps to white. The text-mode palette is EGA, where
+		// index 1 is a dark blue, so anything 1-bit drawn on a full-screen text
+		// display (the picker beside SQ1's "First Name:" prompt) would render
+		// black and vanish. Force index 1 white in the text palette too; the AGI
+		// text itself uses index 15 (white in both), so it is unaffected.
+		_paletteTextMode[1 * 3 + 0] = 0xFF;
+		_paletteTextMode[1 * 3 + 1] = 0xFF;
+		_paletteTextMode[1 * 3 + 2] = 0xFF;
 		break;
 	default:
 		error("initVideo: unsupported render mode: %d", _vm->_renderMode);
