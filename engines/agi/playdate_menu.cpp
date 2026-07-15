@@ -30,7 +30,7 @@ namespace Agi {
 PlaydateMenu::PlaydateMenu(AgiEngine *vm) :
 	_vm(vm), _visible(true), _parserGame(false), _mode(kModeVerb), _verbId(0),
 	_charIsNumber(false), _selectedIndex(0), _scrollOffset(0),
-	_marqueeStart(0), _marqueeDir(1), _marqueeNextMs(0) {
+	_marqueeStart(0), _marqueeDir(1), _marqueeNextMs(0), _lastCrankMs(0) {
 }
 
 PlaydateMenu::~PlaydateMenu() {
@@ -47,11 +47,16 @@ void PlaydateMenu::hide() {
 bool PlaydateMenu::isVisible() const {
 	if (!_visible)
 		return false;
-	// The picker is shown for parser games (word list) and, for any game,
-	// while a GetString/GetNumber prompt is asking for typed input (where
-	// it acts as an on-screen keyboard).
+	// The on-screen keyboard for a GetString/GetNumber prompt is always shown.
 	bool isNumber;
-	return _parserGame || inCharInputLoop(isNumber);
+	if (inCharInputLoop(isNumber))
+		return true;
+	if (!_parserGame)
+		return false;
+	// The word list auto-hides once the crank has been idle for a while, so
+	// exploration gets the whole screen and the picker isn't distracting
+	// chrome. Any crank movement brings it straight back (see handleEvent).
+	return (_vm->_system->getMillis() - _lastCrankMs) < kCrankIdleHideMs;
 }
 
 bool PlaydateMenu::inCharInputLoop(bool &isNumber) const {
@@ -126,9 +131,26 @@ void PlaydateMenu::addSaidPhrase(const uint16 *ids, uint count) {
 	// picker becomes active for the rest of the session.
 	_parserGame = true;
 
-	// A newly seen verb should appear in the verb list right away.
-	if (_mode == kModeVerb)
+	// A newly seen verb should appear in the verb list right away. But rebuild
+	// without snapping the player's selection back to the top: rooms can keep
+	// recording said() phrases for many cycles (idle animations, etc.), and
+	// resetting the highlight each time would fight the crank as the player
+	// navigates the verb list. Preserve the currently selected verb across the
+	// rebuild.
+	if (_mode == kModeVerb) {
+		const uint16 keepId = (_selectedIndex >= 0 && _selectedIndex < (int)_listIds.size())
+		                      ? _listIds[_selectedIndex] : 0xFFFF;
 		enterVerbMode();
+		if (keepId != 0xFFFF) {
+			for (uint i = 0; i < _listIds.size(); ++i) {
+				if (_listIds[i] == keepId) {
+					_selectedIndex = (int)i;
+					break;
+				}
+			}
+			clampSelection();
+		}
+	}
 }
 
 void PlaydateMenu::enterVerbMode() {
@@ -395,18 +417,28 @@ bool PlaydateMenu::handleEvent(const Common::Event &event) {
 
 	switch (event.type) {
 	case Common::EVENT_WHEELDOWN:
+	case Common::EVENT_WHEELUP: {
 		if (_listWords.empty())
 			return false;
-		moveSelection(1);
+		bool isNumber;
+		const bool charMode = inCharInputLoop(isNumber);
+		const uint32 now = _vm->_system->getMillis();
+		// A crank movement always un-hides the word list. The first notch after
+		// it has been idle only reveals it (so a stray notch doesn't scroll a
+		// list the player can't yet see); further notches then navigate. The
+		// on-screen keyboard is always visible, so it navigates immediately.
+		const bool wasHidden = !charMode && (now - _lastCrankMs) >= kCrankIdleHideMs;
+		_lastCrankMs = now;
+		if (wasHidden)
+			return true;
+		moveSelection(event.type == Common::EVENT_WHEELDOWN ? 1 : -1);
 		return true;
-	case Common::EVENT_WHEELUP:
-		if (_listWords.empty())
-			return false;
-		moveSelection(-1);
-		return true;
+	}
 	case Common::EVENT_KEYDOWN:
-		// Only claim keys when there is something to act on; title
-		// screens and cutscenes wait for ENTER themselves.
+		// A/B act only while the list is actually shown. While it is auto-hidden
+		// they fall through to the game (e.g. A = Enter dismisses a message box).
+		if (!isVisible())
+			return false;
 		if (event.kbd.keycode == Common::KEYCODE_RETURN && !_listWords.empty()) {
 			select();
 			return true;

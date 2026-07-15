@@ -148,6 +148,12 @@ private:
 	int _marqueeDir;
 	uint32 _marqueeNextMs;
 
+	// Last time (ms) the crank moved. The word list stays visible for
+	// kCrankIdleHideMs after that, then auto-hides so exploration owns the
+	// screen; the next crank movement reveals it again.
+	uint32 _lastCrankMs;
+	static const uint32 kCrankIdleHideMs = 3000;
+
 	static const int kLineHeight = 10;
 	static const int kVisibleLines = 24; // 240 / 10
 	static const int kMenuX = 320;
