@@ -159,9 +159,17 @@ void SpritesMgr::freeAllSprites() {
 void SpritesMgr::eraseSprites(SpriteList &spriteList) {
 	SpriteList::iterator iter;
 //	warning("eraseSprites - count %d", spriteList.size());
+	const bool rebakeBackground = _drawingStatic && _vm->_renderMode == Common::kRenderPlaydate &&
+		_gfx->hasNativeBackground();
 	for (iter = spriteList.reverse_begin(); iter != spriteList.end(); iter--) {
 		Sprite &sprite = *iter;
 		_gfx->block_restore(sprite.xPos, sprite.yPos, sprite.xSize, sprite.ySize, sprite.backgroundBuffer);
+		// A static sprite was baked into the native background; block_restore has
+		// put the plain background back in the game screen, so re-derive the
+		// native background from it to remove the baked sprite (no ghost when a
+		// static sprite changes, e.g. a door opening).
+		if (rebakeBackground)
+			_gfx->bakeNativeBackgroundRegion(sprite.xPos, sprite.yPos, sprite.xSize, sprite.ySize);
 	}
 
 	freeList(spriteList);
@@ -181,12 +189,16 @@ void SpritesMgr::eraseRegularSprites() {
 }
 
 void SpritesMgr::eraseStaticSprites() {
+	_drawingStatic = true;
 	eraseSprites(_spriteStaticList);
+	_drawingStatic = false;
 }
 
 void SpritesMgr::eraseSprites() {
 	eraseSprites(_spriteRegularList);
+	_drawingStatic = true;
 	eraseSprites(_spriteStaticList);
+	_drawingStatic = false;
 }
 
 /**
@@ -214,11 +226,15 @@ void SpritesMgr::drawRegularSpriteList() {
 
 void SpritesMgr::drawStaticSpriteList() {
 	//debugC(7, kDebugLevelSprites, "drawRegularSpriteList()");
+	_drawingStatic = true;
 	drawSprites(_spriteStaticList);
+	_drawingStatic = false;
 }
 
 void SpritesMgr::drawAllSpriteLists() {
+	_drawingStatic = true;
 	drawSprites(_spriteStaticList);
+	_drawingStatic = false;
 	drawSprites(_spriteRegularList);
 }
 
@@ -245,8 +261,15 @@ void SpritesMgr::drawCel(ScreenObjEntry *screenObj) {
 	// over the native background instead of being upscaled from 160x168. The
 	// visibility test below (priority / control pixels) still gates it, so the
 	// native copy is occluded exactly like the game-screen copy.
+	//
+	// Static sprites and add.to.pic views are instead baked into the native
+	// background (below), because they are not redrawn every cycle: leaving them
+	// in the transient sprite layer would let a passing regular sprite's erase
+	// (which clears that layer) punch a permanent hole in them.
+	const bool bakeToBackground = _vm->_renderMode == Common::kRenderPlaydate &&
+		(_bakingToPicture || _drawingStatic) && _gfx->hasNativeBackground();
 	const bool nativeSprite = _vm->_renderMode == Common::kRenderPlaydate &&
-		!_bakingToPicture && _gfx->hasNativeBackground();
+		!bakeToBackground && _gfx->hasNativeBackground();
 	if (nativeSprite)
 		_gfx->beginNativeSprite(baseX, topY, celPtr->height);
 
@@ -340,6 +363,13 @@ void SpritesMgr::drawCel(ScreenObjEntry *screenObj) {
 			}
 		}
 	}
+
+	// Bake a static sprite into the native background now that the game screen
+	// holds it (add.to.pic bakes itself after drawing its priority box, so it is
+	// excluded here). Its priority still lives in the 160x168 priority screen, so
+	// ego occludes against it exactly as before; this only affects the display.
+	if (_drawingStatic && _vm->_renderMode == Common::kRenderPlaydate && _gfx->hasNativeBackground())
+		_gfx->bakeNativeBackgroundRegion(baseX, topY, celWidth, celPtr->height);
 
 	if (screenObj->objectNr == 0) { // if ego, update if ego is visible at the moment
 		_vm->setFlag(VM_FLAG_EGO_INVISIBLE, isViewHidden);

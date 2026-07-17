@@ -65,6 +65,12 @@ private:
 	// views become permanent scenery rather than moving sprites.
 	bool _bakingToPicture = false;
 
+	// When true (drawing/erasing the static sprite list), drawCel bakes into the
+	// Playdate native background too. Static sprites (e.g. SQ1's corridor doors)
+	// are not redrawn every cycle, so keeping them in the transient sprite layer
+	// let a passing regular sprite's erase punch a permanent hole in them.
+	bool _drawingStatic = false;
+
 public:
 	void buildRegularSpriteList();
 	void buildStaticSpriteList();
