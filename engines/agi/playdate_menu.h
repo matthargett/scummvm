@@ -74,7 +74,13 @@ public:
 	void resetContextWords();
 
 	/** Records a said() phrase (verb id first, then noun ids). */
-	void addSaidPhrase(const uint16 *ids, uint count);
+	void addSaidPhrase(const uint16 *ids, uint count, bool fromLogic0);
+
+	// Whether phrase i should be offered given the current game's style
+	// (logic-0 phrases are hidden once any room-logic phrase has been seen).
+	bool phraseVisible(uint i) const {
+		return !(_hasRoomLogicPhrase && _phraseFromLogic0[i]);
+	}
 
 	void draw();
 
@@ -119,12 +125,21 @@ private:
 	bool _visible;
 	bool _parserGame; // sticky: set once any said() phrase is recorded
 
+	// Sticky: set once a said() phrase is recorded from a room logic (logic
+	// number != 0). Games that use room logics (King's Quest) then hide their
+	// logic-0 phrases (global speed/system commands) as clutter; games that
+	// keep everything in logic 0 (Space Quest) never set this, so their
+	// logic-0 phrases are shown - otherwise the picker would be empty.
+	bool _hasRoomLogicPhrase;
+
 	// Recorded room vocabulary. Each phrase is the full said() word-group
 	// id sequence with the verb first. Only phrases the picker can fully
 	// compose are kept: those containing a wildcard (anyword / rest-of-
 	// line), which need a word the keyboard-less picker cannot supply, are
 	// dropped, so every offered command satisfies its said() test.
+	// _phraseFromLogic0[i] tags whether phrase i came from logic 0.
 	Common::Array<Common::Array<uint16> > _phrases;
+	Common::Array<bool> _phraseFromLogic0;
 
 	Mode _mode;
 	uint16 _verbId;            // selected verb (in noun mode)

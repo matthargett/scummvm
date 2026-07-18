@@ -28,7 +28,8 @@
 namespace Agi {
 
 PlaydateMenu::PlaydateMenu(AgiEngine *vm) :
-	_vm(vm), _visible(true), _parserGame(false), _mode(kModeVerb), _verbId(0),
+	_vm(vm), _visible(true), _parserGame(false), _hasRoomLogicPhrase(false),
+	_mode(kModeVerb), _verbId(0),
 	_charIsNumber(false), _selectedIndex(0), _scrollOffset(0),
 	_marqueeStart(0), _marqueeDir(1), _marqueeNextMs(0), _lastCrankMs(0) {
 }
@@ -88,10 +89,13 @@ bool PlaydateMenu::claimsInput() const {
 
 void PlaydateMenu::resetContextWords() {
 	_phrases.clear();
+	_phraseFromLogic0.clear();
+	// _hasRoomLogicPhrase is intentionally sticky across rooms: the game's
+	// command-structure style does not change room to room.
 	enterVerbMode();
 }
 
-void PlaydateMenu::addSaidPhrase(const uint16 *ids, uint count) {
+void PlaydateMenu::addSaidPhrase(const uint16 *ids, uint count, bool fromLogic0) {
 	// A said() phrase is "verb noun...". The picker can only offer
 	// commands it can compose in full, so a phrase containing a wildcard
 	// (1 = anyword, 9999 = rest-of-line) is dropped: anyword consumes a
@@ -110,6 +114,11 @@ void PlaydateMenu::addSaidPhrase(const uint16 *ids, uint count) {
 	if (phrase.empty())
 		return;
 
+	// A said() from a room logic proves this game scopes commands per room, so
+	// its logic-0 phrases are global clutter and get hidden (see phraseVisible).
+	if (!fromLogic0)
+		_hasRoomLogicPhrase = true;
+
 	// Deduplicate identical phrases.
 	for (uint i = 0; i < _phrases.size(); ++i) {
 		if (_phrases[i].size() != phrase.size())
@@ -121,11 +130,17 @@ void PlaydateMenu::addSaidPhrase(const uint16 *ids, uint count) {
 				break;
 			}
 		}
-		if (same)
+		if (same) {
+			// Keep the more-visible source: a phrase also seen in a room logic
+			// should not stay hidden as a logic-0 duplicate.
+			if (!fromLogic0)
+				_phraseFromLogic0[i] = false;
 			return;
+		}
 	}
 
 	_phrases.push_back(phrase);
+	_phraseFromLogic0.push_back(fromLogic0);
 
 	// Seeing any said() phrase proves this game uses the parser, so the
 	// picker becomes active for the rest of the session.
@@ -164,6 +179,8 @@ void PlaydateMenu::enterVerbMode() {
 
 	// Distinct verbs (first id of each phrase), in first-seen order.
 	for (uint i = 0; i < _phrases.size(); ++i) {
+		if (!phraseVisible(i))
+			continue;
 		const uint16 id = _phrases[i][0];
 		bool present = false;
 		for (uint j = 0; j < _listIds.size(); ++j) {
@@ -224,6 +241,8 @@ void PlaydateMenu::enterNounMode(uint16 verbId, Common::String verbWord) {
 	// multi-word said() tests like said("put","key","in","lock") are
 	// satisfied in full.
 	for (uint i = 0; i < _phrases.size(); ++i) {
+		if (!phraseVisible(i))
+			continue;
 		if (_phrases[i][0] != verbId)
 			continue;
 

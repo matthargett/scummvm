@@ -337,18 +337,20 @@ bool AgiEngine::testSaid(uint8 nwords, uint8 *cc) {
 	int z = 0;
 
 #ifdef PLAYDATE
-	// Record this room's said() phrases for the Playdate word picker.
-	// The phrase order (verb first, then nouns) is preserved so the
-	// picker can offer verb-scoped nouns. said() tests in logic 0 (the
-	// global logic that runs in every room) are skipped, so the picker
-	// shows room-specific verbs rather than global commands like the
-	// speed controls (fast/normal/slow) many games add there.
-	if (_playdateMenu && cc && nwords && _game.curLogicNr != 0) {
+	// Record this room's said() phrases for the Playdate word picker. The
+	// phrase order (verb first, then nouns) is preserved so the picker can offer
+	// verb-scoped nouns. Phrases from logic 0 (the global logic that runs in
+	// every room) are tagged: for games that keep their commands in room logics
+	// (King's Quest) they are the global speed/system commands and are hidden,
+	// but games that handle ALL parser input in logic 0 (Space Quest) have
+	// nothing else, so there the tagged phrases are shown. The picker decides
+	// which case applies (see addSaidPhrase).
+	if (_playdateMenu && cc && nwords) {
 		Common::Array<uint16> saidIds;
 		const uint8 *scan = cc;
 		for (uint i = 0; i < nwords; ++i)
 			saidIds.push_back(READ_LE_UINT16(scan + (i * 2)));
-		_playdateMenu->addSaidPhrase(saidIds.begin(), saidIds.size());
+		_playdateMenu->addSaidPhrase(saidIds.begin(), saidIds.size(), _game.curLogicNr == 0);
 	}
 #endif
 
