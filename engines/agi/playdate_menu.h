@@ -175,6 +175,8 @@ private:
 	static const int kMenuWidth = 80;
 	static const int kTextX = kMenuX + 2;
 	static const int kMaxChars = 9;      // characters that fit in the column
+	static const int kMaxSynonyms = 2;   // extra synonym entries per verb+noun command
+	static const int kNounSynonymCap = 10; // stop adding synonyms once the noun list is this long
 	static const uint32 kMarqueeStepMs = 350;
 };
 

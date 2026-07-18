@@ -267,6 +267,39 @@ void PlaydateMenu::enterNounMode(uint16 verbId, Common::String verbWord) {
 		_listCommands.push_back(command);
 		_listWords.push_back(label);
 		_listIds.push_back(0);
+
+		// Offer a couple of alternate synonyms for a plain verb+noun command,
+		// so the player can find the word the game's narrative actually uses
+		// (e.g. "dagger" when the dictionary's canonical form is "knife"). Kept
+		// gentle: only two-word phrases, at most kMaxSynonyms alternates each,
+		// and only while the list is still short, so a room full of objects
+		// does not balloon the column. Any synonym of the noun parses to the
+		// same word id, so the composed command still satisfies the said() test.
+		if (_phrases[i].size() == 2 && (int)_listWords.size() < kNounSynonymCap) {
+			Common::Array<uint16> nounId;
+			nounId.push_back(_phrases[i][1]);
+			Common::Array<Common::String> synonyms;
+			_vm->_words->collectWordsForIds(nounId, synonyms);
+			int added = 0;
+			for (uint s = 0; s < synonyms.size() && added < kMaxSynonyms; ++s) {
+				if (synonyms[s].equalsIgnoreCase(label))
+					continue; // already shown as the primary word
+				Common::String synCommand = verbWord + " " + synonyms[s];
+				bool dup = false;
+				for (uint j = 0; j < _listCommands.size(); ++j) {
+					if (_listCommands[j] == synCommand) {
+						dup = true;
+						break;
+					}
+				}
+				if (dup)
+					continue;
+				_listCommands.push_back(synCommand);
+				_listWords.push_back(synonyms[s]);
+				_listIds.push_back(0);
+				added++;
+			}
+		}
 	}
 
 	_selectedIndex = 0;
