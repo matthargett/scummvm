@@ -359,6 +359,15 @@ void SpritesMgr::drawCel(ScreenObjEntry *screenObj) {
 				if (!(_gfx->hasNativeSpriteAt(px - 1, py) || _gfx->hasNativeSpriteAt(px + 1, py) ||
 				      _gfx->hasNativeSpriteAt(px, py - 1) || _gfx->hasNativeSpriteAt(px, py + 1)))
 					continue; // not bordering a visible sprite pixel
+				// Don't hug a foreground occluder's edge. When the sprite passes
+				// behind e.g. a tree, an outline pixel dropped in the gap right
+				// next to a branch reads as that branch thickening by 1px and
+				// following the sprite. Skip outline pixels adjacent to a
+				// higher-priority (occluding) pixel; the outline still frames the
+				// sprite against the open background, just not against occluders.
+				if (_gfx->getPriority(px - 1, py) > viewPriority || _gfx->getPriority(px + 1, py) > viewPriority ||
+				    _gfx->getPriority(px, py - 1) > viewPriority || _gfx->getPriority(px, py + 1) > viewPriority)
+					continue;
 				_gfx->putNativeOutlinePixel(px, py);
 			}
 		}
