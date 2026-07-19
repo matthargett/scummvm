@@ -475,12 +475,24 @@ void GfxMgr::copyDisplayToScreen() {
 	_vm->_system->copyRectToScreen(_displayScreen, _displayScreenWidth, 0, 0, _displayScreenWidth, _displayScreenHeight);
 }
 
+// Vertical scale (display rows per 200 game-lines) for the text layer. In
+// graphics mode text overlays the picture: message boxes (drawBox), the text
+// inside them, and their restore (render_Block) must all share the picture's
+// 272 fill scale, or a box lands offset from its text and the restore misses
+// the text pixels. In text mode (gfxMode == false) the whole screen is a boxless
+// 25-row text grid - name entry, the LSL quiz, menus - which only fits the 240
+// display rows at the 240 scale. AGI never draws a message box in text mode, so
+// this seam is clean.
+int GfxMgr::playdateTextRowsFor200() const {
+	return _vm->_game.gfxMode ? kPlaydateDisplayRowsFor200 : kPlaydateFontRowsFor200;
+}
+
 void GfxMgr::translateFontPosToDisplayScreen(int16 &x, int16 &y) const {
 	if (_vm->_renderMode == Common::kRenderPlaydate) {
 		// Playdate: scale font positions using the same ratios as visual coords
 		// This keeps text aligned with dialog boxes which use visual coordinates
 		x = _playdateGameOffsetX + (x * FONT_VISUAL_WIDTH * _playdateGameWidth) / 160; // col * 4 * (gameW/160)
-		y = (y * FONT_VISUAL_HEIGHT * kPlaydateFontRowsFor200) / 200;  // row * 8 * 1.2 = row * 9.6
+		y = (y * FONT_VISUAL_HEIGHT * playdateTextRowsFor200()) / 200;
 	} else {
 		x *= _displayFontWidth;
 		y *= _displayFontHeight;
@@ -498,7 +510,7 @@ void GfxMgr::translateFontDimensionToDisplayScreen(int16 &width, int16 &height) 
 	if (_vm->_renderMode == Common::kRenderPlaydate) {
 		// Playdate: use ceiling division for dimensions to ensure full coverage
 		width = (width * FONT_VISUAL_WIDTH * _playdateGameWidth + 159) / 160;
-		height = (height * FONT_VISUAL_HEIGHT * kPlaydateFontRowsFor200 + 199) / 200;
+		height = (height * FONT_VISUAL_HEIGHT * playdateTextRowsFor200() + 199) / 200;
 	} else {
 		width *= _displayFontWidth;
 		height *= _displayFontHeight;
@@ -618,6 +630,17 @@ void GfxMgr::putPixelOnDisplay(int16 x, int16 adjX, int16 y, int16 adjY, byte co
  */
 void GfxMgr::putFontPixelOnDisplay(int16 baseX, int16 baseY, int16 addX, int16 addY, byte color, bool isHires) {
 	uint32 offset = 0;
+
+	// Guard against writing outside the display buffer. AGI text is a 25-row grid
+	// sized for a 200-line screen; on Playdate a graphics-mode box near the bottom
+	// (272 scale) or a stray coordinate can land a glyph row past the 240-row
+	// display. Clip here rather than trust every caller's arithmetic.
+	{
+		const int px = baseX + addX;
+		const int py = baseY + addY;
+		if (px < 0 || py < 0 || px >= _displayScreenWidth || py >= _displayScreenHeight)
+			return;
+	}
 
 	switch (_upscaledHires) {
 	case DISPLAY_UPSCALED_DISABLED:

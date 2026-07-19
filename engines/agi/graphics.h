@@ -238,6 +238,10 @@ public:
 	void beginNativeSprite(int16 topGameX, int16 topGameY, int16 height);
 	// Native row span [ny0, ny1) that a given sprite game row maps to under the
 	// current beginNativeSprite() map.
+	// Vertical scale (display rows per 200 game-lines) for the text layer:
+	// the picture's fill scale in graphics mode, the shorter fit scale in text
+	// mode (see the definition).
+	int playdateTextRowsFor200() const;
 	void nativeSpriteRowRange(int16 gameY, int &ny0, int &ny1) const;
 	// Native column span [nx0, nx1) for a sprite game column, anchored to the
 	// sprite's left edge so its width is stable frame-to-frame.
