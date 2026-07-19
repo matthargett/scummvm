@@ -41,13 +41,12 @@ namespace Agi {
 #include "agi/font.h"
 
 // Playdate vertical mapping: how many of the 400x240 display's rows the 200 AGI
-// visual rows occupy. 240 is the aspect-correct 1.2x, but because we upscale a
-// 160x168 canvas that duplicates 1 in every 5 rows, which mangles animated
-// sprites in several places as they walk. 200 is a native 1.0x: every visual
-// row maps to exactly one display row - no duplication, perfectly even dither,
-// the vertical axis is no longer upscaled at all - at the cost of slightly
-// squat (2:1) pixels and ~40px of unused black below the game. Retune here.
-static const int kPlaydateDisplayRowsFor200 = 200; // 240 = 1.2x, 200 = 1.0x
+// visual rows occupy. 240 is the aspect-correct 1.2x. Row duplication used to
+// mangle sprites here, but the background is now rasterized directly at this
+// resolution (crisp lines, no upscale doubling) and sprites are scaled with the
+// stretch absorbed into their bottom half (see beginNativeSprite), keeping the
+// face 1:1 and stable, so 1.2x is safe. 200 is a squat native 1.0x. Retune here.
+static const int kPlaydateDisplayRowsFor200 = 240; // 240 = 1.2x, 200 = 1.0x
 
 GfxMgr::GfxMgr(AgiBase *vm, GfxFont *font) : _vm(vm), _font(font) {
 	memset(&_paletteGfxMode, 0, sizeof(_paletteGfxMode));
