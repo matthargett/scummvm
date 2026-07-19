@@ -1933,10 +1933,12 @@ void GfxMgr::beginNativeSprite(int16 topGameX, int16 topGameY, int16 height) {
 		_nsExtraNative = 0;
 		return;
 	}
-	// Absorb the stretch into the bottom half, so the face/torso stay 1:1. The
-	// bottom half is always wide enough to hold `extra` extra rows without any
-	// single row needing to more than double.
-	_nsStretchRows = MAX<int16>(1, height / 2);
+	// Absorb the stretch into the bottom two-thirds, so only the top third (the
+	// face) stays strictly 1:1 and the extra rows spread across the whole lower
+	// body instead of piling into the legs - the gentler the fill, the more this
+	// matters. Always keep at least `extra` stretch rows so no single row has to
+	// more than double.
+	_nsStretchRows = MAX<int16>(1, (height * 2) / 3);
 	if (extra > _nsStretchRows)
 		_nsStretchRows = MIN<int16>(height, extra);
 	_nsExtraNative = extra;
