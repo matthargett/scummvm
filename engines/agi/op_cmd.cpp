@@ -1873,10 +1873,26 @@ void cmdStatus(AgiGame *state, AgiEngine *vm, uint8 *parameter) {
 	vm->redrawScreen();
 }
 
+// On the Playdate the app is a single game with no launcher to quit to (the
+// player exits via the Playdate system menu). A game-initiated quit would
+// otherwise strand the player on a dead black screen - most visibly when
+// failing Leisure Suit Larry's age quiz, which calls quit() on failure. Turn
+// such a quit into a restart so the game comes back and can be tried again.
+static bool playdateQuitAsRestart(AgiEngine *vm) {
+	if (vm->_renderMode != Common::kRenderPlaydate)
+		return false;
+	vm->_restartGame = true;
+	vm->setFlag(VM_FLAG_RESTART_GAME, true);
+	vm->_menu->itemEnableAll();
+	return true;
+}
+
 void cmdQuit(AgiGame *state, AgiEngine *vm, uint8 *parameter) {
 	uint16 withoutPrompt = parameter[0];
 
 	vm->_sound->stopSound();
+	if (playdateQuitAsRestart(vm))
+		return;
 	if (withoutPrompt) {
 		vm->quitGame();
 	} else {
@@ -1888,6 +1904,8 @@ void cmdQuit(AgiGame *state, AgiEngine *vm, uint8 *parameter) {
 
 void cmdQuitV1(AgiGame *state, AgiEngine *vm, uint8 *parameter) {
 	vm->_sound->stopSound();
+	if (playdateQuitAsRestart(vm))
+		return;
 	vm->quitGame();
 }
 
