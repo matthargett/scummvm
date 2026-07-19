@@ -99,7 +99,7 @@ public:
 	void setCursorPalette(const byte *colors, uint start, uint num) override;
 
 private:
-	void renderGameScreen(uint8 *frame) const;
+	void renderGameScreen(uint8 *frame, int rowStart, int rowEnd) const;
 	void renderOverlay(uint8 *frame) const;
 	void renderCursor(uint8 *frame) const;
 	void updatePaletteLuminance(uint start, uint num);
@@ -135,6 +135,15 @@ private:
 
 	int _shakeOffsetX;
 	int _shakeOffsetY;
+
+	// Per-frame dirty rows (frame coordinates). The engine already tells us
+	// exactly which rows changed via copyRectToScreen, so updateScreen converts
+	// and refreshes only those instead of the whole 400x240 screen every frame -
+	// the largest fixed per-frame cost. _forceFullRefresh redraws everything
+	// (first frame, mode change, shake, cursor).
+	int _dirtyTop, _dirtyBottom;
+	bool _forceFullRefresh;
+	void markDirtyRows(int top, int bottom);
 
 	bool _inTransaction;
 };

@@ -56,6 +56,7 @@ PlaydateGraphicsManager::PlaydateGraphicsManager(PlaydateAPI *pd)
 	  _cursorPaletteEnabled(false),
 	  _pointerMode(false),
 	  _shakeOffsetX(0), _shakeOffsetY(0),
+	  _dirtyTop(LCD_ROWS), _dirtyBottom(-1), _forceFullRefresh(true),
 	  _inTransaction(false) {
 	memset(_palette, 0, sizeof(_palette));
 	memset(_paletteLum, 0, sizeof(_paletteLum));
@@ -106,6 +107,7 @@ void PlaydateGraphicsManager::initSize(uint width, uint height, const Graphics::
 	_gameScreen.free();
 	_gameScreen.create(width, height, Graphics::PixelFormat::createFormatCLUT8());
 	_screenChangeID++;
+	_forceFullRefresh = true;
 }
 
 void PlaydateGraphicsManager::beginGFXTransaction() {
@@ -151,6 +153,22 @@ void PlaydateGraphicsManager::copyRectToScreen(const void *buf, int pitch, int x
 
 	assert(x >= 0 && y >= 0 && x + w <= _gameScreen.w && y + h <= _gameScreen.h);
 	_gameScreen.copyRectToSurface(buf, pitch, x, y, w, h);
+	// renderGameScreen maps game row r to frame row r + _shakeOffsetY.
+	markDirtyRows(y + _shakeOffsetY, y + h - 1 + _shakeOffsetY);
+}
+
+// Record that frame rows [top, bottom] changed and must be reconverted.
+void PlaydateGraphicsManager::markDirtyRows(int top, int bottom) {
+	if (top < 0)
+		top = 0;
+	if (bottom > LCD_ROWS - 1)
+		bottom = LCD_ROWS - 1;
+	if (top > bottom)
+		return;
+	if (top < _dirtyTop)
+		_dirtyTop = top;
+	if (bottom > _dirtyBottom)
+		_dirtyBottom = bottom;
 }
 
 Graphics::Surface *PlaydateGraphicsManager::lockScreen() {
@@ -161,13 +179,17 @@ void PlaydateGraphicsManager::unlockScreen() {
 }
 
 void PlaydateGraphicsManager::fillScreen(uint32 col) {
-	if (_gameScreen.getPixels())
+	if (_gameScreen.getPixels()) {
 		_gameScreen.fillRect(Common::Rect(0, 0, _gameScreen.w, _gameScreen.h), col);
+		_forceFullRefresh = true;
+	}
 }
 
 void PlaydateGraphicsManager::fillScreen(const Common::Rect &r, uint32 col) {
-	if (_gameScreen.getPixels())
+	if (_gameScreen.getPixels()) {
 		_gameScreen.fillRect(r, col);
+		markDirtyRows(r.top + _shakeOffsetY, r.bottom - 1 + _shakeOffsetY);
+	}
 }
 
 void PlaydateGraphicsManager::putPixel(uint8 *frame, int x, int y, bool white) {
@@ -182,7 +204,9 @@ void PlaydateGraphicsManager::putPixel(uint8 *frame, int x, int y, bool white) {
 		*p &= ~bit;
 }
 
-void PlaydateGraphicsManager::renderGameScreen(uint8 *frame) const {
+// Convert frame rows [rowStart, rowEnd] (inclusive) of the game screen to the
+// 1-bit framebuffer. A row range lets updateScreen reconvert only what changed.
+void PlaydateGraphicsManager::renderGameScreen(uint8 *frame, int rowStart, int rowEnd) const {
 	if (!_gameScreen.getPixels())
 		return;
 
@@ -195,9 +219,14 @@ void PlaydateGraphicsManager::renderGameScreen(uint8 *frame) const {
 	const int outH = MIN<int>(_gameScreen.h, LCD_ROWS);
 	const int y0 = _shakeOffsetY;
 
-	for (int y = 0; y < outH; y++) {
-		const int fbY = y0 + y;
-		if (fbY < 0 || fbY >= LCD_ROWS)
+	if (rowStart < 0)
+		rowStart = 0;
+	if (rowEnd > LCD_ROWS - 1)
+		rowEnd = LCD_ROWS - 1;
+
+	for (int fbY = rowStart; fbY <= rowEnd; fbY++) {
+		const int y = fbY - y0; // game row that maps to this frame row
+		if (y < 0 || y >= outH)
 			continue;
 
 		const byte *src = (const byte *)_gameScreen.getBasePtr(0, y);
@@ -283,24 +312,44 @@ void PlaydateGraphicsManager::updateScreen() {
 	if (!frame)
 		return;
 
-	if (_overlayVisible) {
-		renderOverlay(frame);
+	// The overlay, the software cursor and a screen shake all need the whole
+	// frame (they either cover it or shift the whole mapping). Everything else -
+	// AGI gameplay - only changes the rows the engine copied this frame, so
+	// convert and refresh just those.
+	const bool cursorShown = _cursorVisible && (_pointerMode || _overlayVisible);
+	const bool full = _forceFullRefresh || _overlayVisible || cursorShown || _shakeOffsetX || _shakeOffsetY;
+
+	int top, bottom;
+	if (full) {
+		if (_overlayVisible) {
+			renderOverlay(frame);
+		} else {
+			memset(frame, 0x00, LCD_ROWS * LCD_ROWSIZE);
+			renderGameScreen(frame, 0, LCD_ROWS - 1);
+		}
+		if (cursorShown)
+			renderCursor(frame);
+		top = 0;
+		bottom = LCD_ROWS - 1;
+		_forceFullRefresh = false;
+	} else if (_dirtyBottom >= _dirtyTop) {
+		renderGameScreen(frame, _dirtyTop, _dirtyBottom);
+		top = _dirtyTop;
+		bottom = _dirtyBottom;
 	} else {
-		// Black border around the centered game screen
-		memset(frame, 0x00, LCD_ROWS * LCD_ROWSIZE);
-		renderGameScreen(frame);
+		// Nothing changed since the last frame; the previous frame is still on
+		// screen. Just yield without touching the framebuffer or the LCD.
+		_dirtyTop = LCD_ROWS;
+		_dirtyBottom = -1;
+		Playdate::coroutineYield();
+		return;
 	}
 
-	// The Playdate is a d-pad/crank device: games are driven by buttons,
-	// not a pointer, so the software cursor is hidden by default even when
-	// the engine asks for it (showMouse(true)). It is only drawn while the
-	// player has explicitly entered pointer mode (hold B), or over the GUI
-	// overlay where there is no other way to aim. This keeps a stray cursor
-	// off keyboard-driven games like the AGI titles.
-	if (_cursorVisible && (_pointerMode || _overlayVisible))
-		renderCursor(frame);
+	_pd->graphics->markUpdatedRows(top, bottom);
 
-	_pd->graphics->markUpdatedRows(0, LCD_ROWS - 1);
+	// Reset the dirty range for the next frame.
+	_dirtyTop = LCD_ROWS;
+	_dirtyBottom = -1;
 
 	// Yield to the Playdate OS, which composites the frame we just
 	// drew and services the hardware, then resumes us next frame.
@@ -308,6 +357,8 @@ void PlaydateGraphicsManager::updateScreen() {
 }
 
 void PlaydateGraphicsManager::setShakePos(int shakeXOffset, int shakeYOffset) {
+	if (shakeXOffset != _shakeOffsetX || shakeYOffset != _shakeOffsetY)
+		_forceFullRefresh = true; // the shake shifts the whole game->frame mapping
 	_shakeOffsetX = shakeXOffset;
 	_shakeOffsetY = shakeYOffset;
 }
@@ -315,11 +366,13 @@ void PlaydateGraphicsManager::setShakePos(int shakeXOffset, int shakeYOffset) {
 void PlaydateGraphicsManager::showOverlay(bool inGUI) {
 	_overlayVisible = true;
 	_overlayInGUI = inGUI;
+	_forceFullRefresh = true;
 }
 
 void PlaydateGraphicsManager::hideOverlay() {
 	_overlayVisible = false;
 	_overlayInGUI = false;
+	_forceFullRefresh = true;
 }
 
 Graphics::PixelFormat PlaydateGraphicsManager::getOverlayFormat() const {
@@ -350,15 +403,21 @@ void PlaydateGraphicsManager::copyRectToOverlay(const void *buf, int pitch, int 
 
 bool PlaydateGraphicsManager::showMouse(bool visible) {
 	const bool last = _cursorVisible;
+	if (visible != last)
+		_forceFullRefresh = true; // repaint to draw or erase the cursor
 	_cursorVisible = visible;
 	return last;
 }
 
 void PlaydateGraphicsManager::setPointerMode(bool on) {
+	if (on != _pointerMode)
+		_forceFullRefresh = true; // the cursor starts/stops being drawn
 	_pointerMode = on;
 }
 
 void PlaydateGraphicsManager::warpMouse(int x, int y) {
+	if ((x != _cursorX || y != _cursorY) && _cursorVisible && _pointerMode)
+		_forceFullRefresh = true; // move the cursor: repaint to erase the old one
 	_cursorX = x;
 	_cursorY = y;
 }
