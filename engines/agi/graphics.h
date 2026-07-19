@@ -130,6 +130,7 @@ private:
 	// black bar on each side.
 	uint16 _playdateGameWidth;
 	uint16 _playdateGameOffsetX;
+	bool _playdatePickerWasVisible; // picker shown last frame (to repaint on hide)
 
 	// Native-resolution background for Playdate: the picture re-rasterized at
 	// display resolution (crisp lines, no upscale row-doubling) instead of
@@ -152,6 +153,7 @@ private:
 	// aspect stretch is absorbed into the bottom half of the sprite, leaving the
 	// face/torso at 1:1 for a crisp, period-accurate, shimmer-free head. Feet
 	// stay anchored to the background ground row.
+	int16 _nsTopGameX;   // game column of the sprite's left edge (horizontal anchor)
 	int16 _nsTopGameY;   // game row of the sprite's top edge
 	int16 _nsHeight;     // sprite height in game rows
 	int16 _nsTopNative;  // native row of the sprite's top edge
@@ -237,6 +239,9 @@ public:
 	// Native row span [ny0, ny1) that a given sprite game row maps to under the
 	// current beginNativeSprite() map.
 	void nativeSpriteRowRange(int16 gameY, int &ny0, int &ny1) const;
+	// Native column span [nx0, nx1) for a sprite game column, anchored to the
+	// sprite's left edge so its width is stable frame-to-frame.
+	void nativeSpriteColRange(int16 gameX, int &nx0, int &nx1) const;
 	// Composite one visible cel pixel (game coords) into the native sprite layer.
 	void putNativeSpritePixel(int16 gameX, int16 gameY, byte color);
 	// Mark one game pixel as a black sprite outline in the native sprite layer.

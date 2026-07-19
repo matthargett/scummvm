@@ -53,6 +53,9 @@ public:
 	void hide();
 	bool isVisible() const;
 
+	/** Display column of the picker overlay's left edge. */
+	int menuLeft() const { return kMenuX; }
+
 	/**
 	 * True when the picker should receive input this cycle: either a
 	 * parser game with the prompt active, or any game currently inside a

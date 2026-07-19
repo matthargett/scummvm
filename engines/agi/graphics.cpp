@@ -46,7 +46,15 @@ namespace Agi {
 // resolution (crisp lines, no upscale doubling) and sprites are scaled with the
 // stretch absorbed into their bottom half (see beginNativeSprite), keeping the
 // face 1:1 and stable, so 1.2x is safe. 200 is a squat native 1.0x. Retune here.
-static const int kPlaydateDisplayRowsFor200 = 240; // 240 = 1.2x, 200 = 1.0x
+static const int kPlaydateDisplayRowsFor200 = 272; // 272 fills the height at correct aspect; 240 = 1.2x with a bottom bar
+
+// Vertical scale for the TEXT layer (status bar, dialog boxes, full-screen text
+// like Space Quest's name entry or LSL1's quiz). The picture uses 272 to fill
+// the display height at correct aspect, but AGI text is a 25-row x 8-line grid
+// that spans the whole 200-line screen: it must map to the 240 display rows
+// exactly (25 rows x 9.6px), or the bottom rows would run past the display and
+// write out of bounds. Kept separate from the picture scale for that reason.
+static const int kPlaydateFontRowsFor200 = 240;
 
 GfxMgr::GfxMgr(AgiBase *vm, GfxFont *font) : _vm(vm), _font(font) {
 	memset(&_paletteGfxMode, 0, sizeof(_paletteGfxMode));
@@ -68,6 +76,7 @@ GfxMgr::GfxMgr(AgiBase *vm, GfxFont *font) : _vm(vm), _font(font) {
 	_displayScreenHeight = DISPLAY_DEFAULT_HEIGHT;
 	_playdateGameWidth = 320;
 	_playdateGameOffsetX = 0;
+	_playdatePickerWasVisible = false;
 	_playdatePicture = nullptr;
 	_playdatePicW = 0;
 	_playdatePicH = 0;
@@ -181,13 +190,17 @@ void GfxMgr::initVideo() {
 		_upscaledHires = DISPLAY_UPSCALED_DISABLED;
 		_displayScreenWidth = 400;
 		_displayScreenHeight = 240;
-		// The game is always 320 wide (correct AGI aspect). It starts
-		// centered (offset 40); once updateScreen() sees the parser is in
-		// use it moves to the left (offset 0) to make room for the picker.
-		_playdateGameWidth = 320;
+		// The game is scaled up uniformly to fill the display height at correct
+		// AGI aspect: 168 rows -> ~229 display rows (below an ~11px status bar),
+		// which fixes the width at ~364 (2.275x the 160-wide game). It sits
+		// centered with a thin black bar each side, and the word picker is drawn
+		// as an overlay on its right edge only while shown (it auto-hides), so
+		// the picture uses the whole screen the rest of the time. kRenderPlaydate
+		// uses kPlaydateDisplayRowsFor200 = 272 for this fill.
+		_playdateGameWidth = 364;
 		_playdateGameOffsetX = (_displayScreenWidth - _playdateGameWidth) / 2;
-		_displayFontWidth = 8;  // FONT_VISUAL_WIDTH(4) * 320 / 160
-		_displayFontHeight = (FONT_VISUAL_HEIGHT * kPlaydateDisplayRowsFor200 + 100) / 200; // 1.2x->10, 1.0x->8
+		_displayFontWidth = 8;  // glyph cell; text is positioned via _playdateGameWidth
+		_displayFontHeight = (FONT_VISUAL_HEIGHT * kPlaydateFontRowsFor200 + 100) / 200; // text grid: 25 rows fill 240
 		_displayWidthMulAdjust = 0;
 		_displayHeightMulAdjust = 0;
 		// The Playdate is 1-bit: the game screen (dither patterns) and the word
@@ -466,8 +479,8 @@ void GfxMgr::translateFontPosToDisplayScreen(int16 &x, int16 &y) const {
 	if (_vm->_renderMode == Common::kRenderPlaydate) {
 		// Playdate: scale font positions using the same ratios as visual coords
 		// This keeps text aligned with dialog boxes which use visual coordinates
-		x = _playdateGameOffsetX + (x * FONT_VISUAL_WIDTH * _playdateGameWidth) / 160; // col * 4 * 2 = col * 8
-		y = (y * FONT_VISUAL_HEIGHT * kPlaydateDisplayRowsFor200) / 200;  // row * 8 * 1.2 = row * 9.6
+		x = _playdateGameOffsetX + (x * FONT_VISUAL_WIDTH * _playdateGameWidth) / 160; // col * 4 * (gameW/160)
+		y = (y * FONT_VISUAL_HEIGHT * kPlaydateFontRowsFor200) / 200;  // row * 8 * 1.2 = row * 9.6
 	} else {
 		x *= _displayFontWidth;
 		y *= _displayFontHeight;
@@ -485,7 +498,7 @@ void GfxMgr::translateFontDimensionToDisplayScreen(int16 &width, int16 &height) 
 	if (_vm->_renderMode == Common::kRenderPlaydate) {
 		// Playdate: use ceiling division for dimensions to ensure full coverage
 		width = (width * FONT_VISUAL_WIDTH * _playdateGameWidth + 159) / 160;
-		height = (height * FONT_VISUAL_HEIGHT * kPlaydateDisplayRowsFor200 + 199) / 200;
+		height = (height * FONT_VISUAL_HEIGHT * kPlaydateFontRowsFor200 + 199) / 200;
 	} else {
 		width *= _displayFontWidth;
 		height *= _displayFontHeight;
@@ -1475,42 +1488,34 @@ void GfxMgr::updateScreen() {
 		// little at a time, so a long command cannot overflow it.
 		_vm->_playdateMenu->feedPendingInput();
 
-		// The game is always 320 wide (correct aspect). When the picker is
-		// in use it sits at the left (offset 0) with the word list filling
-		// the right 80 pixels; otherwise it is centered (offset 40) and
-		// letterboxed. When the layout flips, re-render at the new offset.
+		// The game fills the display height at correct aspect and is centered
+		// (offset ~18) with a thin black bar on each side. It stays put; the word
+		// picker is drawn as an overlay over its right edge only while shown, so
+		// the picture occupies the whole area the rest of the time. When the picker
+		// hides, the game underneath (and the right bar) must be repainted to wipe
+		// the stale overlay.
 		const bool pickerVisible = _vm->_playdateMenu->isVisible();
-		const uint16 wantOffset = pickerVisible ? 0 : ((_displayScreenWidth - _playdateGameWidth) / 2);
-		// Relayout only in graphics mode. redrawScreen() forces gfxMode on and
-		// repaints the picture, so doing it while a text screen is up - e.g. the
-		// Space Quest "Welcome Aboard Arcada / First Name:" name-entry prompt,
-		// which is drawn through the text system, not a picture - would erase the
-		// text and leave the stale picture (the game logo) on screen. The picker
-		// turns into an on-screen keyboard for that prompt, so it wants to be
-		// visible, but the game area must stay put until we are back in graphics.
-		// The keyboard column is drawn on the right regardless (below); a text
-		// prompt's content sits well left of it, so there is no overlap.
-		if (wantOffset != _playdateGameOffsetX && _vm->_game.gfxMode) {
-			_playdateGameOffsetX = wantOffset;
-			// Clear the whole display so no stale pixels remain in the
-			// letterbox bars or the old game area, push the cleared frame,
-			// then re-render the game on top at the new offset.
-			// _playdateMenu is only created by AgiEngine (parser games).
+
+		if (pickerVisible) {
+			_vm->_playdateMenu->draw();
+			// The picker draws into _displayScreen directly; push its overlay
+			// column (from its left edge to the display's right edge).
+			const int16 menuX = _vm->_playdateMenu->menuLeft();
+			const int16 menuWidth = _displayScreenWidth - menuX;
+			_vm->_system->copyRectToScreen(_displayScreen + menuX, _displayScreenWidth,
+			                               menuX, 0, menuWidth, _displayScreenHeight);
+		} else if (_playdatePickerWasVisible && _vm->_game.gfxMode) {
+			// Picker just closed while a picture is up: clear the whole display
+			// (wiping the overlay and both letterbox bars) and repaint the game.
+			// Guarded on gfxMode so a text screen - e.g. Space Quest's "First
+			// Name:" prompt, where the picker doubles as an on-screen keyboard -
+			// is not erased and replaced by the stale picture.
 			drawDisplayRectPlaydate(0, 0, _displayScreenWidth, _displayScreenHeight, 0);
 			_vm->_system->copyRectToScreen(_displayScreen, _displayScreenWidth, 0, 0,
 			                               _displayScreenWidth, _displayScreenHeight);
 			((AgiEngine *)_vm)->redrawScreen();
 		}
-
-		if (pickerVisible) {
-			_vm->_playdateMenu->draw();
-			// The picker draws into _displayScreen directly; push its
-			// column (everything right of the game area) to the backend.
-			const int16 menuX = _playdateGameWidth;
-			const int16 menuWidth = _displayScreenWidth - _playdateGameWidth;
-			_vm->_system->copyRectToScreen(_displayScreen + menuX, _displayScreenWidth,
-			                               menuX, 0, menuWidth, _displayScreenHeight);
-		}
+		_playdatePickerWasVisible = pickerVisible;
 	}
 #endif
 	_vm->_system->updateScreen();
@@ -1844,7 +1849,9 @@ static const uint8 playdatePatterns[] = {
 
 // Re-rasterize the current picture at native resolution into _playdatePicture.
 void GfxMgr::decodePlaydateNative(int16 resourceNr) {
-	const int16 nw = 320; // 2x the 160-px AGI game width
+	// Match the display game width so the re-rasterized picture fills the whole
+	// game area 1:1 (crisp lines at the target resolution, no upscale doubling).
+	const int16 nw = _playdateGameWidth;
 	// The native background must use the SAME vertical scale as the rest of the
 	// layout (kPlaydateDisplayRowsFor200), otherwise sprites - placed by the
 	// upscale path at that scale - float off the ground drawn here. At 1.0x this
@@ -1916,6 +1923,7 @@ void GfxMgr::beginNativeSprite(int16 topGameX, int16 topGameY, int16 height) {
 		return;
 	_nativeSpriteOriginNX = (topGameX * _playdatePicW) / SCRIPT_WIDTH;
 
+	_nsTopGameX = topGameX;
 	_nsTopGameY = topGameY;
 	_nsHeight = height;
 	_nsTopNative = (topGameY * _playdatePicH) / SCRIPT_HEIGHT;
@@ -1962,11 +1970,25 @@ void GfxMgr::nativeSpriteRowRange(int16 gameY, int &ny0, int &ny1) const {
 	ny1 = ny0 + 1 + (through - before);
 }
 
+// Native column span [nx0, nx1) for one sprite game column. Measured relative to
+// the sprite's own left edge (_nsTopGameX -> _nativeSpriteOriginNX) rather than
+// the absolute screen column, so the horizontal scale (a non-integer
+// _playdateGameWidth/160 at the full-height fill) always rounds the SAME way for
+// a given interior column. The silhouette therefore keeps a constant width and
+// only translates as the sprite walks, instead of breathing by a pixel per step.
+void GfxMgr::nativeSpriteColRange(int16 gameX, int &nx0, int &nx1) const {
+	const int lx = gameX - _nsTopGameX;
+	nx0 = _nativeSpriteOriginNX + (lx * _playdatePicW) / SCRIPT_WIDTH;
+	nx1 = _nativeSpriteOriginNX + ((lx + 1) * _playdatePicW) / SCRIPT_WIDTH;
+	if (nx1 <= nx0)
+		nx1 = nx0 + 1;
+}
+
 void GfxMgr::putNativeSpritePixel(int16 gameX, int16 gameY, byte color) {
 	if (!_playdateSprite)
 		return;
-	const int nx0 = (gameX * _playdatePicW) / SCRIPT_WIDTH;
-	const int nx1 = ((gameX + 1) * _playdatePicW) / SCRIPT_WIDTH;
+	int nx0, nx1;
+	nativeSpriteColRange(gameX, nx0, nx1);
 	int ny0, ny1;
 	nativeSpriteRowRange(gameY, ny0, ny1);
 	const byte colorIdx = color & 0x0F;
@@ -1992,8 +2014,8 @@ void GfxMgr::putNativeSpritePixel(int16 gameX, int16 gameY, byte color) {
 void GfxMgr::putNativeOutlinePixel(int16 gameX, int16 gameY) {
 	if (!_playdateSprite)
 		return;
-	const int nx0 = (gameX * _playdatePicW) / SCRIPT_WIDTH;
-	const int nx1 = ((gameX + 1) * _playdatePicW) / SCRIPT_WIDTH;
+	int nx0, nx1;
+	nativeSpriteColRange(gameX, nx0, nx1);
 	int ny0, ny1;
 	nativeSpriteRowRange(gameY, ny0, ny1);
 	for (int ny = ny0; ny < ny1; ny++) {
