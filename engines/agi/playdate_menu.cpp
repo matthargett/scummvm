@@ -27,6 +27,23 @@
 
 namespace Agi {
 
+// Sierra's global system/menu verbs. These are offered through the Playdate
+// system menu (or simply not needed on a save-anywhere handheld), so they are
+// kept out of the word picker - otherwise a game that runs them in logic 0
+// every cycle (Space Quest) buries its real room verbs under them.
+static bool isSystemVerb(const Common::String &word) {
+	static const char *const kSystemVerbs[] = {
+		"save", "restore", "restart", "quit", "pause", "help", "aid",
+		"fast", "fastest", "slow", "normal", "speed", "clock", "sound",
+		"music", "version", "about", "credits", "delay"
+	};
+	for (uint i = 0; i < ARRAYSIZE(kSystemVerbs); ++i) {
+		if (word.equalsIgnoreCase(kSystemVerbs[i]))
+			return true;
+	}
+	return false;
+}
+
 PlaydateMenu::PlaydateMenu(AgiEngine *vm) :
 	_vm(vm), _visible(true), _parserGame(false), _hasRoomLogicPhrase(false),
 	_mode(kModeVerb), _verbId(0),
@@ -112,6 +129,13 @@ void PlaydateMenu::addSaidPhrase(const uint16 *ids, uint count, bool fromLogic0)
 		phrase.push_back(ids[i]);
 	}
 	if (phrase.empty())
+		return;
+
+	// Drop the global system/menu commands (save, restore, speed controls, ...).
+	// The player reaches those through the Playdate system menu, not the word
+	// picker; in games that keep everything in logic 0 (Space Quest) they run
+	// every cycle and would otherwise swamp the actual room verbs.
+	if (isSystemVerb(_vm->_words->firstWordForId(phrase[0])))
 		return;
 
 	// A said() from a room logic proves this game scopes commands per room, so
