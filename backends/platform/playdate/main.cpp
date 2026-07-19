@@ -45,20 +45,25 @@ static PlaydateAPI *s_pd;
 static void *(*s_pdrealloc)(void *ptr, size_t size);
 
 #if TARGET_PLAYDATE
+// These are called from outside the program (newlib's startup and allocator),
+// which the link-time optimiser cannot see, so mark them "used" or LTO's
+// dead-code pass would strip them and break the link.
+#define PD_KEEP __attribute__((used))
+
 // Building with -nostartfiles leaves out crti.o/crtn.o, but newlib's
 // __libc_init_array() still references these.
-extern "C" void _init(void) {}
-extern "C" void _fini(void) {}
+PD_KEEP extern "C" void _init(void) {}
+PD_KEEP extern "C" void _fini(void) {}
 
-extern "C" void *_malloc_r(struct _reent *, size_t size) {
+PD_KEEP extern "C" void *_malloc_r(struct _reent *, size_t size) {
 	return s_pdrealloc(nullptr, size);
 }
 
-extern "C" void *_realloc_r(struct _reent *, void *ptr, size_t size) {
+PD_KEEP extern "C" void *_realloc_r(struct _reent *, void *ptr, size_t size) {
 	return s_pdrealloc(ptr, size);
 }
 
-extern "C" void _free_r(struct _reent *, void *ptr) {
+PD_KEEP extern "C" void _free_r(struct _reent *, void *ptr) {
 	if (ptr)
 		s_pdrealloc(ptr, 0);
 }

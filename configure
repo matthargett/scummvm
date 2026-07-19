@@ -4209,6 +4209,13 @@ if test -n "$_host"; then
 			append_var DEFINES "-DREDUCE_MEMORY_USAGE"
 			append_var CXXFLAGS "-mthumb"
 			append_var CXXFLAGS "-mcpu=cortex-m7"
+			# Schedule for the Playdate's exact core (Cortex-M7); -mcpu only
+			# sets the ISA. Whole-program optimisation (LTO) lets the hot
+			# rendering/mixing paths inline across translation units, and
+			# -ffast-math drops the errno/NaN bookkeeping the audio mixer's
+			# float math does not need - all worthwhile on a 168MHz core with
+			# no cycles to spare.
+			append_var CXXFLAGS "-mtune=cortex-m7"
 			append_var CXXFLAGS "-mfloat-abi=hard"
 			append_var CXXFLAGS "-mfpu=fpv5-sp-d16"
 			append_var CXXFLAGS "-D__FPU_USED=1"
@@ -4219,15 +4226,29 @@ if test -n "$_host"; then
 			append_var CXXFLAGS "-mword-relocations"
 			append_var CXXFLAGS "-fno-common"
 			append_var CXXFLAGS "-fno-exceptions"
+			append_var CXXFLAGS "-flto"
+			append_var CXXFLAGS "-ffast-math"
+			append_var CXXFLAGS "-fno-math-errno"
 			append_var CXXFLAGS "-I$PLAYDATE_SDK_PATH/C_API"
 			append_var LDFLAGS "-nostartfiles"
 			append_var LDFLAGS "-mthumb"
 			append_var LDFLAGS "-mcpu=cortex-m7"
+			append_var LDFLAGS "-mtune=cortex-m7"
 			append_var LDFLAGS "-mfloat-abi=hard"
 			append_var LDFLAGS "-mfpu=fpv5-sp-d16"
+			append_var LDFLAGS "-flto"
+			append_var LDFLAGS "-ffast-math"
 			append_var LDFLAGS "-T$PLAYDATE_SDK_PATH/C_API/buildsupport/link_map.ld"
 			append_var LDFLAGS "-Wl,--gc-sections,--no-warn-mismatch,--emit-relocs"
 			append_var LDFLAGS "-Wl,--entry,eventHandlerShim"
+			# LTO must not drop symbols the firmware/newlib call from outside the
+			# program (the entry shim, newlib's init/fini array and the allocator
+			# reentrant hooks); those references live in objects the LTO pass
+			# cannot see, so force-keep the symbols or the post-LTO garbage
+			# collection removes them and the link fails (undefined _fini, ...).
+			append_var LDFLAGS "-Wl,--undefined,eventHandlerShim,--undefined,eventHandler"
+			append_var LDFLAGS "-Wl,--undefined,_init,--undefined,_fini"
+			append_var LDFLAGS "-Wl,--undefined,_malloc_r,--undefined,_realloc_r,--undefined,_free_r"
 			# The SDK linker script has no .ARM.exidx output section;
 			# satisfy libgcc's unwinder with an empty table.
 			append_var LDFLAGS "-Wl,--defsym,__exidx_start=0,--defsym,__exidx_end=0"
