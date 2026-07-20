@@ -85,9 +85,12 @@ GfxMgr::GfxMgr(AgiBase *vm, GfxFont *font) : _vm(vm), _font(font) {
 	_playdateSprite = nullptr;
 	_nativeSpriteOriginNX = 0;
 	_nativeSpriteOriginNY = 0;
+	_nsTopGameX = 0;
 	_nsTopGameY = 0;
 	_nsHeight = 0;
 	_nsTopNative = 0;
+	_nsColCount = 0;
+	_nsRowCount = 0;
 	_nsStretchRows = 0;
 	_nsExtraNative = 0;
 	_displayFontWidth = 8;
@@ -1941,7 +1944,7 @@ void GfxMgr::renderNativePicture() {
 
 // --- Playdate native sprite layer ---
 
-void GfxMgr::beginNativeSprite(int16 topGameX, int16 topGameY, int16 height) {
+void GfxMgr::beginNativeSprite(int16 topGameX, int16 topGameY, int16 height, int16 width) {
 	if (!_playdatePicture)
 		return;
 	_nativeSpriteOriginNX = (topGameX * _playdatePicW) / SCRIPT_WIDTH;
@@ -1962,24 +1965,44 @@ void GfxMgr::beginNativeSprite(int16 topGameX, int16 topGameY, int16 height) {
 		// No stretch (1.0x): every game row maps to exactly one native row.
 		_nsStretchRows = 0;
 		_nsExtraNative = 0;
-		return;
+	} else {
+		// Absorb the stretch into the bottom two-thirds, so only the top third (the
+		// face) stays strictly 1:1 and the extra rows spread across the whole lower
+		// body instead of piling into the legs - the gentler the fill, the more this
+		// matters. Always keep at least `extra` stretch rows so no single row has to
+		// more than double.
+		_nsStretchRows = MAX<int16>(1, (height * 2) / 3);
+		if (extra > _nsStretchRows)
+			_nsStretchRows = MIN<int16>(height, extra);
+		_nsExtraNative = extra;
 	}
-	// Absorb the stretch into the bottom two-thirds, so only the top third (the
-	// face) stays strictly 1:1 and the extra rows spread across the whole lower
-	// body instead of piling into the legs - the gentler the fill, the more this
-	// matters. Always keep at least `extra` stretch rows so no single row has to
-	// more than double.
-	_nsStretchRows = MAX<int16>(1, (height * 2) / 3);
-	if (extra > _nsStretchRows)
-		_nsStretchRows = MIN<int16>(height, extra);
-	_nsExtraNative = extra;
+
+	// Fill the per-sprite span tables so the per-pixel compositing avoids the
+	// divides in nativeSprite{Col,Row}Range. The stretch parameters above must be
+	// final first (the row table depends on them).
+	_nsColCount = CLIP<int16>(width, 0, SCRIPT_WIDTH);
+	for (int16 lx = 0; lx <= _nsColCount; lx++) {
+		int nx0 = _nativeSpriteOriginNX + (lx * _playdatePicW) / SCRIPT_WIDTH;
+		int nx1 = _nativeSpriteOriginNX + ((lx + 1) * _playdatePicW) / SCRIPT_WIDTH;
+		if (nx1 <= nx0)
+			nx1 = nx0 + 1;
+		_nsColNx0[lx] = nx0;
+		_nsColNx1[lx] = nx1;
+	}
+	_nsRowCount = CLIP<int16>(height, 0, SCRIPT_HEIGHT);
+	for (int16 idx = 0; idx <= _nsRowCount; idx++) {
+		int ny0, ny1;
+		computeNativeSpriteRowRange(idx, ny0, ny1);
+		_nsRowNy0[idx] = ny0;
+		_nsRowNy1[idx] = ny1;
+	}
 }
 
-// Native row span [ny0, ny1) for one sprite game row, applying the bottom-half
-// stretch map. Top (height - stretchRows) rows are 1:1; the extra native rows
-// are spread evenly across the bottom stretchRows rows.
-void GfxMgr::nativeSpriteRowRange(int16 gameY, int &ny0, int &ny1) const {
-	const int idx = gameY - _nsTopGameY; // 0 = top row
+// Native row span for a local sprite row index, applying the bottom-half stretch
+// map. Top (height - stretchRows) rows are 1:1; the extra native rows are spread
+// evenly across the bottom stretchRows rows. beginNativeSprite pre-evaluates this
+// into _nsRowNy0/_nsRowNy1 so the hot path is a table read.
+void GfxMgr::computeNativeSpriteRowRange(int idx, int &ny0, int &ny1) const {
 	const int plain = _nsHeight - _nsStretchRows; // 1:1 rows at the top
 	if (idx < plain || _nsStretchRows == 0) {
 		ny0 = _nsTopNative + idx;
@@ -1993,14 +2016,30 @@ void GfxMgr::nativeSpriteRowRange(int16 gameY, int &ny0, int &ny1) const {
 	ny1 = ny0 + 1 + (through - before);
 }
 
+void GfxMgr::nativeSpriteRowRange(int16 gameY, int &ny0, int &ny1) const {
+	const int idx = gameY - _nsTopGameY; // 0 = top row
+	if (idx >= 0 && idx <= _nsRowCount) {
+		ny0 = _nsRowNy0[idx];
+		ny1 = _nsRowNy1[idx];
+		return;
+	}
+	computeNativeSpriteRowRange(idx, ny0, ny1);
+}
+
 // Native column span [nx0, nx1) for one sprite game column. Measured relative to
 // the sprite's own left edge (_nsTopGameX -> _nativeSpriteOriginNX) rather than
 // the absolute screen column, so the horizontal scale (a non-integer
 // _playdateGameWidth/160 at the full-height fill) always rounds the SAME way for
 // a given interior column. The silhouette therefore keeps a constant width and
 // only translates as the sprite walks, instead of breathing by a pixel per step.
+// beginNativeSprite pre-evaluates this into _nsColNx0/_nsColNx1.
 void GfxMgr::nativeSpriteColRange(int16 gameX, int &nx0, int &nx1) const {
 	const int lx = gameX - _nsTopGameX;
+	if (lx >= 0 && lx <= _nsColCount) {
+		nx0 = _nsColNx0[lx];
+		nx1 = _nsColNx1[lx];
+		return;
+	}
 	nx0 = _nativeSpriteOriginNX + (lx * _playdatePicW) / SCRIPT_WIDTH;
 	nx1 = _nativeSpriteOriginNX + ((lx + 1) * _playdatePicW) / SCRIPT_WIDTH;
 	if (nx1 <= nx0)

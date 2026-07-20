@@ -160,6 +160,15 @@ private:
 	int16 _nsStretchRows;   // number of bottom game rows that absorb the stretch
 	int16 _nsExtraNative;   // extra native rows distributed across those bottom rows
 
+	// Per-sprite native span lookup, filled once by beginNativeSprite so the
+	// hot per-cel-pixel compositing does an array read instead of the integer
+	// divides in nativeSprite{Col,Row}Range. Indexed by local column/row offset
+	// (gameX - _nsTopGameX, gameY - _nsTopGameY); coordinates outside the filled
+	// [0, count] range fall back to computing directly.
+	int16 _nsColNx0[SCRIPT_WIDTH + 2], _nsColNx1[SCRIPT_WIDTH + 2];
+	int16 _nsRowNy0[SCRIPT_HEIGHT + 2], _nsRowNy1[SCRIPT_HEIGHT + 2];
+	int16 _nsColCount, _nsRowCount; // number of valid entries in each table
+
 	uint16 _displayFontWidth;
 	uint16 _displayFontHeight;
 
@@ -235,9 +244,10 @@ public:
 	// Set up the vertical scaling map and dither anchor for a cel occupying the
 	// given game-space rectangle, so its interior is crisp and stable as it
 	// moves. Call once before the cel's putNativeSpritePixel/OutlinePixel calls.
-	void beginNativeSprite(int16 topGameX, int16 topGameY, int16 height);
+	void beginNativeSprite(int16 topGameX, int16 topGameY, int16 height, int16 width);
 	// Native row span [ny0, ny1) that a given sprite game row maps to under the
 	// current beginNativeSprite() map.
+	void computeNativeSpriteRowRange(int idx, int &ny0, int &ny1) const;
 	// Vertical scale (display rows per 200 game-lines) for the text layer:
 	// the picture's fill scale in graphics mode, the shorter fit scale in text
 	// mode (see the definition).
