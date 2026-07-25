@@ -124,10 +124,9 @@ private:
 	// kRenderPlaydate layout. The game is always rendered 320 pixels wide
 	// so its pixel aspect matches the original (AGI's 160 doubled to 320,
 	// 200 lines scaled to 240 = 1.2x) rather than being stretched across
-	// the full 400-pixel display. Parser (AGI) games sit at the left with
-	// offset 0 and leave the right 80 pixels for the word picker; games
-	// with no word list are centered (offset 40) and letterboxed with a
-	// black bar on each side.
+	// the full 400-pixel display. The game is centered (offset 40) with a
+	// black bar on each side; the word picker draws as a temporary overlay
+	// over the right edge while visible (see GfxMgr::updateScreen).
 	uint16 _playdateGameWidth;
 	uint16 _playdateGameOffsetX;
 	bool _playdatePickerWasVisible; // picker shown last frame (to repaint on hide)

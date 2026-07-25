@@ -46,14 +46,21 @@ namespace Agi {
 // resolution (crisp lines, no upscale doubling) and sprites are scaled with the
 // stretch absorbed into their bottom half (see beginNativeSprite), keeping the
 // face 1:1 and stable, so 1.2x is safe. 200 is a squat native 1.0x. Retune here.
-static const int kPlaydateDisplayRowsFor200 = 272; // 272 fills the height at correct aspect; 240 = 1.2x with a bottom bar
+// 240 = 1.2x: with the integer 2x horizontal this is the CRT-correct aspect,
+// and every game pixel maps to a whole number of display pixels (2 wide, 1-2
+// tall). A larger value (e.g. 272) would fill the display height completely,
+// but the horizontal scale it forces (~2.275x) makes single-pixel art - stars,
+// glyph strokes, thin vector lines - alternate between 2px and 3px wide, which
+// wrecks legibility against the original Hercules/1-bit intent. The unused rows
+// below the picture are the price of even pixels; do not trade them back.
+static const int kPlaydateDisplayRowsFor200 = 240;
 
-// Vertical scale for the TEXT layer (status bar, dialog boxes, full-screen text
-// like Space Quest's name entry or LSL1's quiz). The picture uses 272 to fill
-// the display height at correct aspect, but AGI text is a 25-row x 8-line grid
-// that spans the whole 200-line screen: it must map to the 240 display rows
-// exactly (25 rows x 9.6px), or the bottom rows would run past the display and
-// write out of bounds. Kept separate from the picture scale for that reason.
+// Vertical scale for the TEXT layer. AGI text is a 25-row x 8-line grid that
+// spans the whole 200-line screen, so it must map to the 240 display rows
+// exactly or the bottom rows would run past the display and write out of
+// bounds. At the current picture scale the two coincide; keep the constant (and
+// the mode-keyed helper below) so any future retune of the picture scale cannot
+// silently reintroduce the text-layer overflow.
 static const int kPlaydateFontRowsFor200 = 240;
 
 GfxMgr::GfxMgr(AgiBase *vm, GfxFont *font) : _vm(vm), _font(font) {
@@ -193,14 +200,13 @@ void GfxMgr::initVideo() {
 		_upscaledHires = DISPLAY_UPSCALED_DISABLED;
 		_displayScreenWidth = 400;
 		_displayScreenHeight = 240;
-		// The game is scaled up uniformly to fill the display height at correct
-		// AGI aspect: 168 rows -> ~229 display rows (below an ~11px status bar),
-		// which fixes the width at ~364 (2.275x the 160-wide game). It sits
-		// centered with a thin black bar each side, and the word picker is drawn
-		// as an overlay on its right edge only while shown (it auto-hides), so
-		// the picture uses the whole screen the rest of the time. kRenderPlaydate
-		// uses kPlaydateDisplayRowsFor200 = 272 for this fill.
-		_playdateGameWidth = 364;
+		// The game is 320 wide - exactly 2x the 160-px AGI width, so every game
+		// pixel is a uniform 2 display pixels and pixel art stays even and
+		// legible - at the CRT-correct 1.2x vertical (kPlaydateDisplayRowsFor200).
+		// It sits centered with a 40px black bar each side; the word picker is
+		// drawn as an overlay on its right edge only while shown (it auto-hides),
+		// so the picture is unobscured the rest of the time.
+		_playdateGameWidth = 320;
 		_playdateGameOffsetX = (_displayScreenWidth - _playdateGameWidth) / 2;
 		_displayFontWidth = 8;  // glyph cell; text is positioned via _playdateGameWidth
 		_displayFontHeight = (FONT_VISUAL_HEIGHT * kPlaydateFontRowsFor200 + 100) / 200; // text grid: 25 rows fill 240
@@ -481,11 +487,12 @@ void GfxMgr::copyDisplayToScreen() {
 // Vertical scale (display rows per 200 game-lines) for the text layer. In
 // graphics mode text overlays the picture: message boxes (drawBox), the text
 // inside them, and their restore (render_Block) must all share the picture's
-// 272 fill scale, or a box lands offset from its text and the restore misses
-// the text pixels. In text mode (gfxMode == false) the whole screen is a boxless
-// 25-row text grid - name entry, the LSL quiz, menus - which only fits the 240
-// display rows at the 240 scale. AGI never draws a message box in text mode, so
-// this seam is clean.
+// scale, or a box lands offset from its text and the restore misses the text
+// pixels. In text mode (gfxMode == false) the whole screen is a boxless 25-row
+// text grid - name entry, the LSL quiz, menus - which only fits the 240 display
+// rows at the 240 scale. The two currently coincide, but keep the seam: AGI
+// never draws a message box in text mode, so it stays clean if the picture
+// scale is ever retuned.
 int GfxMgr::playdateTextRowsFor200() const {
 	return _vm->_game.gfxMode ? kPlaydateDisplayRowsFor200 : kPlaydateFontRowsFor200;
 }
@@ -635,9 +642,9 @@ void GfxMgr::putFontPixelOnDisplay(int16 baseX, int16 baseY, int16 addX, int16 a
 	uint32 offset = 0;
 
 	// Guard against writing outside the display buffer. AGI text is a 25-row grid
-	// sized for a 200-line screen; on Playdate a graphics-mode box near the bottom
-	// (272 scale) or a stray coordinate can land a glyph row past the 240-row
-	// display. Clip here rather than trust every caller's arithmetic.
+	// sized for a 200-line screen; on Playdate a stray coordinate (or any future
+	// retune of the picture scale) can land a glyph row past the 240-row display.
+	// Clip here rather than trust every caller's arithmetic.
 	{
 		const int px = baseX + addX;
 		const int py = baseY + addY;
@@ -1514,12 +1521,11 @@ void GfxMgr::updateScreen() {
 		// little at a time, so a long command cannot overflow it.
 		_vm->_playdateMenu->feedPendingInput();
 
-		// The game fills the display height at correct aspect and is centered
-		// (offset ~18) with a thin black bar on each side. It stays put; the word
-		// picker is drawn as an overlay over its right edge only while shown, so
-		// the picture occupies the whole area the rest of the time. When the picker
-		// hides, the game underneath (and the right bar) must be repainted to wipe
-		// the stale overlay.
+		// The game is centered (offset 40) with a black bar on each side. It
+		// stays put; the word picker is drawn as an overlay over its right edge
+		// only while shown, so the picture is unobscured the rest of the time.
+		// When the picker hides, the game underneath (and the right bar) must be
+		// repainted to wipe the stale overlay.
 		const bool pickerVisible = _vm->_playdateMenu->isVisible();
 
 		if (pickerVisible) {
