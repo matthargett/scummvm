@@ -41,11 +41,7 @@ namespace Agi {
 #include "agi/font.h"
 
 // Playdate vertical mapping: how many of the 400x240 display's rows the 200 AGI
-// visual rows occupy. 240 is the aspect-correct 1.2x. Row duplication used to
-// mangle sprites here, but the background is now rasterized directly at this
-// resolution (crisp lines, no upscale doubling) and sprites are scaled with the
-// stretch absorbed into their bottom half (see beginNativeSprite), keeping the
-// face 1:1 and stable, so 1.2x is safe. 200 is a squat native 1.0x. Retune here.
+// visual rows occupy.
 // 240 = 1.2x: with the integer 2x horizontal this is the CRT-correct aspect,
 // and every game pixel maps to a whole number of display pixels (2 wide, 1-2
 // tall). A larger value (e.g. 272) would fill the display height completely,
@@ -98,8 +94,6 @@ GfxMgr::GfxMgr(AgiBase *vm, GfxFont *font) : _vm(vm), _font(font) {
 	_nsTopNative = 0;
 	_nsColCount = 0;
 	_nsRowCount = 0;
-	_nsStretchRows = 0;
-	_nsExtraNative = 0;
 	_displayFontWidth = 8;
 	_displayFontHeight = 8;
 
@@ -1961,31 +1955,8 @@ void GfxMgr::beginNativeSprite(int16 topGameX, int16 topGameY, int16 height, int
 	_nsTopNative = (topGameY * _playdatePicH) / SCRIPT_HEIGHT;
 	_nativeSpriteOriginNY = _nsTopNative; // dither phase anchor (top edge)
 
-	// How many native rows the sprite should occupy to match the background's
-	// vertical scale, and how many are "extra" beyond a 1:1 mapping.
-	const int bottomNative = ((topGameY + height) * _playdatePicH) / SCRIPT_HEIGHT;
-	const int totalNative = bottomNative - _nsTopNative;
-	int extra = totalNative - height; // 0 at 1.0x, ~0.2*height at 1.2x
-
-	if (extra <= 0 || height <= 1) {
-		// No stretch (1.0x): every game row maps to exactly one native row.
-		_nsStretchRows = 0;
-		_nsExtraNative = 0;
-	} else {
-		// Absorb the stretch into the bottom two-thirds, so only the top third (the
-		// face) stays strictly 1:1 and the extra rows spread across the whole lower
-		// body instead of piling into the legs - the gentler the fill, the more this
-		// matters. Always keep at least `extra` stretch rows so no single row has to
-		// more than double.
-		_nsStretchRows = MAX<int16>(1, (height * 2) / 3);
-		if (extra > _nsStretchRows)
-			_nsStretchRows = MIN<int16>(height, extra);
-		_nsExtraNative = extra;
-	}
-
 	// Fill the per-sprite span tables so the per-pixel compositing avoids the
-	// divides in nativeSprite{Col,Row}Range. The stretch parameters above must be
-	// final first (the row table depends on them).
+	// divides in nativeSprite{Col,Row}Range.
 	_nsColCount = CLIP<int16>(width, 0, SCRIPT_WIDTH);
 	for (int16 lx = 0; lx <= _nsColCount; lx++) {
 		int nx0 = _nativeSpriteOriginNX + (lx * _playdatePicW) / SCRIPT_WIDTH;
@@ -2004,22 +1975,25 @@ void GfxMgr::beginNativeSprite(int16 topGameX, int16 topGameY, int16 height, int
 	}
 }
 
-// Native row span for a local sprite row index, applying the bottom-half stretch
-// map. Top (height - stretchRows) rows are 1:1; the extra native rows are spread
-// evenly across the bottom stretchRows rows. beginNativeSprite pre-evaluates this
-// into _nsRowNy0/_nsRowNy1 so the hot path is a table read.
+// Native row span for a local sprite row index. This is the SAME absolute map
+// the background uses (game row y occupies native rows [y*picH/H, (y+1)*picH/H)),
+// deliberately: Sierra games routinely animate pieces of the background with
+// view sprites (dock doors, lifts, machinery), and any sprite-private row
+// redistribution leaves such a sprite visibly misaligned against the art it is
+// replacing, and puts a sprite's rows out of register with the background rows
+// at priority boundaries (e.g. ego rising through a floor into a new room reads
+// as a priority bug). An earlier scheme absorbed the 1.2x stretch into the
+// bottom of the sprite to keep a walking ego's face rows fixed; accuracy of the
+// priority/control map and of background-replacement animation matters more.
+// Pattern stability is unaffected - the dither phase stays sprite-local (see
+// putNativeSpritePixel). beginNativeSprite pre-evaluates this into
+// _nsRowNy0/_nsRowNy1 so the hot path is a table read.
 void GfxMgr::computeNativeSpriteRowRange(int idx, int &ny0, int &ny1) const {
-	const int plain = _nsHeight - _nsStretchRows; // 1:1 rows at the top
-	if (idx < plain || _nsStretchRows == 0) {
-		ny0 = _nsTopNative + idx;
+	const int gameY = _nsTopGameY + idx;
+	ny0 = (gameY * _playdatePicH) / SCRIPT_HEIGHT;
+	ny1 = ((gameY + 1) * _playdatePicH) / SCRIPT_HEIGHT;
+	if (ny1 <= ny0)
 		ny1 = ny0 + 1;
-		return;
-	}
-	const int k = idx - plain; // 0-based index within the stretch region
-	const int before = (_nsExtraNative * k) / _nsStretchRows;      // extra rows before this one
-	const int through = (_nsExtraNative * (k + 1)) / _nsStretchRows; // ... up to and incl. this one
-	ny0 = _nsTopNative + plain + k + before;
-	ny1 = ny0 + 1 + (through - before);
 }
 
 void GfxMgr::nativeSpriteRowRange(int16 gameY, int &ny0, int &ny1) const {

@@ -148,16 +148,14 @@ private:
 	byte *_playdateSprite;
 	int16 _nativeSpriteOriginNX, _nativeSpriteOriginNY; // sprite-local dither anchor
 
-	// Per-sprite vertical scaling map (see beginNativeSprite). The vertical 1.2x
-	// aspect stretch is absorbed into the bottom half of the sprite, leaving the
-	// face/torso at 1:1 for a crisp, period-accurate, shimmer-free head. Feet
-	// stay anchored to the background ground row.
-	int16 _nsTopGameX;   // game column of the sprite's left edge (horizontal anchor)
+	// Per-sprite native mapping state (see beginNativeSprite). Sprite rows and
+	// columns use the same absolute map as the background, so sprites that
+	// replace background art stay pixel-aligned and priority boundaries hold
+	// exactly; only the dither pattern phase is sprite-local.
+	int16 _nsTopGameX;   // game column of the sprite's left edge
 	int16 _nsTopGameY;   // game row of the sprite's top edge
 	int16 _nsHeight;     // sprite height in game rows
-	int16 _nsTopNative;  // native row of the sprite's top edge
-	int16 _nsStretchRows;   // number of bottom game rows that absorb the stretch
-	int16 _nsExtraNative;   // extra native rows distributed across those bottom rows
+	int16 _nsTopNative;  // native row of the sprite's top edge (dither anchor)
 
 	// Per-sprite native span lookup, filled once by beginNativeSprite so the
 	// hot per-cel-pixel compositing does an array read instead of the integer
