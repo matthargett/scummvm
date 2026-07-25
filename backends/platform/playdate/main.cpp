@@ -124,11 +124,15 @@ static bool findFirstGameDir() {
 	return s_firstGameDir[0] != '\0';
 }
 
+// The OSystem, for the update callback to service timers/audio each frame.
+static OSystem_Playdate *s_system;
+
 // Coroutine entry: runs the whole of ScummVM. Never returns; when
 // ScummVM exits we idle, yielding a frame at a time.
 static void emuMain() {
 	OSystem_Playdate *system = new OSystem_Playdate(s_pd);
 	g_system = system;
+	s_system = system;
 
 	static char s_gamePathArg[80];
 
@@ -149,6 +153,7 @@ static void emuMain() {
 	int res = scummvm_main(argc, const_cast<char **>(argv));
 
 	s_pd->system->logToConsole("ScummVM exited (%d)", res);
+	s_system = nullptr; // the update callback must not touch it once destroyed
 	system->destroy();
 
 	for (;;)
@@ -163,7 +168,15 @@ static int updateCallback(void *userdata) {
 	// delayMillis() (the only yield points). That starves the OS update
 	// callback and shows as a beach ball. Log it so the offending path can
 	// be found.
+	// Service timers and the audio ring buffer once per display frame, so
+	// audio stays fed no matter how the engine's compute happens to be
+	// scheduled between yields (delayMillis and pollEvent also pump this,
+	// but nothing guarantees the engine passes through them regularly).
+	if (s_system)
+		s_system->updateSubsystems();
+
 	const unsigned start = s_pd->system->getCurrentTimeMilliseconds();
+	Playdate::coroutineSliceBegin(start);
 	Playdate::coroutineResume();
 	const unsigned elapsed = s_pd->system->getCurrentTimeMilliseconds() - start;
 	if (elapsed > 500)

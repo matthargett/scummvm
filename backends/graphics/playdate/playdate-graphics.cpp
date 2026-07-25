@@ -337,23 +337,29 @@ void PlaydateGraphicsManager::updateScreen() {
 		top = _dirtyTop;
 		bottom = _dirtyBottom;
 	} else {
-		// Nothing changed since the last frame; the previous frame is still on
-		// screen. Just yield without touching the framebuffer or the LCD.
-		_dirtyTop = LCD_ROWS;
-		_dirtyBottom = -1;
-		Playdate::coroutineYield();
-		return;
+		top = LCD_ROWS;
+		bottom = -1; // nothing changed; the previous frame is still on screen
 	}
 
-	_pd->graphics->markUpdatedRows(top, bottom);
+	if (bottom >= top)
+		_pd->graphics->markUpdatedRows(top, bottom);
 
 	// Reset the dirty range for the next frame.
 	_dirtyTop = LCD_ROWS;
 	_dirtyBottom = -1;
 
-	// Yield to the Playdate OS, which composites the frame we just
-	// drew and services the hardware, then resumes us next frame.
-	Playdate::coroutineYield();
+	// Yield only once this resume slice has used its compute budget. A yield
+	// ends the OS update callback and costs a whole display frame (~33ms), and
+	// the engine calls updateScreen several times per game cycle (sprite blits,
+	// end of cycle, event-wait loops); yielding on each call quantized every
+	// one of those to a full frame and capped AGI at a fraction of its cycle
+	// rate - visibly jerky animation. The rows marked above accumulate in the
+	// frame buffer and are presented at whichever yield actually ends the
+	// slice (here once the budget is spent, or the engine's next real wait in
+	// delayMillis).
+	const unsigned now = _pd->system->getCurrentTimeMilliseconds();
+	if (Playdate::coroutineSliceBudgetUsed(now))
+		Playdate::coroutineYield();
 }
 
 void PlaydateGraphicsManager::setShakePos(int shakeXOffset, int shakeYOffset) {

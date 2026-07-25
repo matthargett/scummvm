@@ -41,6 +41,21 @@ namespace Playdate {
 
 static CoroutineEntry s_entry;
 
+// See the header: how long a resume slice may compute before updateScreen
+// starts yielding. Must stay comfortably under the display frame period
+// (33ms at 30fps) so the OS callback still returns in time to present.
+static const unsigned kSliceBudgetMs = 22;
+
+static unsigned s_sliceStartMs;
+
+void coroutineSliceBegin(unsigned nowMs) {
+	s_sliceStartMs = nowMs;
+}
+
+bool coroutineSliceBudgetUsed(unsigned nowMs) {
+	return nowMs - s_sliceStartMs >= kSliceBudgetMs;
+}
+
 #if TARGET_PLAYDATE
 
 // Cortex-M7 (Thumb-2, hard-float) cooperative context switch. A saved

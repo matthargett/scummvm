@@ -122,11 +122,20 @@ void OSystem_Playdate::delayMillis(uint msecs) {
 	// Yield frames to the OS while waiting, so the display keeps
 	// refreshing and audio/input stay serviced. getMillis() advances
 	// in real time regardless of yields.
+	//
+	// A while-loop, not do-while: every yield ends the OS update callback and
+	// costs a whole display frame (~33ms at 30fps), so a delay that has
+	// already elapsed - or a zero delay used as a scheduling hint - must not
+	// yield at all, and a short delay must not be quantized up to a frame
+	// unless wall time actually demands it. The engine's cycle timing is
+	// paced by getMillis(), so under-sleeping is corrected naturally, while
+	// over-sleeping (the old behaviour) capped the AGI cycle rate at a
+	// fraction of what the hardware can do.
 	const uint32 endTime = getMillis() + msecs;
-	do {
+	while (getMillis() < endTime) {
 		updateSubsystems();
 		Playdate::coroutineYield();
-	} while (getMillis() < endTime);
+	}
 }
 
 void OSystem_Playdate::getTimeAndDate(TimeDate &td, bool skipRecord) const {

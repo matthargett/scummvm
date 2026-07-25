@@ -53,6 +53,20 @@ void coroutineResume();
 /** Switches from the coroutine back to the main context. */
 void coroutineYield();
 
+/**
+ * Slice budget: every yield ends the OS update callback and costs a whole
+ * display frame (~33ms at 30fps), so yielding cheaply is the difference
+ * between the engine getting ~30ms of compute per frame and getting a few
+ * microseconds. The update callback stamps the slice start time before each
+ * resume; code that WANTS to present a frame but does not NEED to block
+ * (updateScreen) asks sliceBudgetUsed() and keeps running if the slice is
+ * still young. Code that genuinely waits (delayMillis) yields regardless.
+ */
+void coroutineSliceBegin(unsigned nowMs);
+
+/** True once the current resume slice has consumed its compute budget. */
+bool coroutineSliceBudgetUsed(unsigned nowMs);
+
 } // End of namespace Playdate
 
 #endif

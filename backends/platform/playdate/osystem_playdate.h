@@ -54,10 +54,10 @@ public:
 	void addSysArchivesToSearchSet(Common::SearchSet &s, int priority) override;
 
 	/**
-	 * Services the timer manager and the audio ring buffer. Called
-	 * from PlaydateEventSource::pollEvent() and delayMillis(), which
-	 * are the only places the blocking ScummVM main loop regularly
-	 * passes through.
+	 * Services the timer manager and the audio ring buffer. Called once
+	 * per display frame from the OS update callback (so audio stays fed
+	 * regardless of how the engine schedules its work), and additionally
+	 * from PlaydateEventSource::pollEvent() and delayMillis().
 	 */
 	void updateSubsystems();
 
