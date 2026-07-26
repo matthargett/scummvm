@@ -1826,51 +1826,48 @@ void GfxMgr::setCursorPalette(bool amigaStyleCursor) {
 	}
 }
 #endif
-// Playdate dither patterns: a Mac-QuickDraw / Hercules hybrid.
+// Playdate dither patterns: the Hercules grey ramp, re-cut so every ROW of a
+// pattern carries the colour's density.
 //
-// The Playdate has square pixels, like the classic 512x342 Macintosh and
-// unlike the Hercules card (whose dot pitch was tall and narrow, so its dither
-// cells were tuned for non-square pixels). A dispersed-dot ordered dither - the
-// QuickDraw family Apple used for greys on square pixels - therefore tiles far
-// more cleanly on the Playdate than Hercules' clustered/directional cells,
-// which pick up visible line texture and moire under our 1.2x vertical stretch.
+// Real Hercules gives every game row exactly two display rows, so a pattern can
+// alternate a dashed row with a blank row and every one-row art feature (floor
+// slats, panel seams) still shows the same dash+blank pair wherever it sits.
+// Our vertical scale is 1.2x: a game row gets ONE display row four times out of
+// five, so a row-alternating pattern makes identical art features render
+// completely differently depending on which pattern row they happen to land on
+// - some floor bands finely dashed, others solid, in the same room. The only
+// robust cure at a non-integer scale is to make each pattern row-uniform: every
+// row holds the same number of lit pixels (phase-staggered so nothing aligns
+// into stripes), so any art feature of any height reads the same texture and
+// density anywhere on screen.
 //
-// So the base here is a QuickDraw-style dispersed-dot dither, built from the
-// standard 8x8 Bayer ordering at exactly the Hercules grey ramp's per-colour
-// coverage (so grey levels are unchanged - only the dot arrangement differs).
-//
-// The one weakness of a pure luminance dither is that colours sharing a grey
-// level collapse to the same pattern: at Hercules coverage, QuickDraw maps
-// {2,5,8}, {3,4,6}, {9,11} and {12,13} to identical cells, so e.g. a cyan and a
-// red object of equal brightness become indistinguishable. Hercules avoids that
-// by encoding those colours as different *directions* at the same coverage. We
-// take the best of both: keep the clean QuickDraw dot for one colour in each
-// clashing group and borrow the authentic Hercules directional cell (which, for
-// each of these, genuinely differs from the QuickDraw one) for the rest. All 16
-// colours end up distinct while most keep the smoother square-pixel dither.
-//
-// Colours 4,5,6,8,11,13 use the Hercules cell; the rest are QuickDraw. Coverage
-// is identical to the Hercules ramp for every colour.
+// Densities are exactly the Hercules ramp (0, 6.25, 12.5, 25, 50, 62.5, 75,
+// 87.5, 93.75, 100%). Colours sharing a density are told apart by texture
+// direction, like Hercules does: dots vs vertical ticks vs dashes at 12.5%,
+// stagger vs vertical pairs vs diagonal at 25%, and so on. A few patterns
+// cannot be row-uniform at 8px and use a two-row period instead (1 at 6.25%,
+// 8's dashes, 14 at 93.75%) - acceptable because those are used for large
+// areas (skies, ceilings, walls), not one-row features.
 //
 // Format: 16 colors x 8 rows = 128 bytes.
 // Bit layout: 0x80=bit7(left), 0x01=bit0(right), 1=white pixel, 0=black pixel.
 static const uint8 playdatePatterns[] = {
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 0  black (0%)        QD
-	0x88, 0x00, 0x00, 0x00, 0x88, 0x00, 0x00, 0x00, // 1  (6%)             QD
-	0x88, 0x00, 0x22, 0x00, 0x88, 0x00, 0x22, 0x00, // 2  (12%)            QD
-	0xAA, 0x00, 0xAA, 0x00, 0xAA, 0x00, 0xAA, 0x00, // 3  (25%)            QD
-	0x22, 0x88, 0x22, 0x88, 0x22, 0x88, 0x22, 0x88, // 4  vertical (25%)   Herc
-	0x88, 0x00, 0x88, 0x00, 0x88, 0x00, 0x88, 0x00, // 5  columns (12%)    Herc
-	0x11, 0x22, 0x44, 0x88, 0x11, 0x22, 0x44, 0x88, // 6  diagonal / (25%) Herc
-	0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, // 7  checker (50%)    QD
-	0x22, 0x00, 0x88, 0x00, 0x22, 0x00, 0x88, 0x00, // 8  brick (12%)      Herc
-	0xFF, 0xDD, 0xFF, 0x77, 0xFF, 0xDD, 0xFF, 0x77, // 9  dense (87%)      QD
-	0xEE, 0x55, 0xBB, 0x55, 0xEE, 0x55, 0xBB, 0x55, // 10 crosshatch (62%) QD
-	0x7F, 0xEF, 0xFD, 0xDF, 0xFE, 0xF7, 0xBF, 0xFB, // 11 inv diagonal(87%)Herc
-	0xFF, 0x55, 0xFF, 0x55, 0xFF, 0x55, 0xFF, 0x55, // 12 dense (75%)      QD
-	0x77, 0xBB, 0xDD, 0xEE, 0x77, 0xBB, 0xDD, 0xEE, // 13 diagonal \ (75%) Herc
-	0xFF, 0xFF, 0xFF, 0x77, 0xFF, 0xFF, 0xFF, 0x77, // 14 near solid (93%) QD
-	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 15 white (100%)     QD
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 0  black (0%)
+	0x80, 0x00, 0x08, 0x00, 0x20, 0x00, 0x02, 0x00, // 1  sparse staggered dots (6%)
+	0x80, 0x08, 0x20, 0x02, 0x40, 0x04, 0x10, 0x01, // 2  wandering dot per row (12%)
+	0x88, 0x22, 0x88, 0x22, 0x88, 0x22, 0x88, 0x22, // 3  staggered dots (25%)
+	0x88, 0x88, 0x22, 0x22, 0x88, 0x88, 0x22, 0x22, // 4  vertical dashes (25%)
+	0x80, 0x80, 0x08, 0x08, 0x20, 0x20, 0x02, 0x02, // 5  vertical ticks (12%)
+	0x11, 0x22, 0x44, 0x88, 0x11, 0x22, 0x44, 0x88, // 6  diagonal / (25%)   Herc cell
+	0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, // 7  checker (50%)
+	0xC0, 0x00, 0x0C, 0x00, 0x30, 0x00, 0x03, 0x00, // 8  staggered dashes (12%, 2-row period like Herc's brick)
+	0xF7, 0x7F, 0xF7, 0x7F, 0xF7, 0x7F, 0xF7, 0x7F, // 9  ladder holes (87%)
+	0xEA, 0x57, 0xAE, 0x75, 0xEA, 0x57, 0xAE, 0x75, // 10 dense checker (62%)
+	0x7F, 0xEF, 0xFD, 0xDF, 0xFE, 0xF7, 0xBF, 0xFB, // 11 diagonal holes (87%) Herc cell
+	0xEE, 0xBB, 0xEE, 0xBB, 0xEE, 0xBB, 0xEE, 0xBB, // 12 inverse stagger (75%)
+	0x77, 0xBB, 0xDD, 0xEE, 0x77, 0xBB, 0xDD, 0xEE, // 13 diagonal \ (75%)   Herc cell
+	0xFF, 0xF7, 0xFF, 0x7F, 0xFF, 0xFD, 0xFF, 0xDF, // 14 near solid (93%)
+	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 15 white (100%)
 };
 
 // Re-rasterize the current picture at native resolution into _playdatePicture.
