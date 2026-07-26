@@ -1902,15 +1902,20 @@ void GfxMgr::decodePlaydateNative(int16 resourceNr) {
 }
 
 // Rebuild the native background after an overlay.pic. The game screen already
-// holds base+overlay, so a single reseed captures every fill; we then re-draw
-// the base picture's lines and the overlay's lines crisp on top (the overlay
-// pass skips the reseed so it does not wipe the base lines).
+// holds base+overlay, so a single seed captures every fill - but both
+// pictures' lines must be masked out of it BEFORE seeding (the seed holds the
+// overlay's fat lines too), then both pictures are stamped in order.
 void GfxMgr::overlayPlaydateNative(int16 overlayResourceNr) {
 	if (!_playdatePicture || !_playdatePictureMgr)
 		return; // no native background yet (no base picture drawn)
+	_playdatePictureMgr->beginNative(_playdatePicture, _playdatePicW, _playdatePicH);
 	if (_playdateBasePicNr >= 0)
-		_playdatePictureMgr->decodeToNative(_playdateBasePicNr, _playdatePicture, _playdatePicW, _playdatePicH, true);
-	_playdatePictureMgr->decodeToNative(overlayResourceNr, _playdatePicture, _playdatePicW, _playdatePicH, false);
+		_playdatePictureMgr->maskPicture(_playdateBasePicNr);
+	_playdatePictureMgr->maskPicture(overlayResourceNr);
+	_playdatePictureMgr->seedNative();
+	if (_playdateBasePicNr >= 0)
+		_playdatePictureMgr->stampPicture(_playdateBasePicNr);
+	_playdatePictureMgr->stampPicture(overlayResourceNr);
 }
 
 // Dither the native-resolution picture 1:1 to the display (no upscale),

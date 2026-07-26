@@ -132,13 +132,29 @@ protected:
 class PictureMgr_Playdate : public PictureMgr {
 public:
 	PictureMgr_Playdate(AgiBase *agi, GfxMgr *gfx) : PictureMgr(agi, gfx),
-		_nbuf(nullptr), _nw(0), _nh(0) {}
+		_nbuf(nullptr), _nw(0), _nh(0), _nativePass(kPassStamp), _maskingLine(false) {}
 
-	// Decode the given picture resource into nbuf (nw x nh, one byte colour
-	// index per pixel), scaling the 160x168 vector coordinates to fill it.
-	// reseed=false skips re-seeding fills from the game screen, so an overlay
-	// picture's crisp lines can be added on top of an already-seeded buffer.
-	void decodeToNative(int16 resourceNr, byte *nbuf, int16 nw, int16 nh, bool reseed = true);
+	// Rendering a picture into the native buffer is a three-stage pipeline
+	// (see picture.cpp for the rationale):
+	//   beginNative     - bind the target buffer, clear the line mask
+	//   maskPicture     - record which 160x168 pixels the picture's LINE
+	//                     commands own (exact same pixel set as the real
+	//                     decode, via the base interpreter)
+	//   seedNative      - nearest-neighbour seed of the fills from the decoded
+	//                     game screen, with masked (line-owned) pixels
+	//                     inpainted from the nearest fill colour so the fat
+	//                     upscaled lines do not survive under the crisp ones
+	//   stampPicture    - replay the picture, drawing uniform native-
+	//                     resolution strokes and brush blocks in command order
+	// For overlay pictures, mask BOTH pictures before seeding, then stamp
+	// both in order (see GfxMgr::overlayPlaydateNative).
+	void beginNative(byte *nbuf, int16 nw, int16 nh);
+	void maskPicture(int16 resourceNr);
+	void seedNative();
+	void stampPicture(int16 resourceNr);
+
+	// Convenience: the full pipeline for a single (whole-screen) picture.
+	void decodeToNative(int16 resourceNr, byte *nbuf, int16 nw, int16 nh);
 
 protected:
 	void putVirtPixel(int16 x, int16 y) override;
@@ -147,11 +163,22 @@ protected:
 	bool draw_FillCheck(int16 x, int16 y, bool horizontalCheck) override;
 
 private:
+	bool setResource(int16 resourceNr);
 	void nput(int nx, int ny, byte color);
 	byte nget(int nx, int ny) const;
+	byte inpaintColor(int16 sx, int16 sy, bool preferRight, bool preferDown) const;
 
 	byte *_nbuf;
 	int16 _nw, _nh;
+
+	// Which replay pass drawPicture() is running (stamp is also the mode for
+	// one-shot decodes, so it is the default outside maskPicture()).
+	enum NativePass { kPassStamp, kPassMask };
+	NativePass _nativePass;
+	bool _maskingLine; // inside a draw_Line during the mask pass
+
+	// One byte per 160x168 game pixel: nonzero if a LINE command painted it.
+	byte _lineMask[_DEFAULT_WIDTH * _DEFAULT_HEIGHT];
 };
 
 } // End of namespace Agi

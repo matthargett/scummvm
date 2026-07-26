@@ -887,46 +887,116 @@ byte PictureMgr_Playdate::nget(int nx, int ny) const {
 	return 0;
 }
 
-void PictureMgr_Playdate::decodeToNative(int16 resourceNr, byte *nbuf, int16 nw, int16 nh, bool reseed) {
+bool PictureMgr_Playdate::setResource(int16 resourceNr) {
 	_resourceNr = resourceNr;
 	_data = _vm->_game.pictures[resourceNr].rdata;
 	_dataSize = _vm->_game.dirPic[resourceNr].len;
 	_width = _DEFAULT_WIDTH;   // interpreter reads coordinates in 160x168 space;
 	_height = _DEFAULT_HEIGHT; // the overrides below scale them to nbuf.
+	return _data && _dataSize;
+}
+
+void PictureMgr_Playdate::beginNative(byte *nbuf, int16 nw, int16 nh) {
 	_nbuf = nbuf;
 	_nw = nw;
 	_nh = nh;
+	memset(_lineMask, 0, sizeof(_lineMask));
+}
 
-	// Seed the native buffer from the already-decoded 160x168 visual screen
-	// (nearest-neighbour upscale). The flood fills were done there, where the
-	// artwork guarantees they don't leak, so we inherit clean fills. We then
-	// re-run the vector commands drawing only the LINES at native resolution on
-	// top, giving crisp edges without the fill-leak risk that re-flooding at the
-	// finer resolution introduces (draw_Fill is a no-op here).
-	//
-	// reseed is false when replaying an overlay picture on top of an already
-	// seeded buffer: the seed (which now reflects the overlaid game screen) has
-	// already been taken for the base pass, so here we only add the overlay's
-	// crisp lines and must not wipe the base picture's lines with another seed.
-	if (reseed) {
-		for (int ny = 0; ny < nh; ny++) {
-			const int sy = (ny * _DEFAULT_HEIGHT) / nh;
-			for (int nx = 0; nx < nw; nx++) {
-				const int sx = (nx * _DEFAULT_WIDTH) / nw;
-				nbuf[ny * nw + nx] = _gfx->getColor(sx, sy);
+// Record which 160x168 pixels this picture's LINE commands paint. The base
+// interpreter's own draw_Line is used, so the recorded set is exactly the set
+// the real decode painted into the game screen - the same pixels the
+// nearest-neighbour seed would otherwise import as fat 2px-wide lines.
+void PictureMgr_Playdate::maskPicture(int16 resourceNr) {
+	if (!setResource(resourceNr))
+		return;
+	_nativePass = kPassMask;
+	drawPicture();
+	_nativePass = kPassStamp;
+}
+
+// For a masked (line-owned) source pixel, fetch the colour of the nearest
+// fill pixel instead, searching the preferred side first so each half of the
+// line's footprint takes the colour of the region on its own side.
+byte PictureMgr_Playdate::inpaintColor(int16 sx, int16 sy, bool preferRight, bool preferDown) const {
+	const int h1 = preferRight ? 1 : -1;
+	const int v1 = preferDown ? 1 : -1;
+	const int8 offsets[][2] = {
+		{ (int8)h1, 0 }, { 0, (int8)v1 }, { (int8)-h1, 0 }, { 0, (int8)-v1 },
+		{ (int8)h1, (int8)v1 }, { (int8)-h1, (int8)v1 }, { (int8)h1, (int8)-v1 }, { (int8)-h1, (int8)-v1 },
+		{ (int8)(2 * h1), 0 }, { 0, (int8)(2 * v1) }, { (int8)(-2 * h1), 0 }, { 0, (int8)(-2 * v1) },
+	};
+	for (uint i = 0; i < ARRAYSIZE(offsets); i++) {
+		const int cx = sx + offsets[i][0];
+		const int cy = sy + offsets[i][1];
+		if (cx < 0 || cy < 0 || cx >= _DEFAULT_WIDTH || cy >= _DEFAULT_HEIGHT)
+			continue;
+		if (!_lineMask[cy * _DEFAULT_WIDTH + cx])
+			return _gfx->getColor(cx, cy);
+	}
+	return _gfx->getColor(sx, sy); // line cluster thicker than the search; keep as is
+}
+
+// Seed the native buffer from the already-decoded 160x168 visual screen
+// (nearest-neighbour upscale). The flood fills were done there, where the
+// artwork guarantees they don't leak, so we inherit clean fills without the
+// leak risk that re-flooding at the finer resolution introduces (draw_Fill is
+// a no-op here). Pixels the mask says belong to LINES are inpainted with the
+// neighbouring fill colour: importing them as-is would leave the fat upscaled
+// line under the crisp native stroke stamped later, making stroke widths
+// wobble between one and three pixels along a single line - which wrecks the
+// art's symmetry and, in line-dense rooms, its whole tonal balance.
+void PictureMgr_Playdate::seedNative() {
+	if (!_nbuf)
+		return;
+	for (int ny = 0; ny < _nh; ny++) {
+		const int sy = (ny * _DEFAULT_HEIGHT) / _nh;
+		const int syTop = (sy * _nh) / _DEFAULT_HEIGHT;
+		const int syBot = ((sy + 1) * _nh) / _DEFAULT_HEIGHT;
+		const bool preferDown = (ny - syTop) * 2 >= (syBot - syTop);
+		const byte *maskRow = _lineMask + sy * _DEFAULT_WIDTH;
+		byte *out = _nbuf + ny * _nw;
+		for (int nx = 0; nx < _nw; nx++) {
+			const int sx = (nx * _DEFAULT_WIDTH) / _nw;
+			if (!maskRow[sx]) {
+				out[nx] = _gfx->getColor(sx, sy);
+			} else {
+				const int sxLeft = (sx * _nw) / _DEFAULT_WIDTH;
+				const int sxRight = ((sx + 1) * _nw) / _DEFAULT_WIDTH;
+				const bool preferRight = (nx - sxLeft) * 2 >= (sxRight - sxLeft);
+				out[nx] = inpaintColor(sx, sy, preferRight, preferDown);
 			}
 		}
 	}
+}
 
-	if (!_data || !_dataSize)
+// Replay the picture, drawing native-resolution strokes and brush blocks in
+// command order on top of the seeded fills.
+void PictureMgr_Playdate::stampPicture(int16 resourceNr) {
+	if (!setResource(resourceNr))
 		return;
 	drawPicture(); // resets its own state; lines route to nbuf, fills are skipped
 }
 
-// A single 160x168 pixel maps to a block of the native buffer.
+void PictureMgr_Playdate::decodeToNative(int16 resourceNr, byte *nbuf, int16 nw, int16 nh) {
+	beginNative(nbuf, nw, nh);
+	maskPicture(resourceNr);
+	seedNative();
+	stampPicture(resourceNr);
+}
+
+// A single 160x168 pixel maps to a block of the native buffer (stamp pass:
+// pen/brush strokes keep their authentic blocky footprint). In the mask pass
+// this records line ownership instead - and only for line pixels, so brushes
+// stay seeded and are simply repainted identically by the stamp.
 void PictureMgr_Playdate::putVirtPixel(int16 x, int16 y) {
 	if (!_scrOn)
 		return;
+	if (_nativePass == kPassMask) {
+		if (_maskingLine)
+			_lineMask[y * _DEFAULT_WIDTH + x] = 1;
+		return;
+	}
 	const int nx0 = (x * _nw) / _DEFAULT_WIDTH;
 	const int nx1 = ((x + 1) * _nw) / _DEFAULT_WIDTH;
 	const int ny0 = (y * _nh) / _DEFAULT_HEIGHT;
@@ -938,7 +1008,25 @@ void PictureMgr_Playdate::putVirtPixel(int16 x, int16 y) {
 
 // Rasterize the line at native resolution (crisp), not by upscaling 160-res
 // pixels. Only the visual screen is produced here; priority stays at 160x168.
+//
+// Strokes are drawn at a UNIFORM weight of one game pixel per axis: the
+// Bresenham walk runs at native granularity (finer steps on diagonals and
+// curves than the 160-space original - the whole point of re-rasterizing),
+// and each step is widened to the horizontal scale factor (2px at 2x), so a
+// vertical stroke is exactly as wide as the original art's line, a horizontal
+// stroke is one native row, and every stroke keeps that weight along its whole
+// length. Combined with the seed's line inpainting this is what keeps line
+// widths - and the art's symmetry - consistent across the picture.
 void PictureMgr_Playdate::draw_Line(int16 x1, int16 y1, int16 x2, int16 y2) {
+	if (_nativePass == kPassMask) {
+		// Record the 160-space pixel set via the base interpreter (exact match
+		// with the real decode); putVirtPixel stores it into _lineMask.
+		_maskingLine = true;
+		PictureMgr::draw_Line(x1, y1, x2, y2);
+		_maskingLine = false;
+		return;
+	}
+
 	if (!_scrOn)
 		return;
 
@@ -950,22 +1038,26 @@ void PictureMgr_Playdate::draw_Line(int16 x1, int16 y1, int16 x2, int16 y2) {
 	int nx1 = (x1 * _nw) / _DEFAULT_WIDTH, ny1 = (y1 * _nh) / _DEFAULT_HEIGHT;
 	int nx2 = (x2 * _nw) / _DEFAULT_WIDTH, ny2 = (y2 * _nh) / _DEFAULT_HEIGHT;
 
+	// Stroke width in native columns for one game column (2 at the 2x scale).
+	const int strokeW = MAX(1, _nw / _DEFAULT_WIDTH);
+
 	const int dx = ABS(nx2 - nx1), dy = ABS(ny2 - ny1);
 	const int stepX = nx1 < nx2 ? 1 : -1, stepY = ny1 < ny2 ? 1 : -1;
 	int err = dx - dy;
 	for (;;) {
-		nput(nx1, ny1, _scrColor);
+		for (int w = 0; w < strokeW; w++)
+			nput(nx1 + w, ny1, _scrColor);
 		if (nx1 == nx2 && ny1 == ny2)
 			break;
 		const int e2 = 2 * err;
 		bool steppedX = false;
 		if (e2 > -dy) { err -= dy; nx1 += stepX; steppedX = true; }
 		if (e2 < dx)  { err += dx; ny1 += stepY;
-			// A diagonal step would leave an 8-connected gap that a
-			// 4-connected flood fill leaks through. Bridge the corner so the
-			// line is 4-connected and stays a watertight fill boundary.
+			// A diagonal step would leave an 8-connected gap; bridge the corner
+			// so strokes stay visually continuous.
 			if (steppedX)
-				nput(nx1 - stepX, ny1, _scrColor);
+				for (int w = 0; w < strokeW; w++)
+					nput(nx1 - stepX + w, ny1, _scrColor);
 		}
 	}
 }
