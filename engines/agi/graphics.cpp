@@ -1826,47 +1826,50 @@ void GfxMgr::setCursorPalette(bool amigaStyleCursor) {
 	}
 }
 #endif
-// Playdate dither patterns: the Hercules grey ramp, re-cut so every ROW of a
-// pattern carries the colour's density.
+// Playdate dither patterns, indexed by GAME row (see the render loops), the
+// way the Hercules driver keys its cells to game rows (y*2 & 7). Keying the
+// pattern to the art instead of the screen is what makes the texture repeat
+// calmly in art space: every one-game-row feature (floor slats, panel seams)
+// shows a full-density pattern row wherever it sits on screen, instead of
+// whatever screen-space row it happens to land on under the non-integer 1.2x
+// vertical scale.
 //
-// Real Hercules gives every game row exactly two display rows, so a pattern can
-// alternate a dashed row with a blank row and every one-row art feature (floor
-// slats, panel seams) still shows the same dash+blank pair wherever it sits.
-// Our vertical scale is 1.2x: a game row gets ONE display row four times out of
-// five, so a row-alternating pattern makes identical art features render
-// completely differently depending on which pattern row they happen to land on
-// - some floor bands finely dashed, others solid, in the same room. The only
-// robust cure at a non-integer scale is to make each pattern row-uniform: every
-// row holds the same number of lit pixels (phase-staggered so nothing aligns
-// into stripes), so any art feature of any height reads the same texture and
-// density anywhere on screen.
+// Cell design rules, learned the hard way:
+//  - Every ROW of a cell carries the colour's density (no blank interleave
+//    rows), because at 1.2x most game rows get only one display row - a blank
+//    row in the cell would make some art rows render empty.
+//  - Phases advance in a simple 2- or 4-row march (45-degree lattices,
+//    diagonals, vertical ticks) - periodic and calm like the Hercules cells.
+//    Dispersed/bit-reversed phases read as noise, and 2-row zigzags between
+//    two fixed columns read as vertical stripes; both wreck legibility.
+//  - Single lit/unlit pixels only, never 2px clusters: a clustered "dash"
+//    renders as a 2-3px blob that no Hercules pattern ever produces.
 //
 // Densities are exactly the Hercules ramp (0, 6.25, 12.5, 25, 50, 62.5, 75,
 // 87.5, 93.75, 100%). Colours sharing a density are told apart by texture
-// direction, like Hercules does: dots vs vertical ticks vs dashes at 12.5%,
-// stagger vs vertical pairs vs diagonal at 25%, and so on. A few patterns
-// cannot be row-uniform at 8px and use a two-row period instead (1 at 6.25%,
-// 8's dashes, 14 at 93.75%) - acceptable because those are used for large
-// areas (skies, ceilings, walls), not one-row features.
+// direction, as on Hercules: marching-/ vs vertical ticks vs marching-\ at
+// 12.5%, stagger vs vertical pairs vs diagonal at 25%, hole ticks vs diagonal
+// holes at 87.5%. 1 and 14 keep a two-row period (their densities cannot fill
+// every row at 8px width); they are used for large areas, not row features.
 //
 // Format: 16 colors x 8 rows = 128 bytes.
 // Bit layout: 0x80=bit7(left), 0x01=bit0(right), 1=white pixel, 0=black pixel.
 static const uint8 playdatePatterns[] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // 0  black (0%)
-	0x80, 0x00, 0x08, 0x00, 0x20, 0x00, 0x02, 0x00, // 1  sparse staggered dots (6%)
-	0x80, 0x08, 0x20, 0x02, 0x40, 0x04, 0x10, 0x01, // 2  wandering dot per row (12%)
+	0x80, 0x00, 0x08, 0x00, 0x80, 0x00, 0x08, 0x00, // 1  sparse 45-deg dots (6%)
+	0x80, 0x20, 0x08, 0x02, 0x80, 0x20, 0x08, 0x02, // 2  dot marching / (12%)
 	0x88, 0x22, 0x88, 0x22, 0x88, 0x22, 0x88, 0x22, // 3  staggered dots (25%)
-	0x88, 0x88, 0x22, 0x22, 0x88, 0x88, 0x22, 0x22, // 4  vertical dashes (25%)
-	0x80, 0x80, 0x08, 0x08, 0x20, 0x20, 0x02, 0x02, // 5  vertical ticks (12%)
+	0x88, 0x88, 0x22, 0x22, 0x88, 0x88, 0x22, 0x22, // 4  vertical pairs (25%)
+	0x80, 0x80, 0x08, 0x08, 0x80, 0x80, 0x08, 0x08, // 5  vertical ticks (12%)
 	0x11, 0x22, 0x44, 0x88, 0x11, 0x22, 0x44, 0x88, // 6  diagonal / (25%)   Herc cell
 	0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, 0xAA, 0x55, // 7  checker (50%)
-	0xC0, 0x00, 0x0C, 0x00, 0x30, 0x00, 0x03, 0x00, // 8  staggered dashes (12%, 2-row period like Herc's brick)
-	0xF7, 0x7F, 0xF7, 0x7F, 0xF7, 0x7F, 0xF7, 0x7F, // 9  ladder holes (87%)
-	0xEA, 0x57, 0xAE, 0x75, 0xEA, 0x57, 0xAE, 0x75, // 10 dense checker (62%)
+	0x02, 0x08, 0x20, 0x80, 0x02, 0x08, 0x20, 0x80, // 8  dot marching \ (12%)
+	0x7F, 0x7F, 0xF7, 0xF7, 0x7F, 0x7F, 0xF7, 0xF7, // 9  vertical hole ticks (87%)
+	0xDD, 0x55, 0x77, 0xAA, 0xDD, 0x55, 0x77, 0xAA, // 10 crosshatch (62%)   Herc cell
 	0x7F, 0xEF, 0xFD, 0xDF, 0xFE, 0xF7, 0xBF, 0xFB, // 11 diagonal holes (87%) Herc cell
-	0xEE, 0xBB, 0xEE, 0xBB, 0xEE, 0xBB, 0xEE, 0xBB, // 12 inverse stagger (75%)
+	0x77, 0xDD, 0x77, 0xDD, 0x77, 0xDD, 0x77, 0xDD, // 12 staggered holes (75%)
 	0x77, 0xBB, 0xDD, 0xEE, 0x77, 0xBB, 0xDD, 0xEE, // 13 diagonal \ (75%)   Herc cell
-	0xFF, 0xF7, 0xFF, 0x7F, 0xFF, 0xFD, 0xFF, 0xDF, // 14 near solid (93%)
+	0xFF, 0x7F, 0xFF, 0xF7, 0xFF, 0x7F, 0xFF, 0xF7, // 14 near solid (93%)
 	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 15 white (100%)
 };
 
@@ -1925,7 +1928,9 @@ void GfxMgr::renderNativePicture() {
 		const int displayY = startY + ry;
 		if (displayY < 0 || displayY >= _displayScreenHeight)
 			continue;
-		const int patternRow = displayY & 0x07;
+		// Pattern row keyed to the GAME row, Hercules-style, so textures repeat
+		// in art space and every one-row art feature dithers identically.
+		const int patternRow = ((ry * SCRIPT_HEIGHT) / _playdatePicH) & 0x07;
 		byte *drow = _displayScreen + displayY * _displayScreenWidth;
 		const byte *nrow = _playdatePicture + ry * _playdatePicW;
 		const byte *srow = _playdateSprite ? _playdateSprite + ry * _playdatePicW : nullptr;
@@ -1939,7 +1944,7 @@ void GfxMgr::renderNativePicture() {
 			}
 			const byte color = nrow[rx] & 0x0F;
 			const byte pat = playdatePatterns[color * 8 + patternRow];
-			drow[displayX] = (pat >> (7 - (displayX & 0x07))) & 1;
+			drow[displayX] = (pat >> (7 - (rx & 0x07))) & 1;
 		}
 	}
 }
@@ -2141,7 +2146,9 @@ void GfxMgr::renderNativeSpriteRegion(int16 gameX, int16 gameY, int16 gameW, int
 		const int displayY = startY + ny;
 		if (displayY < 0 || displayY >= _displayScreenHeight)
 			continue;
-		const int patternRow = displayY & 0x07;
+		// Game-row keyed, matching renderNativePicture, so a partial repaint
+		// dithers identically to the full-screen render.
+		const int patternRow = ((ny * SCRIPT_HEIGHT) / _playdatePicH) & 0x07;
 		byte *drow = _displayScreen + displayY * _displayScreenWidth;
 		const byte *nrow = _playdatePicture + ny * _playdatePicW;
 		const byte *srow = _playdateSprite + ny * _playdatePicW;
@@ -2154,7 +2161,7 @@ void GfxMgr::renderNativeSpriteRegion(int16 gameX, int16 gameY, int16 gameW, int
 			} else {
 				const byte color = nrow[nx] & 0x0F;
 				const byte pat = playdatePatterns[color * 8 + patternRow];
-				drow[displayX] = (pat >> (7 - (displayX & 0x07))) & 1;
+				drow[displayX] = (pat >> (7 - (nx & 0x07))) & 1;
 			}
 			if (displayX < minDX) minDX = displayX;
 			if (displayX > maxDX) maxDX = displayX;
@@ -2207,8 +2214,9 @@ void GfxMgr::render_BlockPlaydate(int16 x, int16 y, int16 width, int16 height) {
 		if (agiY < 0 || agiY >= SCRIPT_HEIGHT)
 			continue;
 
-		// Pattern row - direct modulo on display coordinate for native tiling
-		const int patternRow = displayY & 0x07;
+		// Pattern row keyed to the game row (Hercules-style, matching the
+		// native picture render) so art features dither identically everywhere.
+		const int patternRow = agiY & 0x07;
 
 		byte *displayRow = _displayScreen + displayY * _displayScreenWidth;
 		const byte *agiRow = _activeScreen + agiY * SCRIPT_WIDTH;
@@ -2225,8 +2233,9 @@ void GfxMgr::render_BlockPlaydate(int16 x, int16 y, int16 width, int16 height) {
 			// Get the pattern byte for this color and row
 			const byte patternByte = playdatePatterns[color * 8 + patternRow];
 
-			// Pattern column - direct modulo on display coordinate for native tiling
-			const int bitPos = 7 - (displayX & 0x07);
+			// Pattern column relative to the game area, so the phase is fixed
+			// in game space regardless of where the area sits on screen.
+			const int bitPos = 7 - ((displayX - _playdateGameOffsetX) & 0x07);
 			const byte pixel = (patternByte >> bitPos) & 1;
 
 			displayRow[displayX] = pixel;
