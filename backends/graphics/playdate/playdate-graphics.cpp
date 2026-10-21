@@ -88,15 +88,21 @@ bool PlaydateGraphicsManager::getFeatureState(OSystem::Feature f) const {
 
 #ifdef USE_RGB_COLOR
 Graphics::PixelFormat PlaydateGraphicsManager::getScreenFormat() const {
+	// Report the format the game screen was actually created with: engines
+	// that asked for RGB565 (ADL) inspect this after initGraphics().
+	if (_gameScreen.getPixels())
+		return _gameScreen.format;
 	return Graphics::PixelFormat::createFormatCLUT8();
 }
 
 Common::List<Graphics::PixelFormat> PlaydateGraphicsManager::getSupportedFormats() const {
+	// Most preferred first, as initGraphics() expects. RGB565 leads so an
+	// engine that insists on a true-colour surface without naming a format
+	// (ADL's Apple II display) gets one; it is thresholded to 1-bit in
+	// renderGameScreen. Engines that want a palette ask for CLUT8 by name.
 	Common::List<Graphics::PixelFormat> list;
-	list.push_back(Graphics::PixelFormat::createFormatCLUT8());
-	// RGB565 for engines that insist on a true-colour surface (ADL's Apple II
-	// display); it is thresholded to 1-bit in renderGameScreen.
 	list.push_back(Graphics::PixelFormat(2, 5, 6, 5, 0, 11, 5, 0, 0));
+	list.push_back(Graphics::PixelFormat::createFormatCLUT8());
 	return list;
 }
 #endif
