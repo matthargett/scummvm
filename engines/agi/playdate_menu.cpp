@@ -69,12 +69,9 @@ bool PlaydateMenu::isVisible() const {
 	bool isNumber;
 	if (inCharInputLoop(isNumber))
 		return true;
-	if (!_parserGame)
-		return false;
-	// The word list auto-hides once the crank has been idle for a while, so
-	// exploration gets the whole screen and the picker isn't distracting
-	// chrome. Any crank movement brings it straight back (see handleEvent).
-	return (_vm->_system->getMillis() - _lastCrankMs) < kCrankIdleHideMs;
+	// The picker has its own column beside the game, so it is simply always
+	// shown for parser games.
+	return _parserGame;
 }
 
 bool PlaydateMenu::inCharInputLoop(bool &isNumber) const {
@@ -496,17 +493,7 @@ bool PlaydateMenu::handleEvent(const Common::Event &event) {
 	case Common::EVENT_WHEELUP: {
 		if (_listWords.empty())
 			return false;
-		bool isNumber;
-		const bool charMode = inCharInputLoop(isNumber);
-		const uint32 now = _vm->_system->getMillis();
-		// A crank movement always un-hides the word list. The first notch after
-		// it has been idle only reveals it (so a stray notch doesn't scroll a
-		// list the player can't yet see); further notches then navigate. The
-		// on-screen keyboard is always visible, so it navigates immediately.
-		const bool wasHidden = !charMode && (now - _lastCrankMs) >= kCrankIdleHideMs;
-		_lastCrankMs = now;
-		if (wasHidden)
-			return true;
+		_lastCrankMs = _vm->_system->getMillis();
 		moveSelection(event.type == Common::EVENT_WHEELDOWN ? 1 : -1);
 		return true;
 	}

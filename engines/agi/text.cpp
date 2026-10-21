@@ -837,21 +837,14 @@ void TextMgr::promptKeyPress(uint16 newKey) {
 	if (scriptsInputLen < maxChars)
 		maxChars = scriptsInputLen;
 
-	// On Playdate the prompt is not drawn (crank picker composes commands), so
-	// skip echoing keystrokes to the screen. The command string is still built
-	// and parsed below exactly as normal.
-	const bool drawPrompt = (_vm->_renderMode != Common::kRenderPlaydate);
-
-	if (drawPrompt)
-		inputEditOn();
+	inputEditOn();
 
 	switch (newKey) {
 	case AGI_KEY_BACKSPACE: {
 		if (_promptCursorPos) {
 			_promptCursorPos--;
 			_prompt[_promptCursorPos] = 0;
-			if (drawPrompt)
-				displayCharacter(newKey);
+			displayCharacter(newKey);
 			if (_vm->isLanguageRTL())
 				promptRedraw();
 
@@ -885,8 +878,7 @@ void TextMgr::promptKeyPress(uint16 newKey) {
 				_prompt[_promptCursorPos] = newKey;
 				_promptCursorPos++;
 				_prompt[_promptCursorPos] = 0;
-				if (drawPrompt)
-					displayCharacter(newKey);
+				displayCharacter(newKey);
 				if (_vm->isLanguageRTL())
 					promptRedraw();
 
@@ -896,8 +888,7 @@ void TextMgr::promptKeyPress(uint16 newKey) {
 		break;
 	}
 
-	if (drawPrompt)
-		inputEditOff();
+	inputEditOff();
 }
 
 void TextMgr::promptCancelLine() {
@@ -933,12 +924,6 @@ void TextMgr::promptEchoLine() {
 }
 
 void TextMgr::promptRedraw() {
-	// On Playdate the command line is composed with the crank word picker, not
-	// typed, so the on-screen ">" input line is redundant chrome. Suppress its
-	// drawing (the prompt logic and parsing still run) to keep the bottom of the
-	// screen clean. promptKeyPress() likewise skips echoing injected characters.
-	if (_vm->_renderMode == Common::kRenderPlaydate)
-		return;
 	if (_promptEnabled) {
 		if (_optionCommandPromptWindow) {
 			// Abort, in case command prompt window is active

@@ -40,24 +40,17 @@ namespace Agi {
 
 #include "agi/font.h"
 
-// Playdate vertical mapping: how many of the 400x240 display's rows the 200 AGI
-// visual rows occupy.
-// 240 = 1.2x: with the integer 2x horizontal this is the CRT-correct aspect,
-// and every game pixel maps to a whole number of display pixels (2 wide, 1-2
-// tall). A larger value (e.g. 272) would fill the display height completely,
-// but the horizontal scale it forces (~2.275x) makes single-pixel art - stars,
-// glyph strokes, thin vector lines - alternate between 2px and 3px wide, which
-// wrecks legibility against the original Hercules/1-bit intent. The unused rows
-// below the picture are the price of even pixels; do not trade them back.
-static const int kPlaydateDisplayRowsFor200 = 240;
-
-// Vertical scale for the TEXT layer. AGI text is a 25-row x 8-line grid that
-// spans the whole 200-line screen, so it must map to the 240 display rows
-// exactly or the bottom rows would run past the display and write out of
-// bounds. At the current picture scale the two coincide; keep the constant (and
-// the mode-keyed helper below) so any future retune of the picture scale cannot
-// silently reintroduce the text-layer overflow.
-static const int kPlaydateFontRowsFor200 = 240;
+// kRenderPlaydate geometry: the game is drawn at exactly 320x200 - the same
+// 2x1 pixels Sierra's own Macintosh AGI interpreter used on the 512x342 1-bit
+// Mac screen. Every game pixel is two display pixels wide and one tall, so the
+// 8x8 dither cells lock to the game grid and every coordinate path in this
+// file is the stock 320x200 one. The area sits at the top left of the 400x240
+// display; the right 80 columns belong to the word picker and the bottom 40
+// rows are unused. The picture is deliberately NOT scaled to CRT aspect:
+// neither 1-bit original did that (Hercules showed game pixels at ~1.3:1, the
+// Mac at 2:1), and only an integer scale keeps lines and dithers crisp - every
+// non-integer vertical scale tried here (1.2x) broke line weights, dither
+// phase, sprite alignment and text/box registration in turn.
 
 GfxMgr::GfxMgr(AgiBase *vm, GfxFont *font) : _vm(vm), _font(font) {
 	memset(&_paletteGfxMode, 0, sizeof(_paletteGfxMode));
@@ -77,23 +70,11 @@ GfxMgr::GfxMgr(AgiBase *vm, GfxFont *font) : _vm(vm), _font(font) {
 	_upscaledHires = DISPLAY_UPSCALED_DISABLED;
 	_displayScreenWidth = DISPLAY_DEFAULT_WIDTH;
 	_displayScreenHeight = DISPLAY_DEFAULT_HEIGHT;
-	_playdateGameWidth = 320;
-	_playdateGameOffsetX = 0;
-	_playdatePickerWasVisible = false;
-	_playdatePicture = nullptr;
-	_playdatePicW = 0;
-	_playdatePicH = 0;
-	_playdateBasePicNr = -1;
-	_playdatePictureMgr = nullptr;
-	_playdateSprite = nullptr;
-	_nativeSpriteOriginNX = 0;
-	_nativeSpriteOriginNY = 0;
-	_nsTopGameX = 0;
-	_nsTopGameY = 0;
-	_nsHeight = 0;
-	_nsTopNative = 0;
-	_nsColCount = 0;
-	_nsRowCount = 0;
+	_playdateSprite[0] = nullptr;
+	_playdateSprite[1] = nullptr;
+	_spriteLayerCur = 0;
+	_spriteLayerOriginX = 0;
+	_spriteLayerOriginY = 0;
 	_displayFontWidth = 8;
 	_displayFontHeight = 8;
 
@@ -185,27 +166,20 @@ void GfxMgr::initVideo() {
 		}
 		break;
 	case Common::kRenderPlaydate:
-		// Playdate: 400x240 display, native Hercules patterns at full
-		// resolution. Parser (AGI) games render into the left 320
-		// pixels and leave the right 80 for the word picker; preAGI
-		// games have no parser and use the full 400. Vertical scale is
-		// always 200 visual -> 240 display (1.2x).
+		// 400x240 1-bit display; the game is the stock 320x200 layout at the top
+		// left (see the geometry note at the top of this file).
 		initPalette(_paletteGfxMode, PALETTE_HERCULES_GREEN, 2, 8);
 		_upscaledHires = DISPLAY_UPSCALED_DISABLED;
 		_displayScreenWidth = 400;
 		_displayScreenHeight = 240;
-		// The game is 320 wide - exactly 2x the 160-px AGI width, so every game
-		// pixel is a uniform 2 display pixels and pixel art stays even and
-		// legible - at the CRT-correct 1.2x vertical (kPlaydateDisplayRowsFor200).
-		// It sits centered with a 40px black bar each side; the word picker is
-		// drawn as an overlay on its right edge only while shown (it auto-hides),
-		// so the picture is unobscured the rest of the time.
-		_playdateGameWidth = 320;
-		_playdateGameOffsetX = (_displayScreenWidth - _playdateGameWidth) / 2;
-		_displayFontWidth = 8;  // glyph cell; text is positioned via _playdateGameWidth
-		_displayFontHeight = (FONT_VISUAL_HEIGHT * kPlaydateFontRowsFor200 + 100) / 200; // text grid: 25 rows fill 240
+		_displayFontWidth = 8;
+		_displayFontHeight = 8;
 		_displayWidthMulAdjust = 0;
 		_displayHeightMulAdjust = 0;
+		for (int i = 0; i < 2; i++) {
+			free(_playdateSprite[i]);
+			_playdateSprite[i] = (byte *)calloc(SCRIPT_WIDTH * 2 * SCRIPT_HEIGHT, 1);
+		}
 		// The Playdate is 1-bit: the game screen (dither patterns) and the word
 		// picker both write colour index 1 for "lit", which the graphics palette
 		// (Hercules 2-colour) maps to white. The text-mode palette is EGA, where
@@ -304,12 +278,10 @@ void GfxMgr::deinitVideo() {
 	free(_gameScreen);
 	free(_priorityScreen);
 
-	free(_playdatePicture);
-	_playdatePicture = nullptr;
-	free(_playdateSprite);
-	_playdateSprite = nullptr;
-	delete _playdatePictureMgr;
-	_playdatePictureMgr = nullptr;
+	for (int i = 0; i < 2; i++) {
+		free(_playdateSprite[i]);
+		_playdateSprite[i] = nullptr;
+	}
 }
 
 void GfxMgr::setRenderStartOffset(uint16 offsetY) {
@@ -317,12 +289,7 @@ void GfxMgr::setRenderStartOffset(uint16 offsetY) {
 		error("invalid render start offset");
 
 	_renderStartVisualOffsetY = offsetY;
-	if (_vm->_renderMode == Common::kRenderPlaydate) {
-		// Playdate: scale offset by 1.2x (240/200)
-		_renderStartDisplayOffsetY = (offsetY * kPlaydateDisplayRowsFor200) / 200;
-	} else {
-		_renderStartDisplayOffsetY = offsetY * (1 + _displayHeightMulAdjust);
-	}
+	_renderStartDisplayOffsetY = offsetY * (1 + _displayHeightMulAdjust);
 }
 
 uint16 GfxMgr::getRenderStartDisplayOffsetY() const {
@@ -332,44 +299,26 @@ uint16 GfxMgr::getRenderStartDisplayOffsetY() const {
 // Translates a game screen coordinate to a display screen coordinate
 // Game screen to 320x200 -> x * 2, y + renderStart
 // Game screen to 640x400 -> x * 4, (y * 2) + renderStart
-// Game screen to 400x240 (Playdate) -> x * 2.5, y * 1.2 + renderStart
 void GfxMgr::translateGamePosToDisplayScreen(int16 &x, int16 &y) const {
-	if (_vm->_renderMode == Common::kRenderPlaydate) {
-		x = _playdateGameOffsetX + (x * _playdateGameWidth) / 160;
-		y = ((y + _renderStartVisualOffsetY) * kPlaydateDisplayRowsFor200) / 200;
-	} else {
-		x = x * (2 + _displayWidthMulAdjust);
-		y = y * (1 + _displayHeightMulAdjust) + _renderStartDisplayOffsetY;
-	}
+	x = x * (2 + _displayWidthMulAdjust);
+	y = y * (1 + _displayHeightMulAdjust) + _renderStartDisplayOffsetY;
 }
 
 // Translates a visual coordinate to a display screen coordinate
 // Visual to 320x200 -> x * 2, y
 // Visual to 640x400 -> x * 4, y * 2
-// Visual to 400x240 (Playdate) -> x * 2.5, y * 1.2
 void GfxMgr::translateVisualPosToDisplayScreen(int16 &x, int16 &y) const {
-	if (_vm->_renderMode == Common::kRenderPlaydate) {
-		x = _playdateGameOffsetX + (x * _playdateGameWidth) / 160;
-		y = (y * kPlaydateDisplayRowsFor200) / 200;
-	} else {
-		x = x * (2 + _displayWidthMulAdjust);
-		y = y * (1 + _displayHeightMulAdjust);
-	}
+	x = x * (2 + _displayWidthMulAdjust);
+	y = y * (1 + _displayHeightMulAdjust);
 }
 
 // Translates a display screen coordinate to a game screen coordinate
 // Display screen to 320x200 -> x / 2, y - renderStart
 // Display screen to 640x400 -> x / 4, (y / 2) - renderStart
-// Display screen to 400x240 (Playdate) -> x / 2.5, y / 1.2 - renderStart
 void GfxMgr::translateDisplayPosToGameScreen(int16 &x, int16 &y) const {
-	if (_vm->_renderMode == Common::kRenderPlaydate) {
-		x = ((x - _playdateGameOffsetX) * 160) / _playdateGameWidth;
-		y = (y * 200) / kPlaydateDisplayRowsFor200 - _renderStartVisualOffsetY;
-	} else {
-		y -= _renderStartDisplayOffsetY; // remove status bar line
-		x = x / (2 + _displayWidthMulAdjust);
-		y = y / (1 + _displayHeightMulAdjust);
-	}
+	y -= _renderStartDisplayOffsetY; // remove status bar line
+	x = x / (2 + _displayWidthMulAdjust);
+	y = y / (1 + _displayHeightMulAdjust);
 	if (y < 0)
 		y = 0;
 	if (y >= SCRIPT_HEIGHT)
@@ -378,25 +327,14 @@ void GfxMgr::translateDisplayPosToGameScreen(int16 &x, int16 &y) const {
 
 // Translates dimension from visual screen to display screen
 void GfxMgr::translateVisualDimensionToDisplayScreen(int16 &width, int16 &height) const {
-	if (_vm->_renderMode == Common::kRenderPlaydate) {
-		// Use ceiling division to ensure full coverage
-		width = (width * _playdateGameWidth + 159) / 160;
-		height = (height * kPlaydateDisplayRowsFor200 + 199) / 200;
-	} else {
-		width = width * (2 + _displayWidthMulAdjust);
-		height = height * (1 + _displayHeightMulAdjust);
-	}
+	width = width * (2 + _displayWidthMulAdjust);
+	height = height * (1 + _displayHeightMulAdjust);
 }
 
 // Translates dimension from display screen to visual screen
 void GfxMgr::translateDisplayDimensionToVisualScreen(int16 &width, int16 &height) const {
-	if (_vm->_renderMode == Common::kRenderPlaydate) {
-		width = (width * 160) / _playdateGameWidth;
-		height = (height * 200) / kPlaydateDisplayRowsFor200;
-	} else {
-		width = width / (2 + _displayWidthMulAdjust);
-		height = height / (1 + _displayHeightMulAdjust);
-	}
+	width = width / (2 + _displayWidthMulAdjust);
+	height = height / (1 + _displayHeightMulAdjust);
 }
 
 // Translates a rect from game screen to display screen
@@ -478,47 +416,19 @@ void GfxMgr::copyDisplayToScreen() {
 	_vm->_system->copyRectToScreen(_displayScreen, _displayScreenWidth, 0, 0, _displayScreenWidth, _displayScreenHeight);
 }
 
-// Vertical scale (display rows per 200 game-lines) for the text layer. In
-// graphics mode text overlays the picture: message boxes (drawBox), the text
-// inside them, and their restore (render_Block) must all share the picture's
-// scale, or a box lands offset from its text and the restore misses the text
-// pixels. In text mode (gfxMode == false) the whole screen is a boxless 25-row
-// text grid - name entry, the LSL quiz, menus - which only fits the 240 display
-// rows at the 240 scale. The two currently coincide, but keep the seam: AGI
-// never draws a message box in text mode, so it stays clean if the picture
-// scale is ever retuned.
-int GfxMgr::playdateTextRowsFor200() const {
-	return _vm->_game.gfxMode ? kPlaydateDisplayRowsFor200 : kPlaydateFontRowsFor200;
-}
-
 void GfxMgr::translateFontPosToDisplayScreen(int16 &x, int16 &y) const {
-	if (_vm->_renderMode == Common::kRenderPlaydate) {
-		// Playdate: scale font positions using the same ratios as visual coords
-		// This keeps text aligned with dialog boxes which use visual coordinates
-		x = _playdateGameOffsetX + (x * FONT_VISUAL_WIDTH * _playdateGameWidth) / 160; // col * 4 * (gameW/160)
-		y = (y * FONT_VISUAL_HEIGHT * playdateTextRowsFor200()) / 200;
-	} else {
-		x *= _displayFontWidth;
-		y *= _displayFontHeight;
-	}
+	x *= _displayFontWidth;
+	y *= _displayFontHeight;
 }
 
 void GfxMgr::translateDisplayPosToFontScreen(int16 &x, int16 &y) const {
-	if (_vm->_renderMode == Common::kRenderPlaydate)
-		x -= _playdateGameOffsetX;
 	x /= _displayFontWidth;
 	y /= _displayFontHeight;
 }
 
 void GfxMgr::translateFontDimensionToDisplayScreen(int16 &width, int16 &height) const {
-	if (_vm->_renderMode == Common::kRenderPlaydate) {
-		// Playdate: use ceiling division for dimensions to ensure full coverage
-		width = (width * FONT_VISUAL_WIDTH * _playdateGameWidth + 159) / 160;
-		height = (height * FONT_VISUAL_HEIGHT * playdateTextRowsFor200() + 199) / 200;
-	} else {
-		width *= _displayFontWidth;
-		height *= _displayFontHeight;
-	}
+	width *= _displayFontWidth;
+	height *= _displayFontHeight;
 }
 
 void GfxMgr::translateFontRectToDisplayScreen(int16 &x, int16 &y, int16 &width, int16 &height) const {
@@ -553,6 +463,9 @@ void GfxMgr::debugShowMap(int mapNr) {
 void GfxMgr::clear(byte color, byte priority) {
 	memset(_gameScreen, color, _pixels);
 	memset(_priorityScreen, priority, _pixels);
+	// A fresh picture has no sprites yet; they are composited afterwards.
+	if (_vm->_renderMode == Common::kRenderPlaydate)
+		clearSpriteLayers();
 }
 
 /**
@@ -735,23 +648,7 @@ void GfxMgr::render_Block(int16 x, int16 y, int16 width, int16 height, bool copy
 		break;
 	case Common::kRenderPlaydate:
 		render_BlockPlaydate(x, y, width, height);
-		if (copyToScreen) {
-			// For Playdate, compute display rect exactly as render_BlockPlaydate does
-			// to ensure the copy matches the rendered area precisely - including
-			// the 1px vertical widening it applies (see there), so the restored
-			// seam actually reaches the framebuffer.
-			const int displayX = _playdateGameOffsetX + (x * _playdateGameWidth) / 160;
-			int displayY = ((y + _renderStartVisualOffsetY) * kPlaydateDisplayRowsFor200) / 200;
-			int displayYEnd = ((y + _renderStartVisualOffsetY + height) * kPlaydateDisplayRowsFor200 + 199) / 200;
-			if (displayY > 0)
-				displayY--;
-			displayYEnd = MIN<int>(displayYEnd + 1, _displayScreenHeight);
-			const int displayW = _playdateGameOffsetX + ((x + width) * _playdateGameWidth + 159) / 160 - displayX;
-			const int displayH = displayYEnd - displayY;
-			_vm->_system->copyRectToScreen(_displayScreen + displayY * _displayScreenWidth + displayX,
-				_displayScreenWidth, displayX, displayY, displayW, displayH);
-		}
-		return;  // Early return for Playdate since we handled copy above
+		break;
 	case Common::kRenderCGA:
 		render_BlockCGA(x, y, width, height);
 		break;
@@ -1216,10 +1113,6 @@ void GfxMgr::block_restore(int16 x, int16 y, int16 width, int16 height, byte *bu
 		remainingHeight--;
 	}
 
-	// Restoring the background also removes any sprite that was here, so drop
-	// its pixels from the Playdate native sprite layer.
-	if (_vm->_renderMode == Common::kRenderPlaydate)
-		clearNativeSpriteRegion(x, y, width, height);
 }
 
 /**
@@ -1515,33 +1408,15 @@ void GfxMgr::updateScreen() {
 		// little at a time, so a long command cannot overflow it.
 		_vm->_playdateMenu->feedPendingInput();
 
-		// The game is centered (offset 40) with a black bar on each side. It
-		// stays put; the word picker is drawn as an overlay over its right edge
-		// only while shown, so the picture is unobscured the rest of the time.
-		// When the picker hides, the game underneath (and the right bar) must be
-		// repainted to wipe the stale overlay.
-		const bool pickerVisible = _vm->_playdateMenu->isVisible();
-
-		if (pickerVisible) {
+		// The picker owns the right 80 columns of the display permanently (the
+		// game area is 320 wide), so it never needs to be wiped or repainted over.
+		if (_vm->_playdateMenu->isVisible()) {
 			_vm->_playdateMenu->draw();
-			// The picker draws into _displayScreen directly; push its overlay
-			// column (from its left edge to the display's right edge).
 			const int16 menuX = _vm->_playdateMenu->menuLeft();
 			const int16 menuWidth = _displayScreenWidth - menuX;
 			_vm->_system->copyRectToScreen(_displayScreen + menuX, _displayScreenWidth,
 			                               menuX, 0, menuWidth, _displayScreenHeight);
-		} else if (_playdatePickerWasVisible && _vm->_game.gfxMode) {
-			// Picker just closed while a picture is up: clear the whole display
-			// (wiping the overlay and both letterbox bars) and repaint the game.
-			// Guarded on gfxMode so a text screen - e.g. Space Quest's "First
-			// Name:" prompt, where the picker doubles as an on-screen keyboard -
-			// is not erased and replaced by the stale picture.
-			drawDisplayRectPlaydate(0, 0, _displayScreenWidth, _displayScreenHeight, 0);
-			_vm->_system->copyRectToScreen(_displayScreen, _displayScreenWidth, 0, 0,
-			                               _displayScreenWidth, _displayScreenHeight);
-			((AgiEngine *)_vm)->redrawScreen();
 		}
-		_playdatePickerWasVisible = pickerVisible;
 	}
 #endif
 	_vm->_system->updateScreen();
@@ -1826,31 +1701,18 @@ void GfxMgr::setCursorPalette(bool amigaStyleCursor) {
 	}
 }
 #endif
-// Playdate dither patterns, indexed by GAME row (see the render loops), the
-// way the Hercules driver keys its cells to game rows (y*2 & 7). Keying the
-// pattern to the art instead of the screen is what makes the texture repeat
-// calmly in art space: every one-game-row feature (floor slats, panel seams)
-// shows a full-density pattern row wherever it sits on screen, instead of
-// whatever screen-space row it happens to land on under the non-integer 1.2x
-// vertical scale.
-//
-// Cell design rules, learned the hard way:
-//  - Every ROW of a cell carries the colour's density (no blank interleave
-//    rows), because at 1.2x most game rows get only one display row - a blank
-//    row in the cell would make some art rows render empty.
-//  - Phases advance in a simple 2- or 4-row march (45-degree lattices,
-//    diagonals, vertical ticks) - periodic and calm like the Hercules cells.
-//    Dispersed/bit-reversed phases read as noise, and 2-row zigzags between
-//    two fixed columns read as vertical stripes; both wreck legibility.
-//  - Single lit/unlit pixels only, never 2px clusters: a clustered "dash"
-//    renders as a 2-3px blob that no Hercules pattern ever produces.
-//
-// Densities are exactly the Hercules ramp (0, 6.25, 12.5, 25, 50, 62.5, 75,
-// 87.5, 93.75, 100%). Colours sharing a density are told apart by texture
-// direction, as on Hercules: marching-/ vs vertical ticks vs marching-\ at
-// 12.5%, stagger vs vertical pairs vs diagonal at 25%, hole ticks vs diagonal
-// holes at 87.5%. 1 and 14 keep a two-row period (their densities cannot fill
-// every row at 8px width); they are used for large areas, not row features.
+// Playdate dither patterns: one 8x8 cell per EGA colour, tiled across the game
+// area and keyed to the GAME row and column. At the integer 2x1 scale this is
+// exactly the QuickDraw scheme Sierra's Macintosh AGI used (8x8 patterns on a
+// 2x1-per-game-pixel grid) carrying the Hercules driver's grey ramp: densities
+// are the Hercules ones (0, 6.25, 12.5, 25, 50, 62.5, 75, 87.5, 93.75, 100%),
+// so tonal relationships match the Hercules art, and colours sharing a density
+// are told apart by texture direction as on Hercules (marching-/ vs vertical
+// ticks vs marching-\ at 12.5%, stagger vs vertical pairs vs diagonal at 25%,
+// hole ticks vs diagonal holes at 87.5%). Cells are calm periodic lattices of
+// single pixels: dispersed/bit-reversed phases read as noise, zigzags between
+// two columns read as stripes, and 2px clusters read as blobs. 6, 10, 11 and 13
+// are verbatim Hercules cells.
 //
 // Format: 16 colors x 8 rows = 128 bytes.
 // Bit layout: 0x80=bit7(left), 0x01=bit0(right), 1=white pixel, 0=black pixel.
@@ -1873,372 +1735,104 @@ static const uint8 playdatePatterns[] = {
 	0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, // 15 white (100%)
 };
 
-// Re-rasterize the current picture at native resolution into _playdatePicture.
-void GfxMgr::decodePlaydateNative(int16 resourceNr) {
-	// Match the display game width so the re-rasterized picture fills the whole
-	// game area 1:1 (crisp lines at the target resolution, no upscale doubling).
-	const int16 nw = _playdateGameWidth;
-	// The native background must use the SAME vertical scale as the rest of the
-	// layout (kPlaydateDisplayRowsFor200), otherwise sprites - placed by the
-	// upscale path at that scale - float off the ground drawn here. At 1.0x this
-	// is 168 rows; at 1.2x it would be ~202.
-	const int16 nh = (SCRIPT_HEIGHT * kPlaydateDisplayRowsFor200 + 100) / 200;
-	if (!_playdatePicture || _playdatePicW != nw || _playdatePicH != nh) {
-		free(_playdatePicture);
-		free(_playdateSprite);
-		_playdatePicture = (byte *)malloc((size_t)nw * nh);
-		_playdateSprite = (byte *)malloc((size_t)nw * nh);
-		_playdatePicW = nw;
-		_playdatePicH = nh;
-	}
-	if (!_playdatePicture || !_playdateSprite)
-		return;
-	// A fresh picture has no sprites yet; they are composited afterwards.
-	memset(_playdateSprite, 0, (size_t)nw * nh);
-	if (!_playdatePictureMgr)
-		_playdatePictureMgr = new PictureMgr_Playdate(_vm, this);
-	_playdatePictureMgr->decodeToNative(resourceNr, _playdatePicture, nw, nh);
-	_playdateBasePicNr = resourceNr;
+// --- Playdate sprite layers ---
+//
+// Two 320x168 byte layers over the game area, indexed by game row: [0] holds
+// the regular (updating) sprites, [1] the static (non-updating) ones. A cel is
+// dithered into its layer with the pattern phase anchored to the cel's own
+// origin - with purely screen-locked patterns a walking character's face would
+// re-dither every step - and gets a 1px black outline so it reads against the
+// dithered background. render_BlockPlaydate composites the layers over the
+// dithered game screen. Erasing a regular sprite clears only the regular layer,
+// so a character walking past a static sprite cannot punch a hole in it (the
+// SQ1 elevator-door tear). add.to.pic views are permanent scenery: they live in
+// the game screen only and use neither layer.
+
+static const int kPlaydateLayerWidth = SCRIPT_WIDTH * 2;
+
+static inline bool playdateGamePixelInBounds(int16 x, int16 y) {
+	return x >= 0 && y >= 0 && x < SCRIPT_WIDTH && y < SCRIPT_HEIGHT;
 }
 
-// Rebuild the native background after an overlay.pic. The game screen already
-// holds base+overlay, so a single seed captures every fill - but both
-// pictures' lines must be masked out of it BEFORE seeding (the seed holds the
-// overlay's fat lines too), then both pictures are stamped in order.
-void GfxMgr::overlayPlaydateNative(int16 overlayResourceNr) {
-	if (!_playdatePicture || !_playdatePictureMgr)
-		return; // no native background yet (no base picture drawn)
-	_playdatePictureMgr->beginNative(_playdatePicture, _playdatePicW, _playdatePicH);
-	if (_playdateBasePicNr >= 0)
-		_playdatePictureMgr->maskPicture(_playdateBasePicNr);
-	_playdatePictureMgr->maskPicture(overlayResourceNr);
-	_playdatePictureMgr->seedNative();
-	if (_playdateBasePicNr >= 0)
-		_playdatePictureMgr->stampPicture(_playdateBasePicNr);
-	_playdatePictureMgr->stampPicture(overlayResourceNr);
+void GfxMgr::clearSpriteLayers() {
+	for (int i = 0; i < 2; i++)
+		if (_playdateSprite[i])
+			memset(_playdateSprite[i], 0, kPlaydateLayerWidth * SCRIPT_HEIGHT);
 }
 
-// Dither the native-resolution picture 1:1 to the display (no upscale),
-// overlaying any composited sprite pixels.
-void GfxMgr::renderNativePicture() {
-	if (!_playdatePicture)
-		return;
-	const int startY = _renderStartDisplayOffsetY;
-	for (int ry = 0; ry < _playdatePicH; ry++) {
-		const int displayY = startY + ry;
-		if (displayY < 0 || displayY >= _displayScreenHeight)
-			continue;
-		// Pattern row keyed to the GAME row, Hercules-style, so textures repeat
-		// in art space and every one-row art feature dithers identically.
-		const int patternRow = ((ry * SCRIPT_HEIGHT) / _playdatePicH) & 0x07;
-		byte *drow = _displayScreen + displayY * _displayScreenWidth;
-		const byte *nrow = _playdatePicture + ry * _playdatePicW;
-		const byte *srow = _playdateSprite ? _playdateSprite + ry * _playdatePicW : nullptr;
-		for (int rx = 0; rx < _playdatePicW; rx++) {
-			const int displayX = _playdateGameOffsetX + rx;
-			if (displayX < 0 || displayX >= _displayScreenWidth)
-				continue;
-			if (srow && srow[rx]) {
-				drow[displayX] = (srow[rx] == 2) ? 1 : 0;
-				continue;
-			}
-			const byte color = nrow[rx] & 0x0F;
-			const byte pat = playdatePatterns[color * 8 + patternRow];
-			drow[displayX] = (pat >> (7 - (rx & 0x07))) & 1;
-		}
-	}
-}
-
-// --- Playdate native sprite layer ---
-
-void GfxMgr::beginNativeSprite(int16 topGameX, int16 topGameY, int16 height, int16 width) {
-	if (!_playdatePicture)
-		return;
-	_nativeSpriteOriginNX = (topGameX * _playdatePicW) / SCRIPT_WIDTH;
-
-	_nsTopGameX = topGameX;
-	_nsTopGameY = topGameY;
-	_nsHeight = height;
-	_nsTopNative = (topGameY * _playdatePicH) / SCRIPT_HEIGHT;
-	_nativeSpriteOriginNY = _nsTopNative; // dither phase anchor (top edge)
-
-	// Fill the per-sprite span tables so the per-pixel compositing avoids the
-	// divides in nativeSprite{Col,Row}Range.
-	_nsColCount = CLIP<int16>(width, 0, SCRIPT_WIDTH);
-	for (int16 lx = 0; lx <= _nsColCount; lx++) {
-		int nx0 = _nativeSpriteOriginNX + (lx * _playdatePicW) / SCRIPT_WIDTH;
-		int nx1 = _nativeSpriteOriginNX + ((lx + 1) * _playdatePicW) / SCRIPT_WIDTH;
-		if (nx1 <= nx0)
-			nx1 = nx0 + 1;
-		_nsColNx0[lx] = nx0;
-		_nsColNx1[lx] = nx1;
-	}
-	_nsRowCount = CLIP<int16>(height, 0, SCRIPT_HEIGHT);
-	for (int16 idx = 0; idx <= _nsRowCount; idx++) {
-		int ny0, ny1;
-		computeNativeSpriteRowRange(idx, ny0, ny1);
-		_nsRowNy0[idx] = ny0;
-		_nsRowNy1[idx] = ny1;
-	}
-}
-
-// Native row span for a local sprite row index. This is the SAME absolute map
-// the background uses (game row y occupies native rows [y*picH/H, (y+1)*picH/H)),
-// deliberately: Sierra games routinely animate pieces of the background with
-// view sprites (dock doors, lifts, machinery), and any sprite-private row
-// redistribution leaves such a sprite visibly misaligned against the art it is
-// replacing, and puts a sprite's rows out of register with the background rows
-// at priority boundaries (e.g. ego rising through a floor into a new room reads
-// as a priority bug). An earlier scheme absorbed the 1.2x stretch into the
-// bottom of the sprite to keep a walking ego's face rows fixed; accuracy of the
-// priority/control map and of background-replacement animation matters more.
-// Pattern stability is unaffected - the dither phase stays sprite-local (see
-// putNativeSpritePixel). beginNativeSprite pre-evaluates this into
-// _nsRowNy0/_nsRowNy1 so the hot path is a table read.
-void GfxMgr::computeNativeSpriteRowRange(int idx, int &ny0, int &ny1) const {
-	const int gameY = _nsTopGameY + idx;
-	ny0 = (gameY * _playdatePicH) / SCRIPT_HEIGHT;
-	ny1 = ((gameY + 1) * _playdatePicH) / SCRIPT_HEIGHT;
-	if (ny1 <= ny0)
-		ny1 = ny0 + 1;
-}
-
-void GfxMgr::nativeSpriteRowRange(int16 gameY, int &ny0, int &ny1) const {
-	const int idx = gameY - _nsTopGameY; // 0 = top row
-	if (idx >= 0 && idx <= _nsRowCount) {
-		ny0 = _nsRowNy0[idx];
-		ny1 = _nsRowNy1[idx];
-		return;
-	}
-	computeNativeSpriteRowRange(idx, ny0, ny1);
-}
-
-// Native column span [nx0, nx1) for one sprite game column. Measured relative to
-// the sprite's own left edge (_nsTopGameX -> _nativeSpriteOriginNX) rather than
-// the absolute screen column, so the horizontal scale (a non-integer
-// _playdateGameWidth/160 at the full-height fill) always rounds the SAME way for
-// a given interior column. The silhouette therefore keeps a constant width and
-// only translates as the sprite walks, instead of breathing by a pixel per step.
-// beginNativeSprite pre-evaluates this into _nsColNx0/_nsColNx1.
-void GfxMgr::nativeSpriteColRange(int16 gameX, int &nx0, int &nx1) const {
-	const int lx = gameX - _nsTopGameX;
-	if (lx >= 0 && lx <= _nsColCount) {
-		nx0 = _nsColNx0[lx];
-		nx1 = _nsColNx1[lx];
-		return;
-	}
-	nx0 = _nativeSpriteOriginNX + (lx * _playdatePicW) / SCRIPT_WIDTH;
-	nx1 = _nativeSpriteOriginNX + ((lx + 1) * _playdatePicW) / SCRIPT_WIDTH;
-	if (nx1 <= nx0)
-		nx1 = nx0 + 1;
+void GfxMgr::beginNativeSprite(int16 topGameX, int16 topGameY, bool isStatic) {
+	_spriteLayerCur = isStatic ? 1 : 0;
+	_spriteLayerOriginX = topGameX * 2;
+	_spriteLayerOriginY = topGameY;
 }
 
 void GfxMgr::putNativeSpritePixel(int16 gameX, int16 gameY, byte color) {
-	if (!_playdateSprite)
+	byte *layer = _playdateSprite[_spriteLayerCur];
+	if (!layer || !playdateGamePixelInBounds(gameX, gameY))
 		return;
-	int nx0, nx1;
-	nativeSpriteColRange(gameX, nx0, nx1);
-	int ny0, ny1;
-	nativeSpriteRowRange(gameY, ny0, ny1);
-	const byte colorIdx = color & 0x0F;
-	for (int ny = ny0; ny < ny1; ny++) {
-		if (ny < 0 || ny >= _playdatePicH)
-			continue;
-		// Sprite-local pattern phase: anchored to the cel origin, so the interior
-		// dither travels with the sprite instead of shimmering against a fixed
-		// screen grid. The black outline hides the phase seam at the edge.
-		const int localY = ny - _nativeSpriteOriginNY;
-		const byte pat = playdatePatterns[colorIdx * 8 + (localY & 0x07)];
-		byte *srow = _playdateSprite + ny * _playdatePicW;
-		for (int nx = nx0; nx < nx1; nx++) {
-			if (nx < 0 || nx >= _playdatePicW)
-				continue;
-			const int localX = nx - _nativeSpriteOriginNX;
-			const byte bit = (pat >> (7 - (localX & 0x07))) & 1;
-			srow[nx] = bit ? 2 : 1;
-		}
+	const byte pat = playdatePatterns[(color & 0x0F) * 8 + ((gameY - _spriteLayerOriginY) & 7)];
+	byte *row = layer + gameY * kPlaydateLayerWidth;
+	for (int sub = 0; sub < 2; sub++) {
+		const int px = gameX * 2 + sub;
+		const int localX = px - _spriteLayerOriginX;
+		row[px] = ((pat >> (7 - (localX & 7))) & 1) ? 2 : 1;
 	}
 }
 
 void GfxMgr::putNativeOutlinePixel(int16 gameX, int16 gameY) {
-	if (!_playdateSprite)
+	byte *layer = _playdateSprite[_spriteLayerCur];
+	if (!layer || !playdateGamePixelInBounds(gameX, gameY))
 		return;
-	int nx0, nx1;
-	nativeSpriteColRange(gameX, nx0, nx1);
-	int ny0, ny1;
-	nativeSpriteRowRange(gameY, ny0, ny1);
-	for (int ny = ny0; ny < ny1; ny++) {
-		if (ny < 0 || ny >= _playdatePicH)
-			continue;
-		byte *srow = _playdateSprite + ny * _playdatePicW;
-		for (int nx = nx0; nx < nx1; nx++) {
-			if (nx >= 0 && nx < _playdatePicW && !srow[nx]) // don't overwrite a sprite body pixel
-				srow[nx] = 1; // black
-		}
-	}
+	byte *px = layer + gameY * kPlaydateLayerWidth + gameX * 2;
+	if (!px[0])
+		px[0] = 1;
+	if (!px[1])
+		px[1] = 1;
 }
 
 bool GfxMgr::hasNativeSpriteAt(int16 gameX, int16 gameY) const {
-	if (!_playdateSprite || gameX < 0 || gameY < 0 || gameX >= SCRIPT_WIDTH || gameY >= SCRIPT_HEIGHT)
+	const byte *layer = _playdateSprite[_spriteLayerCur];
+	if (!layer || !playdateGamePixelInBounds(gameX, gameY))
 		return false;
-	const int nx = (gameX * _playdatePicW + _playdatePicW / 2) / SCRIPT_WIDTH;
-	const int ny = (gameY * _playdatePicH + _playdatePicH / 2) / SCRIPT_HEIGHT;
-	if (nx < 0 || nx >= _playdatePicW || ny < 0 || ny >= _playdatePicH)
-		return false;
-	return _playdateSprite[ny * _playdatePicW + nx] != 0;
+	return layer[gameY * kPlaydateLayerWidth + gameX * 2] != 0;
 }
 
-void GfxMgr::clearNativeSpriteRegion(int16 gameX, int16 gameY, int16 gameW, int16 gameH) {
-	if (!_playdateSprite)
+void GfxMgr::clearNativeSpriteRegion(int16 gameX, int16 gameY, int16 gameW, int16 gameH, bool isStatic) {
+	byte *layer = _playdateSprite[isStatic ? 1 : 0];
+	if (!layer)
 		return;
-	int nx0 = (gameX * _playdatePicW) / SCRIPT_WIDTH;
-	int nx1 = ((gameX + gameW) * _playdatePicW + SCRIPT_WIDTH - 1) / SCRIPT_WIDTH;
-	int ny0 = (gameY * _playdatePicH) / SCRIPT_HEIGHT;
-	int ny1 = ((gameY + gameH) * _playdatePicH + SCRIPT_HEIGHT - 1) / SCRIPT_HEIGHT;
-	nx0 = CLIP<int>(nx0, 0, _playdatePicW);
-	nx1 = CLIP<int>(nx1, 0, _playdatePicW);
-	ny0 = CLIP<int>(ny0, 0, _playdatePicH);
-	ny1 = CLIP<int>(ny1, 0, _playdatePicH);
-	for (int ny = ny0; ny < ny1; ny++)
-		memset(_playdateSprite + ny * _playdatePicW + nx0, 0, nx1 - nx0);
+	const int x0 = CLIP<int>(gameX, 0, SCRIPT_WIDTH);
+	const int x1 = CLIP<int>(gameX + gameW, 0, SCRIPT_WIDTH);
+	const int y0 = CLIP<int>(gameY, 0, SCRIPT_HEIGHT);
+	const int y1 = CLIP<int>(gameY + gameH, 0, SCRIPT_HEIGHT);
+	for (int y = y0; y < y1; y++)
+		memset(layer + y * kPlaydateLayerWidth + x0 * 2, 0, (x1 - x0) * 2);
 }
 
-void GfxMgr::bakeNativeBackgroundRegion(int16 gameX, int16 gameY, int16 gameW, int16 gameH) {
-	if (!_playdatePicture)
-		return;
-	int nx0 = (gameX * _playdatePicW) / SCRIPT_WIDTH;
-	int nx1 = ((gameX + gameW) * _playdatePicW + SCRIPT_WIDTH - 1) / SCRIPT_WIDTH;
-	int ny0 = (gameY * _playdatePicH) / SCRIPT_HEIGHT;
-	int ny1 = ((gameY + gameH) * _playdatePicH + SCRIPT_HEIGHT - 1) / SCRIPT_HEIGHT;
-	nx0 = CLIP<int>(nx0, 0, _playdatePicW);
-	nx1 = CLIP<int>(nx1, 0, _playdatePicW);
-	ny0 = CLIP<int>(ny0, 0, _playdatePicH);
-	ny1 = CLIP<int>(ny1, 0, _playdatePicH);
-	for (int ny = ny0; ny < ny1; ny++) {
-		const int sy = (ny * SCRIPT_HEIGHT) / _playdatePicH;
-		for (int nx = nx0; nx < nx1; nx++) {
-			const int sx = (nx * SCRIPT_WIDTH) / _playdatePicW;
-			_playdatePicture[ny * _playdatePicW + nx] = getColor(sx, sy);
-		}
-	}
-}
-
-// Dither background+sprites for a game-space rectangle to the display and push
-// it to the backend. Used in place of render_Block for sprite updates so cels
-// composite over the crisp native background at native resolution.
-void GfxMgr::renderNativeSpriteRegion(int16 gameX, int16 gameY, int16 gameW, int16 gameH) {
-	if (!_playdatePicture || !_playdateSprite)
-		return;
-
-	int nx0 = (gameX * _playdatePicW) / SCRIPT_WIDTH;
-	int nx1 = ((gameX + gameW) * _playdatePicW + SCRIPT_WIDTH - 1) / SCRIPT_WIDTH;
-	int ny0 = (gameY * _playdatePicH) / SCRIPT_HEIGHT;
-	int ny1 = ((gameY + gameH) * _playdatePicH + SCRIPT_HEIGHT - 1) / SCRIPT_HEIGHT;
-	nx0 = CLIP<int>(nx0, 0, _playdatePicW);
-	nx1 = CLIP<int>(nx1, 0, _playdatePicW);
-	ny0 = CLIP<int>(ny0, 0, _playdatePicH);
-	ny1 = CLIP<int>(ny1, 0, _playdatePicH);
-
-	const int startY = _renderStartDisplayOffsetY;
-	int minDX = _displayScreenWidth, maxDX = -1;
-	int minDY = _displayScreenHeight, maxDY = -1;
-	for (int ny = ny0; ny < ny1; ny++) {
-		const int displayY = startY + ny;
+// Dither a game-screen block to the display at the integer 2x1 scale: each game
+// pixel becomes two display pixels on one row, taking its bits from the colour's
+// 8x8 cell keyed to the GAME row and column (so textures are locked to the art,
+// as on Hercules), with any sprite-layer pixel overriding the background.
+void GfxMgr::render_BlockPlaydate(int16 x, int16 y, int16 width, int16 height) {
+	const byte *regular = _playdateSprite[0];
+	const byte *statics = _playdateSprite[1];
+	for (int16 gy = y; gy < y + height; gy++) {
+		const int displayY = gy + _renderStartDisplayOffsetY;
 		if (displayY < 0 || displayY >= _displayScreenHeight)
 			continue;
-		// Game-row keyed, matching renderNativePicture, so a partial repaint
-		// dithers identically to the full-screen render.
-		const int patternRow = ((ny * SCRIPT_HEIGHT) / _playdatePicH) & 0x07;
-		byte *drow = _displayScreen + displayY * _displayScreenWidth;
-		const byte *nrow = _playdatePicture + ny * _playdatePicW;
-		const byte *srow = _playdateSprite + ny * _playdatePicW;
-		for (int nx = nx0; nx < nx1; nx++) {
-			const int displayX = _playdateGameOffsetX + nx;
-			if (displayX < 0 || displayX >= _displayScreenWidth)
-				continue;
-			if (srow[nx]) {
-				drow[displayX] = (srow[nx] == 2) ? 1 : 0;
-			} else {
-				const byte color = nrow[nx] & 0x0F;
-				const byte pat = playdatePatterns[color * 8 + patternRow];
-				drow[displayX] = (pat >> (7 - (nx & 0x07))) & 1;
+		const byte *src = _activeScreen + gy * SCRIPT_WIDTH;
+		byte *dst = _displayScreen + displayY * _displayScreenWidth;
+		const int layerRow = gy * kPlaydateLayerWidth;
+		const int patternRow = gy & 7;
+		for (int16 gx = x; gx < x + width; gx++) {
+			const byte pat = playdatePatterns[(src[gx] & 0x0F) * 8 + patternRow];
+			for (int sub = 0; sub < 2; sub++) {
+				const int px = gx * 2 + sub;
+				byte s = regular ? regular[layerRow + px] : 0;
+				if (!s && statics)
+					s = statics[layerRow + px];
+				dst[px] = s ? (s == 2 ? 1 : 0) : ((pat >> (7 - (px & 7))) & 1);
 			}
-			if (displayX < minDX) minDX = displayX;
-			if (displayX > maxDX) maxDX = displayX;
-			if (displayY < minDY) minDY = displayY;
-			if (displayY > maxDY) maxDY = displayY;
-		}
-	}
-
-	if (maxDX >= minDX && maxDY >= minDY)
-		_vm->_system->copyRectToScreen(_displayScreen + minDY * _displayScreenWidth + minDX,
-			_displayScreenWidth, minDX, minDY, maxDX - minDX + 1, maxDY - minDY + 1);
-}
-
-void GfxMgr::render_BlockPlaydate(int16 x, int16 y, int16 width, int16 height) {
-	// Full-picture render: use the crisp native-resolution background instead
-	// of upscaling the 160x168 buffer. Partial (sprite) renders fall through to
-	// the upscale path below.
-	if (_playdatePicture && x <= 0 && y <= 0 && width >= SCRIPT_WIDTH && height >= SCRIPT_HEIGHT) {
-		renderNativePicture();
-		return;
-	}
-
-	// Render at native Playdate resolution (400x240) using native patterns.
-	// Patterns are 8x8 tiles that tile across the entire display.
-	// NO downsampling or scaling of patterns - they render at native dot pitch.
-
-	// Calculate the display area for this AGI block
-	// Scale: 160 AGI → 400 display (2.5x horizontal)
-	// Scale: 200 visual → 240 display (1.2x vertical)
-	// Use floor for start and ceiling for end to ensure full coverage
-	const int displayX0 = _playdateGameOffsetX + (x * _playdateGameWidth) / 160;
-	const int displayX1 = _playdateGameOffsetX + ((x + width) * _playdateGameWidth + 159) / 160;  // ceiling division
-	int displayY0 = ((y + _renderStartVisualOffsetY) * kPlaydateDisplayRowsFor200) / 200;
-	int displayY1 = ((y + _renderStartVisualOffsetY + height) * kPlaydateDisplayRowsFor200 + 199) / 200;  // ceiling division
-
-	// Widen the vertical span by one display row each way. The message-box draw
-	// path (drawBox) truncates the 1.2x vertical scale of y and the render-start
-	// offset separately, while we combine them, so a drawn box can extend up to
-	// 1px past this rect - closing the window would then leave a 1px seam where
-	// its top border was. Rows that map outside the game screen are skipped
-	// below and extra rows just repaint identical content, so this is safe for
-	// every caller (full-screen redraws clamp to the same bounds).
-	if (displayY0 > 0)
-		displayY0--;
-	displayY1++;
-
-	for (int displayY = displayY0; displayY < displayY1 && displayY < _displayScreenHeight; ++displayY) {
-		// Map display Y to AGI Y
-		const int agiY = ((displayY * 200) / kPlaydateDisplayRowsFor200) - _renderStartVisualOffsetY;
-		if (agiY < 0 || agiY >= SCRIPT_HEIGHT)
-			continue;
-
-		// Pattern row keyed to the game row (Hercules-style, matching the
-		// native picture render) so art features dither identically everywhere.
-		const int patternRow = agiY & 0x07;
-
-		byte *displayRow = _displayScreen + displayY * _displayScreenWidth;
-		const byte *agiRow = _activeScreen + agiY * SCRIPT_WIDTH;
-
-		for (int displayX = displayX0; displayX < displayX1 && displayX < _displayScreenWidth; ++displayX) {
-			// Map display X to AGI X
-			const int agiX = ((displayX - _playdateGameOffsetX) * 160) / _playdateGameWidth;
-			if (agiX < 0 || agiX >= SCRIPT_WIDTH)
-				continue;
-
-			// Get AGI color
-			const byte color = agiRow[agiX] & 0x0F;
-
-			// Get the pattern byte for this color and row
-			const byte patternByte = playdatePatterns[color * 8 + patternRow];
-
-			// Pattern column relative to the game area, so the phase is fixed
-			// in game space regardless of where the area sits on screen.
-			const int bitPos = 7 - ((displayX - _playdateGameOffsetX) & 0x07);
-			const byte pixel = (patternByte >> bitPos) & 1;
-
-			displayRow[displayX] = pixel;
 		}
 	}
 }

@@ -121,50 +121,13 @@ private:
 	uint16 _displayScreenWidth;
 	uint16 _displayScreenHeight;
 
-	// kRenderPlaydate layout. The game is always rendered 320 pixels wide
-	// so its pixel aspect matches the original (AGI's 160 doubled to 320,
-	// 200 lines scaled to 240 = 1.2x) rather than being stretched across
-	// the full 400-pixel display. The game is centered (offset 40) with a
-	// black bar on each side; the word picker draws as a temporary overlay
-	// over the right edge while visible (see GfxMgr::updateScreen).
-	uint16 _playdateGameWidth;
-	uint16 _playdateGameOffsetX;
-	bool _playdatePickerWasVisible; // picker shown last frame (to repaint on hide)
-
-	// Native-resolution background for Playdate: the picture re-rasterized at
-	// display resolution (crisp lines, no upscale row-doubling) instead of
-	// scaling up the 160x168 buffer. Null until the first picture is decoded.
-	byte *_playdatePicture;
-	int16 _playdatePicW, _playdatePicH;
-	int16 _playdateBasePicNr; // last whole-picture (clearScreen) resource, for overlay replay
-	class PictureMgr_Playdate *_playdatePictureMgr;
-
-	// Native-resolution sprite layer, same dimensions as _playdatePicture. One
-	// byte per native pixel: 0 = no sprite (show background), 1 = sprite black,
-	// 2 = sprite white. Cels are dithered into this at native resolution with a
-	// sprite-local pattern phase so their interior is stable as they move, and
-	// composited over the crisp background instead of upscaling the mixed
-	// 160x168 game screen. Null until the first picture is decoded.
-	byte *_playdateSprite;
-	int16 _nativeSpriteOriginNX, _nativeSpriteOriginNY; // sprite-local dither anchor
-
-	// Per-sprite native mapping state (see beginNativeSprite). Sprite rows and
-	// columns use the same absolute map as the background, so sprites that
-	// replace background art stay pixel-aligned and priority boundaries hold
-	// exactly; only the dither pattern phase is sprite-local.
-	int16 _nsTopGameX;   // game column of the sprite's left edge
-	int16 _nsTopGameY;   // game row of the sprite's top edge
-	int16 _nsHeight;     // sprite height in game rows
-	int16 _nsTopNative;  // native row of the sprite's top edge (dither anchor)
-
-	// Per-sprite native span lookup, filled once by beginNativeSprite so the
-	// hot per-cel-pixel compositing does an array read instead of the integer
-	// divides in nativeSprite{Col,Row}Range. Indexed by local column/row offset
-	// (gameX - _nsTopGameX, gameY - _nsTopGameY); coordinates outside the filled
-	// [0, count] range fall back to computing directly.
-	int16 _nsColNx0[SCRIPT_WIDTH + 2], _nsColNx1[SCRIPT_WIDTH + 2];
-	int16 _nsRowNy0[SCRIPT_HEIGHT + 2], _nsRowNy1[SCRIPT_HEIGHT + 2];
-	int16 _nsColCount, _nsRowCount; // number of valid entries in each table
+	// Playdate sprite layers: [0] regular (updating) sprites, [1] static ones.
+	// 320x168 bytes each (the game area at 2x1), indexed by game row: 0 = no
+	// sprite pixel, 1 = black, 2 = white. See the sprite layer section in
+	// graphics.cpp. Null outside kRenderPlaydate.
+	byte *_playdateSprite[2];
+	int _spriteLayerCur;                            // layer the current cel composites into
+	int16 _spriteLayerOriginX, _spriteLayerOriginY; // cel-local dither phase anchor (display x, game y)
 
 	uint16 _displayFontWidth;
 	uint16 _displayFontHeight;
@@ -225,48 +188,21 @@ private:
 	void render_BlockCGA(int16 x, int16 y, int16 width, int16 height);
 	void render_BlockHercules(int16 x, int16 y, int16 width, int16 height);
 	void render_BlockPlaydate(int16 x, int16 y, int16 width, int16 height);
-	void renderNativePicture();
 
 public:
-	// Re-rasterize the given picture into the Playdate native-resolution
-	// background buffer. Called by PictureMgr::decodePicture after the normal
-	// 160x168 decode when running in Playdate render mode.
-	void decodePlaydateNative(int16 resourceNr);
-	// Rebuild the native background after an overlay.pic, so the overlaid change
-	// (e.g. closing doors) is reflected in the crisp background as well.
-	void overlayPlaydateNative(int16 overlayResourceNr);
-
-	// --- Playdate native sprite layer ---
-	bool hasNativeBackground() const { return _playdatePicture != nullptr; }
-	// Set up the vertical scaling map and dither anchor for a cel occupying the
-	// given game-space rectangle, so its interior is crisp and stable as it
-	// moves. Call once before the cel's putNativeSpritePixel/OutlinePixel calls.
-	void beginNativeSprite(int16 topGameX, int16 topGameY, int16 height, int16 width);
-	// Native row span [ny0, ny1) that a given sprite game row maps to under the
-	// current beginNativeSprite() map.
-	void computeNativeSpriteRowRange(int idx, int &ny0, int &ny1) const;
-	// Vertical scale (display rows per 200 game-lines) for the text layer:
-	// the picture's fill scale in graphics mode, the shorter fit scale in text
-	// mode (see the definition).
-	int playdateTextRowsFor200() const;
-	void nativeSpriteRowRange(int16 gameY, int &ny0, int &ny1) const;
-	// Native column span [nx0, nx1) for a sprite game column, anchored to the
-	// sprite's left edge so its width is stable frame-to-frame.
-	void nativeSpriteColRange(int16 gameX, int &nx0, int &nx1) const;
-	// Composite one visible cel pixel (game coords) into the native sprite layer.
+	// --- Playdate sprite layers (see graphics.cpp) ---
+	bool hasSpriteLayer() const { return _playdateSprite[0] != nullptr; }
+	void clearSpriteLayers();
+	// Select the layer and dither anchor for the cel about to be composited.
+	void beginNativeSprite(int16 topGameX, int16 topGameY, bool isStatic);
+	// Composite one visible cel pixel (game coords) into the current layer.
 	void putNativeSpritePixel(int16 gameX, int16 gameY, byte color);
-	// Mark one game pixel as a black sprite outline in the native sprite layer.
+	// Mark one game pixel as black outline in the current layer (never over a body pixel).
 	void putNativeOutlinePixel(int16 gameX, int16 gameY);
-	// True if the native sprite layer holds a sprite pixel for this game pixel.
+	// True if the current layer holds a sprite pixel at this game pixel.
 	bool hasNativeSpriteAt(int16 gameX, int16 gameY) const;
-	// Clear the native sprite layer for a game-space rectangle (top-left origin).
-	void clearNativeSpriteRegion(int16 gameX, int16 gameY, int16 gameW, int16 gameH);
-	// Dither background+sprites for a game-space rectangle to the display and
-	// push it to the backend. Used in place of render_Block for sprite updates.
-	void renderNativeSpriteRegion(int16 gameX, int16 gameY, int16 gameW, int16 gameH);
-	// Bake the current game-screen contents of a rectangle into the native
-	// background (for add.to.pic, whose views become part of the scenery).
-	void bakeNativeBackgroundRegion(int16 gameX, int16 gameY, int16 gameW, int16 gameH);
+	// Clear a game-space rectangle (top-left origin) in the regular or static layer.
+	void clearNativeSpriteRegion(int16 gameX, int16 gameY, int16 gameW, int16 gameH, bool isStatic = false);
 
 	void transition_Amiga();
 	void transition_AtariSt();

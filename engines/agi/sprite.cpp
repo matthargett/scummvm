@@ -159,17 +159,15 @@ void SpritesMgr::freeAllSprites() {
 void SpritesMgr::eraseSprites(SpriteList &spriteList) {
 	SpriteList::iterator iter;
 //	warning("eraseSprites - count %d", spriteList.size());
-	const bool rebakeBackground = _drawingStatic && _vm->_renderMode == Common::kRenderPlaydate &&
-		_gfx->hasNativeBackground();
+	const bool clearLayer = _vm->_renderMode == Common::kRenderPlaydate && _gfx->hasSpriteLayer();
 	for (iter = spriteList.reverse_begin(); iter != spriteList.end(); iter--) {
 		Sprite &sprite = *iter;
 		_gfx->block_restore(sprite.xPos, sprite.yPos, sprite.xSize, sprite.ySize, sprite.backgroundBuffer);
-		// A static sprite was baked into the native background; block_restore has
-		// put the plain background back in the game screen, so re-derive the
-		// native background from it to remove the baked sprite (no ghost when a
-		// static sprite changes, e.g. a door opening).
-		if (rebakeBackground)
-			_gfx->bakeNativeBackgroundRegion(sprite.xPos, sprite.yPos, sprite.xSize, sprite.ySize);
+		// Playdate: the sprite's pixels also live in its layer. Clear that
+		// rectangle in THIS list's layer only, so a regular sprite passing a
+		// static one does not punch a hole in it (the SQ1 elevator-door tear).
+		if (clearLayer)
+			_gfx->clearNativeSpriteRegion(sprite.xPos, sprite.yPos, sprite.xSize, sprite.ySize, _drawingStatic);
 	}
 
 	freeList(spriteList);
@@ -256,50 +254,15 @@ void SpritesMgr::drawCel(ScreenObjEntry *screenObj) {
 	curY = curY - celPtr->height + 1;
 	const int16 topY = curY;
 
-	// Playdate: composite this cel into the native sprite layer (see
-	// GfxMgr::putNativeSpritePixel) at display resolution, so it reads crisply
-	// over the native background instead of being upscaled from 160x168. The
-	// visibility test below (priority / control pixels) still gates it, so the
-	// native copy is occluded exactly like the game-screen copy.
-	//
-	// Static sprites and add.to.pic views are instead baked into the native
-	// background (below), because they are not redrawn every cycle: leaving them
-	// in the transient sprite layer would let a passing regular sprite's erase
-	// (which clears that layer) punch a permanent hole in them.
-	const bool bakeToBackground = _vm->_renderMode == Common::kRenderPlaydate &&
-		(_bakingToPicture || _drawingStatic) && _gfx->hasNativeBackground();
+	// Playdate: composite this cel into its sprite layer (see the sprite layer
+	// section in graphics.cpp) with a cel-anchored dither phase and an outline.
+	// The visibility test below (priority / control pixels) still gates it, so
+	// the layer copy is occluded exactly like the game-screen copy. add.to.pic
+	// views are permanent scenery and stay in the game screen only.
 	const bool nativeSprite = _vm->_renderMode == Common::kRenderPlaydate &&
-		!bakeToBackground && _gfx->hasNativeBackground();
+		!_bakingToPicture && _gfx->hasSpriteLayer();
 	if (nativeSprite)
-		_gfx->beginNativeSprite(baseX, topY, celPtr->height, celWidth);
-
-	// Playdate without a native background (e.g. AGI256): give the sprite a 1px
-	// black outline in the game screen so it reads clearly against the dithered
-	// 1-bit background. Drawn on the cel's own transparent pixels that touch an
-	// opaque pixel, so it stays inside the cel footprint and leaves no trail.
-	// (With a native background the outline is drawn into the native layer after
-	// the opaque pass instead - see below.)
-	if (_vm->_renderMode == Common::kRenderPlaydate && !nativeSprite) {
-		const byte *bmp = celPtr->rawBitmap;
-		const int16 celHeightI = celPtr->height;
-		for (int16 cy = 0; cy < celHeightI; cy++) {
-			for (int16 cx = 0; cx < celWidth; cx++) {
-				if (bmp[cy * celWidth + cx] != celClearKey)
-					continue; // outline only the transparent pixels
-				const bool touchesOpaque =
-					(cx > 0              && bmp[cy * celWidth + cx - 1] != celClearKey) ||
-					(cx < celWidth - 1   && bmp[cy * celWidth + cx + 1] != celClearKey) ||
-					(cy > 0              && bmp[(cy - 1) * celWidth + cx] != celClearKey) ||
-					(cy < celHeightI - 1 && bmp[(cy + 1) * celWidth + cx] != celClearKey);
-				if (!touchesOpaque)
-					continue;
-				const int16 px = baseX + cx;
-				const int16 py = curY + cy;
-				if (_gfx->getPriority(px, py) <= viewPriority)
-					_gfx->putPixel(px, py, GFX_SCREEN_MASK_VISUAL, 0, 0); // black
-			}
-		}
-	}
+		_gfx->beginNativeSprite(baseX, topY, _drawingStatic);
 
 	while (remainingCelHeight) {
 		for (int16 loopX = 0; loopX < celWidth; loopX++) {
@@ -373,12 +336,6 @@ void SpritesMgr::drawCel(ScreenObjEntry *screenObj) {
 		}
 	}
 
-	// Bake a static sprite into the native background now that the game screen
-	// holds it (add.to.pic bakes itself after drawing its priority box, so it is
-	// excluded here). Its priority still lives in the 160x168 priority screen, so
-	// ego occludes against it exactly as before; this only affects the display.
-	if (_drawingStatic && _vm->_renderMode == Common::kRenderPlaydate && _gfx->hasNativeBackground())
-		_gfx->bakeNativeBackgroundRegion(baseX, topY, celWidth, celPtr->height);
 
 	if (screenObj->objectNr == 0) { // if ego, update if ego is visible at the moment
 		_vm->setFlag(VM_FLAG_EGO_INVISIBLE, isViewHidden);
@@ -460,10 +417,7 @@ void SpritesMgr::showSprite(ScreenObjEntry *screenObj) {
 
 	// render this block
 	int16 upperY = y - height + 1;
-	if (_vm->_renderMode == Common::kRenderPlaydate && _gfx->hasNativeBackground())
-		_gfx->renderNativeSpriteRegion(x, upperY, width, height);
-	else
-		_gfx->render_Block(x, upperY, width, height);
+	_gfx->render_Block(x, upperY, width, height);
 }
 
 void SpritesMgr::showSprites(SpriteList &spriteList) {
@@ -585,16 +539,11 @@ void SpritesMgr::addToPic(int16 viewNr, int16 loopNr, int16 celNr, int16 xPos, i
 	if (screenObj->priority == 0) {
 		screenObj->priority = _gfx->priorityFromY(screenObj->yPos);
 	}
-	// add.to.pic views are permanent scenery, not moving sprites: bake them into
-	// the Playdate native background rather than the transient native sprite
-	// layer (which is cleared every frame).
+	// add.to.pic views are permanent scenery, not moving sprites: on Playdate
+	// they go into the game screen only, never a sprite layer.
 	_bakingToPicture = true;
 	drawCel(screenObj);
 	_bakingToPicture = false;
-	if (_vm->_renderMode == Common::kRenderPlaydate && _gfx->hasNativeBackground()) {
-		const int16 top = screenObj->yPos - screenObj->ySize + 1;
-		_gfx->bakeNativeBackgroundRegion(screenObj->xPos, top, screenObj->xSize, screenObj->ySize);
-	}
 
 	if (border <= 3) {
 		// Create priority-box
