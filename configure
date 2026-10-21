@@ -4269,7 +4269,10 @@ if test -n "$_host"; then
 			_mt32emu=no
 			_nuked_opl=no
 			_tinygl=no
-			_highres=no
+			# Oversized game screens are sampled 2:1 and centered by the backend
+			# (ADL's 560x384 Apple II surface lands at the Apple II's own 280x192),
+			# so high-resolution engines are not excluded at configure time.
+			_highres=yes
 			_vkeybd=no
 			_eventrec=no
 			_translation=no
@@ -4284,6 +4287,10 @@ if test -n "$_host"; then
 			engine_disable_all
 			engine_enable agi
 			engine_enable sci
+			# Hi-Res Adventures: the Apple II's 280x192 1-bit art lands 1:1 on
+			# the 400x240 LCD (the backend samples its 2x surface every other
+			# pixel), so it belongs in the port's default set.
+			engine_enable adl
 			engine_disable sci32
 			;;
 		playdate-simulator)
@@ -4308,7 +4315,10 @@ if test -n "$_host"; then
 			_mt32emu=no
 			_nuked_opl=no
 			_tinygl=no
-			_highres=no
+			# Oversized game screens are sampled 2:1 and centered by the backend
+			# (ADL's 560x384 Apple II surface lands at the Apple II's own 280x192),
+			# so high-resolution engines are not excluded at configure time.
+			_highres=yes
 			_vkeybd=no
 			_eventrec=no
 			_translation=no
@@ -4320,6 +4330,10 @@ if test -n "$_host"; then
 			engine_disable_all
 			engine_enable agi
 			engine_enable sci
+			# Hi-Res Adventures: the Apple II's 280x192 1-bit art lands 1:1 on
+			# the 400x240 LCD (the backend samples its 2x surface every other
+			# pixel), so it belongs in the port's default set.
+			engine_enable adl
 			engine_disable sci32
 			;;
 		ppc-amigaos)
