@@ -91,6 +91,14 @@ void OSystem_Playdate::initBackend() {
 	// verbatim.
 	ConfMan.registerDefault("render_mode", "playdate");
 
+	// ADL (the Apple II Hi-Res Adventures) can simulate NTSC colour artifacts
+	// and a colour monitor; on a 1-bit screen both only smear the art that was
+	// drawn as 1-bit in the first place, so pin the engine to its monochrome
+	// output. These are set, not defaulted, because the engine registers its
+	// own defaults for them (NTSC on) when a game starts.
+	ConfMan.setBool("ntsc", false, Common::ConfigManager::kApplicationDomain);
+	ConfMan.setBool("color", false, Common::ConfigManager::kApplicationDomain);
+
 	_pd->file->mkdir("saves");
 
 	_timerManager = new DefaultTimerManager();

@@ -5082,7 +5082,7 @@ fi
 # Enable 16bit support only for backends which support it
 #
 case $_backend in
-	3ds | android | dc | ds | emscripten | ios7 | kolibrios | maemo | null | opendingux | miyoomini | miyoo | openpandora | psp | psp2 | sailfish | samsungtv | sdl | switch | wii)
+	3ds | android | dc | ds | emscripten | ios7 | kolibrios | maemo | null | opendingux | miyoomini | miyoo | openpandora | playdate | psp | psp2 | sailfish | samsungtv | sdl | switch | wii)
 		if test "$_16bit" = auto ; then
 			_16bit=yes
 		else

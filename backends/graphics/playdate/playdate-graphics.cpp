@@ -94,18 +94,22 @@ Graphics::PixelFormat PlaydateGraphicsManager::getScreenFormat() const {
 Common::List<Graphics::PixelFormat> PlaydateGraphicsManager::getSupportedFormats() const {
 	Common::List<Graphics::PixelFormat> list;
 	list.push_back(Graphics::PixelFormat::createFormatCLUT8());
+	// RGB565 for engines that insist on a true-colour surface (ADL's Apple II
+	// display); it is thresholded to 1-bit in renderGameScreen.
+	list.push_back(Graphics::PixelFormat(2, 5, 6, 5, 0, 11, 5, 0, 0));
 	return list;
 }
 #endif
 
 void PlaydateGraphicsManager::initSize(uint width, uint height, const Graphics::PixelFormat *format) {
-	assert(!format || format->isCLUT8());
+	const Graphics::PixelFormat fmt = format ? *format : Graphics::PixelFormat::createFormatCLUT8();
+	assert(fmt.isCLUT8() || fmt.bytesPerPixel == 2);
 
-	if (_gameScreen.w == (int16)width && _gameScreen.h == (int16)height)
+	if (_gameScreen.w == (int16)width && _gameScreen.h == (int16)height && _gameScreen.format == fmt)
 		return;
 
 	_gameScreen.free();
-	_gameScreen.create(width, height, Graphics::PixelFormat::createFormatCLUT8());
+	_gameScreen.create(width, height, fmt);
 	_screenChangeID++;
 	_forceFullRefresh = true;
 }
@@ -153,8 +157,29 @@ void PlaydateGraphicsManager::copyRectToScreen(const void *buf, int pitch, int x
 
 	assert(x >= 0 && y >= 0 && x + w <= _gameScreen.w && y + h <= _gameScreen.h);
 	_gameScreen.copyRectToSurface(buf, pitch, x, y, w, h);
-	// renderGameScreen maps game row r to frame row r + _shakeOffsetY.
-	markDirtyRows(y + _shakeOffsetY, y + h - 1 + _shakeOffsetY);
+	markDirtyRows(frameRowForGameRow(y), frameRowForGameRow(y + h - 1));
+}
+
+// How the game screen lands on the LCD: 1:1 at the top left for screens that
+// fit (AGI's 400x240), or sampled every other pixel and centered for screens
+// that don't (ADL's 560x384 Apple II surface becomes 280x192, which is the
+// Apple II's real resolution).
+int PlaydateGraphicsManager::displayStep() const {
+	return (_gameScreen.w > LCD_COLUMNS || _gameScreen.h > LCD_ROWS) ? 2 : 1;
+}
+
+int PlaydateGraphicsManager::displayBaseX() const {
+	const int step = displayStep();
+	return step == 1 ? 0 : (LCD_COLUMNS - MIN<int>(_gameScreen.w / step, LCD_COLUMNS)) / 2;
+}
+
+int PlaydateGraphicsManager::displayBaseY() const {
+	const int step = displayStep();
+	return step == 1 ? 0 : (LCD_ROWS - MIN<int>(_gameScreen.h / step, LCD_ROWS)) / 2;
+}
+
+int PlaydateGraphicsManager::frameRowForGameRow(int y) const {
+	return displayBaseY() + y / displayStep() + _shakeOffsetY;
 }
 
 // Record that frame rows [top, bottom] changed and must be reconverted.
@@ -188,7 +213,7 @@ void PlaydateGraphicsManager::fillScreen(uint32 col) {
 void PlaydateGraphicsManager::fillScreen(const Common::Rect &r, uint32 col) {
 	if (_gameScreen.getPixels()) {
 		_gameScreen.fillRect(r, col);
-		markDirtyRows(r.top + _shakeOffsetY, r.bottom - 1 + _shakeOffsetY);
+		markDirtyRows(frameRowForGameRow(r.top), frameRowForGameRow(r.bottom - 1));
 	}
 }
 
@@ -210,14 +235,18 @@ void PlaydateGraphicsManager::renderGameScreen(uint8 *frame, int rowStart, int r
 	if (!_gameScreen.getPixels())
 		return;
 
-	// AGI renders in the Playdate Hercules mode: a 400x240 two-color
-	// surface (index 0 black, index 1 bright) with authentic Sierra
-	// fill patterns already baked in. It is displayed 1:1 at the top
-	// left with a fixed threshold - dithering here would destroy the
-	// original patterns.
-	const int outW = MIN<int>(_gameScreen.w, LCD_COLUMNS);
-	const int outH = MIN<int>(_gameScreen.h, LCD_ROWS);
-	const int y0 = _shakeOffsetY;
+	// Game screens are converted with a fixed threshold, never dithered here:
+	// AGI already draws a two-colour surface with its own fill patterns baked
+	// in, and ADL (forced to monochrome on this port, see OSystem_Playdate)
+	// produces genuinely 1-bit Apple II art. Dithering would destroy both.
+	// Paletted screens are judged on palette luminance at 50%; RGB565 ones at
+	// 25%, so the Apple II's dim green phosphor (0,192,0) still counts as lit.
+	const int step = displayStep();
+	const int baseX = displayBaseX();
+	const int baseY = displayBaseY();
+	const int outW = MIN<int>(_gameScreen.w / step, LCD_COLUMNS);
+	const int outH = MIN<int>(_gameScreen.h / step, LCD_ROWS);
+	const bool paletted = _gameScreen.format.isCLUT8();
 
 	if (rowStart < 0)
 		rowStart = 0;
@@ -225,19 +254,21 @@ void PlaydateGraphicsManager::renderGameScreen(uint8 *frame, int rowStart, int r
 		rowEnd = LCD_ROWS - 1;
 
 	for (int fbY = rowStart; fbY <= rowEnd; fbY++) {
-		const int y = fbY - y0; // game row that maps to this frame row
+		const int y = fbY - baseY - _shakeOffsetY; // output row that maps to this frame row
 		if (y < 0 || y >= outH)
 			continue;
 
-		const byte *src = (const byte *)_gameScreen.getBasePtr(0, y);
+		const byte *src8 = paletted ? (const byte *)_gameScreen.getBasePtr(0, y * step) : nullptr;
+		const uint16 *src16 = paletted ? nullptr : (const uint16 *)_gameScreen.getBasePtr(0, y * step);
 		uint8 *dstRow = frame + fbY * LCD_ROWSIZE;
 
 		for (int x = 0; x < outW; x++) {
-			const int fbX = x + _shakeOffsetX;
+			const int fbX = baseX + x + _shakeOffsetX;
 			if (fbX < 0 || fbX >= LCD_COLUMNS)
 				continue;
 
-			const bool white = _paletteLum[src[x]] >= 128;
+			const bool white = paletted ? (_paletteLum[src8[x * step]] >= 128)
+			                            : (luminanceRGB565(src16[x * step]) >= 64);
 			const uint8 bit = 0x80 >> (fbX & 7);
 			if (white)
 				dstRow[fbX >> 3] |= bit;

@@ -32,13 +32,15 @@ typedef struct PlaydateAPI PlaydateAPI;
 /**
  * Graphics manager for the Playdate's 1-bit 400x240 display.
  *
- * Game graphics (8-bit paletted) and the GUI overlay (RGB565) are
- * converted to 1-bit with 8x8 ordered (Bayer) dithering. Ordered
- * dithering is used instead of error diffusion because it is stable
- * across frames: moving game graphics do not shimmer.
+ * Game graphics (8-bit paletted, or RGB565 for engines that need it) and the
+ * GUI overlay (RGB565) are converted to 1-bit. Game screens use a fixed
+ * threshold because the engines this port targets already produce two-tone
+ * art; the overlay uses 8x8 ordered (Bayer) dithering, which is stable across
+ * frames so moving GUI elements do not shimmer.
  *
- * The standard 320x200 screen of AGI and SCI games is centered on the
- * display; 640x400 (hires AGI) is downscaled by 2.
+ * A game screen that fits the LCD is shown 1:1 at the top left (AGI draws
+ * its own 400x240 layout); one that does not is sampled every other pixel
+ * and centered (ADL's 560x384 Apple II surface becomes 280x192).
  */
 class PlaydateGraphicsManager final : public GraphicsManager {
 public:
@@ -103,6 +105,12 @@ private:
 	void renderOverlay(uint8 *frame) const;
 	void renderCursor(uint8 *frame) const;
 	void updatePaletteLuminance(uint start, uint num);
+
+	// Placement of the game screen on the LCD (see renderGameScreen).
+	int displayStep() const;
+	int displayBaseX() const;
+	int displayBaseY() const;
+	int frameRowForGameRow(int y) const;
 
 	static uint8 luminanceRGB(byte r, byte g, byte b);
 	static uint8 luminanceRGB565(uint16 color);
