@@ -86,13 +86,13 @@ void FreescapeEngine::waitInLoop(int maxWait) {
 		if (_currentArea->isOutside())
 			farClipPlane *= 100;
 
-		const float fov = 75.0f;
-		float aspectRatio = isCastle() ? 1.6 : 2.18;
+		const float fov = _fieldOfView;
+		float aspectRatio = _viewAspectRatio;
 		_gfx->updateProjectionMatrix(fov, aspectRatio, _nearClipPlane, farClipPlane);
 		_gfx->positionCamera(_position, _position + _cameraFront, _roll);
 
 		drawBackground();
-		_currentArea->draw(_gfx, _ticks / 10, _position, _cameraFront, true, fov, aspectRatio, _nearClipPlane, farClipPlane);
+		_currentArea->draw(_gfx, _ticks / 10, _position, _cameraFront, _roll, true, fov, aspectRatio, _nearClipPlane, farClipPlane);
 		drawBorder();
 		drawUI();
 
@@ -227,11 +227,16 @@ void FreescapeEngine::borderScreen() {
 			lines.push_back(centerAndPadString("1: KEYBOARD ONLY   ", pad));
 			lines.push_back(centerAndPadString("2: IBM JOYSTICK    ", pad));
 			lines.push_back(centerAndPadString("3: AMSTRAD JOYSTICK", pad));
-			lines.push_back("");
+			if (isCastleMaster2()) {
+				// Castle Master 2 also offers mouse control here
+				lines.push_back(centerAndPadString("4: SERIAL MOUSE    ", pad));
+				lines.push_back(centerAndPadString("5: AMSTRAD MOUSE   ", pad));
+			} else
+				lines.push_back("");
 			lines.push_back("");
 			lines.push_back(centerAndPadString("SPACEBAR:  BEGIN MISSION", pad));
 			lines.push_back("");
-			lines.push_back(centerAndPadString("COPYRIGHT 1988 INCENTIVE", pad));
+			lines.push_back(centerAndPadString(isCastleMaster2() ? "COPYRIGHT 1990 INCENTIVE" : "COPYRIGHT 1988 INCENTIVE", pad));
 		} else if (isSpectrum() || isCPC()) {
 			if (isCastle())
 				pad = 22;

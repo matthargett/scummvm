@@ -29,6 +29,7 @@
 
 #include "engines/nancy/nancy.h"
 #include "engines/nancy/input.h"
+#include "engines/nancy/graphics.h"
 
 namespace Nancy {
 
@@ -38,7 +39,7 @@ void InputManager::processEvents() {
 	using namespace Common;
 	Common::Event event;
 
-	_inputs &= ~(NancyInput::kLeftMouseButtonDown | NancyInput::kLeftMouseButtonUp | NancyInput::kRightMouseButtonDown | NancyInput::kRightMouseButtonUp | NancyInput::kRaycastMap);
+	_inputs &= ~(NancyInput::kLeftMouseButtonDown | NancyInput::kLeftMouseButtonUp | NancyInput::kRightMouseButtonDown | NancyInput::kRightMouseButtonUp | NancyInput::kRaycastMap | NancyInput::kMouseWheel);
 	_otherKbdInput.clear();
 
 	while (g_nancy->getEventManager()->pollEvent(event)) {
@@ -46,6 +47,14 @@ void InputManager::processEvents() {
 		case EVENT_KEYDOWN:
 			// Push all keyboard events into an array and let getInput() callers handle them
 			_otherKbdInput.push_back(event.kbd);
+			_inputBeginState = g_nancy->getState();
+			break;
+		case EVENT_WHEELUP:
+			_inputs |= NancyInput::kMouseWheelUp;
+			_inputBeginState = g_nancy->getState();
+			break;
+		case EVENT_WHEELDOWN:
+			_inputs |= NancyInput::kMouseWheelDown;
 			_inputBeginState = g_nancy->getState();
 			break;
 		case EVENT_CUSTOM_ENGINE_ACTION_START:
@@ -146,7 +155,8 @@ NancyInput InputManager::getInput() const {
 	}
 
 	if (_mouseEnabled || g_nancy->getState() == NancyState::kCredits) {
-		ret.mousePos = g_nancy->getEventManager()->getMousePos();
+		ret.screenMousePos = g_nancy->getEventManager()->getMousePos();
+		ret.mousePos = g_nancy->_graphics->screenToGame(ret.screenMousePos);
 	} else {
 		ret.eatMouseInput();
 	}

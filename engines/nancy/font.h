@@ -22,6 +22,7 @@
 #define NANCY_FONT_H
 
 #include "common/array.h"
+#include "common/ptr.h"
 
 #include "graphics/font.h"
 #include "graphics/managed_surface.h"
@@ -43,14 +44,23 @@ public:
 
 	void read(Common::SeekableReadStream &stream);
 
-	int getFontHeight() const override { return _fontHeight - 1; }
+	// Nancy16+ uses system fonts, which get drawn with a TrueType substitute.
+	// The color passed when drawing is then a font color ID. Every font also
+	// comes in bold, which gets "_Bold" added to its name.
+	void readSystemFont(Common::SeekableReadStream &stream, bool bold);
+	void setSystemFont(const Common::String &name, const Common::String &faceName, int32 height, int32 weight);
+	const Common::String &getName() const { return _description; }
+	// Nancy16+: the substitute font, for drawing with an explicit color instead of a color ID
+	const Graphics::Font *getSystemFont() const { return _systemFont.get(); }
+
+	int getFontHeight() const override { return _systemFont ? _systemFont->getFontHeight() : _fontHeight - 1; }
 
 	// The vertical advance between text lines (height of the first glyph).
 	int getLineHeight() const;
 
-	int getMaxCharWidth() const override { return _maxCharWidth; }
+	int getMaxCharWidth() const override { return _systemFont ? _systemFont->getMaxCharWidth() : _maxCharWidth; }
 	int getCharWidth(uint32 chr) const override;
-	int getKerningOffset(uint32 left, uint32 right) const override { return 0; }
+	int getKerningOffset(uint32 left, uint32 right) const override { return _systemFont ? _systemFont->getKerningOffset(left, right) : 0; }
 
 	void drawChar(Graphics::Surface *dst, uint32 chr, int x, int y, uint32 color) const override;
 
@@ -74,25 +84,25 @@ private:
 	uint16 _spaceWidth = 0;
 
 	// Specific offsets into the _characterRects array
-	uint16 _uppercaseOffset			= 0;
-	uint16 _lowercaseOffset			= 0;
-	uint16 _digitOffset				= 0;
-	uint16 _periodOffset			= 0;
-	uint16 _commaOffset				= 0;
-	uint16 _equalitySignOffset		= 0;
-	uint16 _colonOffset				= 0;
-	uint16 _dashOffset				= 0;
-	uint16 _questionMarkOffset		= 0;
-	uint16 _exclamationMarkOffset	= 0;
-	uint16 _percentOffset			= 0;
-	uint16 _ampersandOffset			= 0;
-	uint16 _asteriskOffset			= 0;
-	uint16 _leftBracketOffset		= 0;
-	uint16 _rightBracketOffset		= 0;
-	uint16 _plusOffset				= 0;
-	uint16 _apostropheOffset		= 0;
-	uint16 _semicolonOffset			= 0;
-	uint16 _slashOffset				= 0;
+	uint16 _uppercaseOffset					= 0;
+	uint16 _lowercaseOffset					= 0;
+	uint16 _digitOffset						= 0;
+	uint16 _periodOffset					= 0;
+	uint16 _commaOffset						= 0;
+	uint16 _equalitySignOffset				= 0;
+	uint16 _colonOffset						= 0;
+	uint16 _dashOffset						= 0;
+	uint16 _questionMarkOffset				= 0;
+	uint16 _exclamationMarkOffset			= 0;
+	uint16 _percentOffset					= 0;
+	uint16 _ampersandOffset					= 0;
+	uint16 _asteriskOffset					= 0;
+	uint16 _leftBracketOffset				= 0;
+	uint16 _rightBracketOffset				= 0;
+	uint16 _plusOffset						= 0;
+	uint16 _apostropheOffset				= 0;
+	uint16 _semicolonOffset					= 0;
+	uint16 _slashOffset						= 0;
 
 	// Specific offsets for Cyrillic characters. Introduced in nancy5, only used in Russian variants
 	// The original data references the letters one by one, out of order. We only keep the two offsets below
@@ -129,22 +139,34 @@ private:
 	int16 _eszettOffset						= -1;
 
 	// Even more specific offsets for extended ASCII characters. Introduced in nancy10
-	int16 _uppercaseAWithDotOffset          = -1;
-	int16 _aWithDotOffset                   = -1;
-	int16 _underscoreOffset                 = -1;
-	int16 _hashOffset                       = -1;
-	int16 _dollarOffset                     = -1;
-	int16 _lessThanOffset                   = -1;
-	int16 _greaterThanOffset                = -1;
-	int16 _leftCurlyBracketOffset           = -1;
-	int16 _rightCurlyBracketOffset          = -1;
-	int16 _euroOffset                       = -1;
+	int16 _uppercaseAWithDotOffset			= -1;
+	int16 _aWithDotOffset					= -1;
+	int16 _underscoreOffset					= -1;
+	int16 _hashOffset						= -1;
+	int16 _dollarOffset						= -1;
+	int16 _lessThanOffset					= -1;
+	int16 _greaterThanOffset				= -1;
+	int16 _leftCurlyBracketOffset			= -1;
+	int16 _rightCurlyBracketOffset			= -1;
+	int16 _euroOffset						= -1;
+
+	// Two more characters, introduced in nancy15
+	int16 _caretOffset						= -1;
+	int16 _atSignOffset						= -1;
+
+	// Specific offsets in French variant of nancy12
+	int16 _uppercaseCWithCedillaOffset		= -1;
+	int16 _uWithCircumflexOffset			= -1;
+	int16 _oeLigatureOffset					= -1;
+	int16 _iWithDiaeresisOffset				= -1;
 
 	Common::Array<Common::Rect> _characterRects;
 
 	Graphics::ManagedSurface _image;
 
 	const struct TBOX *_textboxData = nullptr;
+
+	Common::DisposablePtr<const Graphics::Font> _systemFont{nullptr, DisposeAfterUse::NO};
 
 	int _fontHeight = 0;
 	int _maxCharWidth = 0;

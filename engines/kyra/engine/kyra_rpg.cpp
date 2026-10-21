@@ -53,6 +53,7 @@ KyraRpgEngine::KyraRpgEngine(OSystem *system, const GameFlags &flags) : KyraEngi
 	_vcnBpp = 1;
 	_vcnSrcBitsPerPixel = (_flags.platform == Common::kPlatformAmiga) ? 5 : (_flags.platform == Common::kPlatformFMTowns ? 8 : 4);
 	_vcnDrawLine = nullptr;
+	_vcnHiColorPalette = nullptr;
 	_vmpVisOffs = (flags.platform == Common::kPlatformSegaCD) ? _vmpOffsetsSegaCD : _vmpOffsetsDefault;
 
 	_vmpPtr = 0;
@@ -203,7 +204,7 @@ Common::Error KyraRpgEngine::init() {
 	for (int i = 0; i < 128; i++)
 		_vcnColTable[i] = i & 0x0F;
 
-	setVcnFormat(1);
+	setVcnFormat(1, Common::kRenderDefault);
 
 	_doorShapes = new uint8*[6]();
 

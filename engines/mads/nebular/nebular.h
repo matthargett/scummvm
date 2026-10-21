@@ -22,98 +22,97 @@
 #ifndef MADS_NEBULAR_H
 #define MADS_NEBULAR_H
 
-#include "common/scummsys.h"
-#include "common/system.h"
-#include "common/error.h"
-#include "common/random.h"
-#include "common/util.h"
-#include "engines/engine.h"
-#include "graphics/surface.h"
 #include "mads/mads.h"
-#include "mads/nebular/debugger.h"
-#include "mads/nebular/core/conversations.h"
-#include "mads/nebular/core/dialogs.h"
-#include "mads/nebular/core/events.h"
-#include "mads/nebular/core/font.h"
-#include "mads/nebular/core/game.h"
-#include "mads/nebular/core/screen.h"
-#include "mads/nebular/core/msurface.h"
-#include "mads/nebular/core/resources.h"
-#include "mads/nebular/sound_nebular.h"
 
 namespace MADS {
-namespace Nebular {
+namespace RexNebular {
 
-#define DEBUG_BASIC 1
-#define DEBUG_INTERMEDIATE 2
-#define DEBUG_DETAILED 3
+class MacNebular;
 
-class RexNebularEngine : public MADS::MADSEngine {
+struct MADSSavegameHeader {
+	uint8 _version;
+	Common::String _saveName;
+	Graphics::Surface *_thumbnail;
+	int _year, _month, _day;
+	int _hour, _minute;
+	int _totalFrames;
+
+	void readSavegameHeader(Common::SeekableReadStream *src);
+	void writeSavegameHeader(Common::WriteStream *dest);
+};
+
+class RexNebularEngine : public MADSEngine {
 private:
-	/**
-	 * Handles basic initialisation
-	 */
-	void initialize();
+	friend class MacNebular;
+	MacNebular *_macNebular = nullptr;
 
-	void loadOptions();
+	void showRecipe();
 
 protected:
-	// Engine APIs
-	Common::Error run() override;
+	void applyGameSettings() override;
+	Common::Point screenToGame(const Common::Point &point) const override;
+	Common::Point gameToScreen(const Common::Point &point) const override;
+	void presentScreen(int shakeOffset) override;
+	bool handleMacEvent(Common::Event &event) override;
+	void serviceMacintoshUI() override;
+	void serviceMacintoshSound() override;
 
-public:
-	Debugger *_debugger;
-	Dialogs *_dialogs;
-	EventsManager *_events;
-	Font *_font;
-	Game *_game;
-	GameConversations *_gameConv;
-	Palette *_palette;
-	Resources *_resources;
-	Screen *_screen;
-	SoundManager *_sound;
-	AudioPlayer *_audio;
-	bool _easyMouse;
-	bool _invObjectsAnimated;
-	bool _textWindowStill;
-	ScreenFade _screenFade;
-	bool _musicFlag;
-	bool _soundFlag;
-	bool _dithering;
-	bool _disableFastwalk;
 public:
 	RexNebularEngine(OSystem *syst, const MADSGameDescription *gameDesc);
 	~RexNebularEngine() override;
 
-	/**
-	* Returns true if it is currently okay to restore a game
-	*/
-	bool canLoadGameStateCurrently(Common::U32String *msg = nullptr) override;
+	Common::Error run() override;
+	void syncRoom(Common::Serializer &s) override;
+	void selectMacintoshDifficulty();
+	int selectMacintoshResumeSlot();
+	bool usesOriginalMacintoshMenus() const;
+	int getMacintoshDisplaySize() const;
+	bool getMacintoshHideMenuBar() const;
+	bool getMacintoshPreferencesAtStartup() const;
+	Common::String getMacintoshApplicationVersion() const;
+	bool getMacintoshStoryLocked() const;
+	bool verifyMacintoshStoryPassword(const Common::String &password) const;
+	void setMacintoshDisplaySize(int displaySize, bool persist);
+	void setMacintoshHideMenuBar(bool hide);
+	void setMacintoshPreferencesAtStartup(bool show, bool persist);
+	void setMacintoshStoryLocked(bool locked,
+		const Common::String &password);
+	void setMacintoshOuterMenuActive(bool active);
+	void notifyMacintoshOuterMenuFrameReady();
+	void setMacintoshFullFrameActive(bool active);
+	bool isMacintoshFullFrameActive() const;
+	int runMacintoshCopyProtectionDialog(const Common::String &title,
+		const Common::String &subtitle, const Common::String &prompt,
+		char *target, int maxLength);
 
-	/**
-	* Returns true if it is currently okay to save the game
-	*/
-	bool canSaveGameStateCurrently(Common::U32String *msg = nullptr) override;
-
-	/**
-	 * Handles loading a game via the GMM
-	 */
-	Common::Error loadGameState(int slot) override;
-
-	/**
-	 * Handles saving the game via the GMM
-	 */
-	Common::Error saveGameState(int slot, const Common::String &desc, bool isAutosave = false) override;
-
-	/**
-	 * Handles updating sound settings after they're changed in the GMM dialog
-	 */
-	void syncSoundSettings() override;
-
-	void saveOptions();
+	int main_copy_verify() override;
+	void global_init_code() override;
+	void section_music(int section_num) override;
+	void global_section_constructor() override;
+	void global_daemon_code() override;
+	void global_verb_filter() override;
+	void global_pre_parser_code() override;
+	void global_parser_code() override;
+	void global_error_code() override;
+	void global_room_init() override {}
+	void global_sound_driver() override;
+	bool hasInterfaceAnimations() const override;
+	bool drawPopup() override;
+	int editMacintoshPopup(char *target, int maxLength) override;
+	void onPopupDestroyed() override;
+	int getMacintoshTextWidth(FontPtr font, const char *text,
+		int spacing) const override;
+	bool drawMacintoshText(FontPtr font, Buffer *target, const char *text,
+		int x, int y, int color, int spacing) const override;
+	bool getInterfaceSentenceColor(byte &foreground) const override;
+	bool hasMacintoshInterface() const override;
+	bool setMacintoshPalette(const RGBcolor *palette, int firstColor,
+		int numColors) override;
+	bool getMacintoshPalette(RGBcolor *palette, int firstColor,
+		int numColors) const override;
 };
 
-} // namespace Nebular
+} // namespace RexNebular
 } // namespace MADS
 
 #endif

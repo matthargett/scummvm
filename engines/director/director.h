@@ -58,6 +58,7 @@ class Cast;
 class Debugger;
 class DirectorSound;
 class Lingo;
+class LingoProfiler;
 class Movie;
 class Window;
 struct Picture;
@@ -169,6 +170,7 @@ public:
 	Common::Platform getPlatform() const;
 	Common::Language getLanguage() const;
 	uint32 getGameFlags() const;
+	bool isDemo() const;
 	Common::String getTargetName() { return _targetName; }
 	const char *getExtra();
 	Common::String getRawEXEName() const;
@@ -251,6 +253,7 @@ public:
 	Common::Array<Common::Event> _injectedEvents;
 
 	// game-quirks.cpp
+	bool lingoOpenWrapper(const char *target, Common::Platform platform, const Common::String &whichApplication, const Common::String &whichDocument);
 	void gameQuirks(const char *target, Common::Platform platform);
 	void loadSlowdownCooloff(uint32 delay = 2000);
 
@@ -307,6 +310,12 @@ public:
 	uint32 _loadSlowdownCooldownTime;
 	int _fileIOType;
 	bool _vfwPaletteHack;
+
+	uint16 _key;
+	int _keyCode;
+	byte _keyFlags;
+
+	LingoProfiler *_lingoProfiler = nullptr;
 
 private:
 	byte _currentPalette[768];

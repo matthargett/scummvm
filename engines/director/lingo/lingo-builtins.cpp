@@ -41,6 +41,7 @@
 #include "director/window.h"
 #include "director/castmember/castmember.h"
 #include "director/castmember/bitmap.h"
+#include "director/castmember/digitalvideo.h"
 #include "director/castmember/palette.h"
 #include "director/castmember/text.h"
 #include "director/castmember/transition.h"
@@ -245,7 +246,7 @@ static const BuiltinProto builtins[] = {
 	{ "true",			LB::b_true,			0, 0, 200, KBLTIN },	// D2 k
 	{ "version",		LB::b_version,		0, 0, 300, KBLTIN },	//		D3 k
 	// References
-	{ "cast",			LB::b_cast,			1, 1, 400, FBLTIN },	//			D4 f
+	{ "cast",			LB::b_member,			1, 2, 400, FBLTIN },	//			D4 f
 	{ "castLib",		LB::b_castLib,		1, 1, 500, FBLTIN },	//				D5 f
 	{ "member",			LB::b_member,		1, 2, 500, FBLTIN },	//				D5 f
 	{ "script",			LB::b_script,		1, 2, 400, FBLTIN },	//			D4 f
@@ -270,6 +271,8 @@ static const BuiltinProto builtins[] = {
 	{ "trackStartTime",	LB::b_trackStartTime,1,1, 500, FBLTIN },	//				D5 f
 	{ "trackStopTime",	LB::b_trackStopTime,1, 1, 500, FBLTIN },	//				D5 f
 	{ "trackType",		LB::b_trackType,	1, 1, 500, FBLTIN },	//				D5 f
+	{ "trackEnabled",	LB::b_trackEnabled,	2, 2, 500, FBLTIN },	//				D5 f
+	{ "setTrackEnabled",LB::b_setTrackEnabled,	3, 3, 500, CBLTIN },	//				D5 f
 
 	// Save session
 	{ "beginRecording", LB::b_beginRecording,0, 1, 500, CBLTIN },	//				D5 c
@@ -376,7 +379,6 @@ static const BuiltinProto builtins[] = {
    pathName				//	D5
    preloadMode			//				D8
    selectiomn			//	D5
-   soundDevice			//			D7
    version				//	D5
 
    Movie properties:
@@ -832,70 +834,6 @@ void LB::b_value(int nargs) {
 		g_lingo->push(Datum(0));
 		return;
 	}
-
-	bool maybeExpression = false;
-
-	// First, let's check that it is a number
-	if (expr[0] == '-' || expr[0] == '+' || (expr[0] >= '0' && expr[0] <= '9') ||
-			(expr[0] == '.' && expr.size() > 1 && expr[1] >= '0' && expr[1] <= '9')) {
-		char *endPtr = nullptr;
-		double result = strtof(expr.c_str(), &endPtr);
-
-		// Maybe it is part of an expression?
-		if (endPtr && *endPtr) {
-			while (*endPtr && Common::isSpace(*endPtr))
-				endPtr++;
-
-			if (strchr("-+*/%^:,()><&|", *endPtr) != NULL) {
-				maybeExpression = true;
-			}
-		}
-
-		if (!maybeExpression) {
-			if (result < INT_MAX && floor(result) == result) {
-				g_lingo->push(Datum((int)result));
-			} else {
-				g_lingo->push(Datum(result));
-			}
-			return;
-		}
-	}
-
-	// Or maybe it is a string with quotes around it?
-	if (expr.size() >= 2 && expr[0] == '"') {
-		// scan for the end quote, ignoring escaped quotes
-		bool escaped = false;
-		size_t i;
-		for (i = 1; i < expr.size(); i++) {
-			if (expr[i] == '"' && !escaped) {
-				break;
-			}
-			escaped = (expr[i] == '\\' && !escaped);
-		}
-		if (i == expr.size()) {
-			// No closing quote found, push void
-			g_lingo->pushVoid();
-			return;
-		}
-
-		if (i + 1 < expr.size()) {
-			// There are extra characters after the closing quote, this is not a simple string
-			size_t j = i + 1;
-			while (expr[j] && Common::isSpace(expr[j]))
-				j++;
-
-			if (strchr("&", expr[j]) != NULL) {
-				maybeExpression = true;
-			}
-		}
-
-		if (!maybeExpression) {
-			g_lingo->push(expr.substr(1, i - 1));
-			return;
-		}
-	}
-
-	// There is no simple way, feed it to the Lingo parser
 
 	Common::String code = "return " + expr;
 	// Compile the code to an anonymous function and call it
@@ -1548,7 +1486,7 @@ void LB::b_setAt(int nargs) {
 	Datum list = g_lingo->pop();
 
 	TYPECHECK2(indexD, INT, FLOAT);
-	TYPECHECK3(list, ARRAY, PARRAY, RECT);
+	TYPECHECK4(list, ARRAY, PARRAY, POINT, RECT);
 	int index = indexD.asInt();
 
 	switch (list.type) {
@@ -1566,9 +1504,11 @@ void LB::b_setAt(int nargs) {
 		ARRBOUNDSCHECK(index, list);
 		list.u.parr->arr[index - 1].v = value;
 		break;
+	case POINT:
 	case RECT:
 		ARRBOUNDSCHECK(index, list);
 		list.u.farr->arr[index-1] = value;
+		break;
 	default:
 		break;
 	}
@@ -1778,8 +1718,13 @@ void LB::b_open(int nargs) {
 
 	Datum ex = g_lingo->pop();
 	Datum d;
+
 	if (nargs == 2)
 		d = g_lingo->pop();
+
+	if (g_director->lingoOpenWrapper(g_director->getTargetName().c_str(), g_director->getPlatform(), ex.asString(), d.asString()))
+		return;
+
 	warning("LB::b_open(): Unsupported command open encountered -> The movie tried to open %s %s", ex.asString().c_str(), d.type != VOID ? d.asString().c_str() : "");
 
 	if (!debugChannelSet(-1, kDebugFewFramesOnly) &&
@@ -2871,7 +2816,7 @@ void LB::b_importFileInto(int nargs) {
 }
 
 void menuCommandsCallback(int action, Common::String &text, void *data) {
-	g_director->getCurrentMovie()->queueInputEvent(kEventMenuCallback, action);
+	g_director->getStage()->getCurrentMovie()->queueInputEvent(kEventMenuCallback, action);
 }
 
 void LB::b_installMenu(int nargs) {
@@ -2884,7 +2829,10 @@ void LB::b_installMenu(int nargs) {
 		g_director->_wm->removeMenu();
 		return;
 	}
-	Movie *movie = g_director->getCurrentMovie();
+	// FIXME: it might be possible for other windows than the stage to create and use menus.
+	// This would probably mean reworking MacWindowManager to have a per-window menu model.
+	Window *window = g_director->getStage();
+	Movie *movie = window->getCurrentMovie();
 	CastMember *member = movie->getCastMember(memberID);
 	if (!member) {
 		g_lingo->lingoError("installMenu: Unknown %s", memberID.asString().c_str());
@@ -2919,10 +2867,8 @@ void LB::b_installMenu(int nargs) {
 	char CODE_SEPARATOR_CHAR = '\xC5';
 	// FIXME: For some reason there are games which use º (Mac) or ¼ (Win) and it works too?
 	char CODE_SEPARATOR_CHAR_2 = '\xBC';
-	if (g_director->getVersion() >= 500) {
-		// D5 changed this to be the pipe | character, the same in Windows and Mac.
-		CODE_SEPARATOR_CHAR = '\x7C';
-	}
+	// D5 changed this to be the pipe | character, the same in Windows and Mac. ≈ also works.
+	char CODE_SEPARATOR_CHAR_3 = (g_director->getVersion() >= 500) ? '\x7C' : '\xC5';
 	// Continuation character is 0xac to denote a line running over.
 	// For Mac, this is ¨. For Windows, this is ¬.
 	const char CONTINUATION_CHAR = '\xAC';
@@ -2986,6 +2932,8 @@ void LB::b_installMenu(int nargs) {
 		size_t sepOffset = line.find(CODE_SEPARATOR_CHAR);
 		if (sepOffset == Common::String::npos)
 			sepOffset = line.find(CODE_SEPARATOR_CHAR_2);
+		if (sepOffset == Common::String::npos)
+			sepOffset = line.find(CODE_SEPARATOR_CHAR_3);
 
 		Common::String text;
 
@@ -3008,6 +2956,7 @@ void LB::b_installMenu(int nargs) {
 					commandId++;
 				}
 				mainArchive->replaceCode(command.decode(Common::kMacRoman), kEventScript, commandId);
+				debugC(3, kDebugLoading, "LB::b_installMenu(): %s -> %s (EventScript %d)", text.c_str(), command.c_str(), commandId);
 				submenuText += Common::String::format("[%d];", commandId);
 			} else {
 				submenuText += ';';
@@ -3353,14 +3302,7 @@ void LB::b_puppetSprite(int nargs) {
 			int spriteId = sprite.asInt();
 			Sprite *target = sc->getSpriteById(spriteId);
 			bool val = (bool)state.asInt();
-			bool refresh = (!val) && (target->_puppet);
 			target->_puppet = val;
-			if (refresh) {
-				// puppetSprite set to FALSE, copy back sprite data from frame cache
-				Channel *chan = sc->getChannelById(spriteId);
-				chan->setClean(sc->_currentFrame->_sprites[spriteId]);
-				chan->setDirty();
-			}
 		} else {
 			warning("b_puppetSprite: sprite index out of bounds");
 		}
@@ -3871,7 +3813,15 @@ void LB::b_intersect(int nargs) {
 	Common::Rect rect1(r1.u.farr->arr[0].asInt(), r1.u.farr->arr[1].asInt(), r1.u.farr->arr[2].asInt(), r1.u.farr->arr[3].asInt());
 	Common::Rect rect2(r2.u.farr->arr[0].asInt(), r2.u.farr->arr[1].asInt(), r2.u.farr->arr[2].asInt(), r2.u.farr->arr[3].asInt());
 
-	d = rect1.intersects(rect2);
+	// Return the overlapping area as a rect (rect(0,0,0,0) if none).
+	Common::Rect inter = rect1.findIntersectingRect(rect2);
+
+	d.type = RECT;
+	d.u.farr = new FArray;
+	d.u.farr->arr.push_back(Datum((int)inter.left));
+	d.u.farr->arr.push_back(Datum((int)inter.top));
+	d.u.farr->arr.push_back(Datum((int)inter.right));
+	d.u.farr->arr.push_back(Datum((int)inter.bottom));
 
 	g_lingo->push(d);
 }
@@ -3909,8 +3859,15 @@ void LB::b_inside(int nargs) {
 	Datum d;
 	Datum r2 = g_lingo->pop();
 	Datum p1 = g_lingo->pop();
-	TYPECHECK(r2, RECT);
-	TYPECHECK(p1, POINT);
+
+	// A sprite reference can be void before its init handler runs, giving a void
+	// rect; return FALSE rather than aborting the builtin with no value.
+	if (p1.type != POINT || r2.type != RECT) {
+		warning("LB::b_inside(): expected a point and a rect, got %s and %s", p1.type2str(), r2.type2str());
+		d = 0;
+		g_lingo->push(d);
+		return;
+	}
 
 	Common::Rect rect2(r2.u.farr->arr[0].asInt(), r2.u.farr->arr[1].asInt(), r2.u.farr->arr[2].asInt(), r2.u.farr->arr[3].asInt());
 	Common::Point point1(p1.u.farr->arr[0].asInt(), p1.u.farr->arr[1].asInt());
@@ -4192,13 +4149,6 @@ void LB::b_version(int nargs) {
 ///////////////////
 // References
 ///////////////////
-void LB::b_cast(int nargs) {
-	Datum d = g_lingo->pop();
-	Datum res = d.asMemberID();
-	res.type = CASTREF;
-	g_lingo->push(res);
-}
-
 void LB::b_castLib(int nargs) {
 	Datum d = g_lingo->pop();
 	Datum res(0);
@@ -4218,6 +4168,9 @@ void LB::b_member(int nargs) {
 		Datum member = g_lingo->pop();
 		res = member.asMemberID();
 	} else if (nargs == 2) {
+		if (g_director->getVersion() < 500) {
+			warning("b_member: included a castLib argument! These aren't supposed to exist until D5");
+		}
 		Datum library = g_lingo->pop();
 		Datum member = g_lingo->pop();
 		res = g_lingo->toCastMemberID(member, library);
@@ -4439,6 +4392,47 @@ void LB::b_trackType(int nargs) {
 	Datum result("video");
 	result.type = SYMBOL;
 	g_lingo->push(result);
+}
+
+void LB::b_trackEnabled(int nargs) {
+	Datum whichTrack = g_lingo->pop();
+	Datum whichSprite = g_lingo->pop();
+	TYPECHECK(whichSprite, SPRITEREF);
+
+	Score *score = g_director->getCurrentMovie()->getScore();
+	Sprite *sprite = score->getSpriteById(whichSprite.u.i);
+	if (!sprite) {
+		g_lingo->push(0);
+		g_lingo->lingoError("b_trackEnabled: invalid sprite reference received");
+		return;
+	}
+	if (!sprite->_cast || (sprite->_cast->_type != kCastDigitalVideo)) {
+		g_lingo->push(0);
+		g_lingo->lingoError("b_trackEnabled: non-digital-video sprite reference received");
+		return;
+	}
+
+	g_lingo->push(((DigitalVideoCastMember *)(sprite->_cast))->getTrackEnabled(whichTrack.asInt()));
+}
+
+void LB::b_setTrackEnabled(int nargs) {
+	Datum trueOrFalse = g_lingo->pop();
+	Datum whichTrack = g_lingo->pop();
+	Datum whichSprite = g_lingo->pop();
+	TYPECHECK(whichSprite, SPRITEREF);
+
+	Score *score = g_director->getCurrentMovie()->getScore();
+	Sprite *sprite = score->getSpriteById(whichSprite.u.i);
+	if (!sprite) {
+		g_lingo->lingoError("b_setTrackEnabled: invalid sprite reference received");
+		return;
+	}
+	if (!sprite->_cast || (sprite->_cast->_type != kCastDigitalVideo)) {
+		g_lingo->lingoError("b_setTrackEnabled: non-digital-video sprite reference received");
+		return;
+	}
+
+	((DigitalVideoCastMember *)(sprite->_cast))->setTrackEnabled(whichTrack.asInt(), trueOrFalse.asInt());
 }
 
 void LB::b_scummvmassert(int nargs) {

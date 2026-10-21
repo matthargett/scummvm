@@ -22,15 +22,17 @@
 #ifndef NANCY_ACTION_ROTATINGLOCKPUZZLE_H
 #define NANCY_ACTION_ROTATINGLOCKPUZZLE_H
 
-#include "engines/nancy/action/actionrecord.h"
+#include "engines/nancy/action/puzzlerecord.h"
+#include "engines/nancy/cursor.h"
 
 namespace Nancy {
 namespace Action {
 
-class RotatingLockPuzzle : public RenderActionRecord {
+class RotatingLockPuzzle : public PuzzleRecord {
 public:
 	enum SolveState { kNotSolved, kPlaySound, kWaitForSound };
-	RotatingLockPuzzle() : RenderActionRecord(7) {}
+	static const byte kRandomStart = 99;
+	RotatingLockPuzzle() : PuzzleRecord(7) {}
 	virtual ~RotatingLockPuzzle() {}
 
 	void init() override;
@@ -39,22 +41,33 @@ public:
 	void execute() override;
 	void handleInput(NancyInput &input) override;
 
-	Common::Path _imageName;
 	Common::Array<Common::Rect> _srcRects;
 	Common::Array<Common::Rect> _destRects;
 	Common::Array<Common::Rect> _upHotspots;
 	Common::Array<Common::Rect> _downHotspots;
+	// Nancy 14+: per-dial starting positions; kRandomStart picks a random
+	// position that differs from the solution
+	Common::Array<byte> _startSequence;
 	Common::Array<byte> _correctSequence;
 	uint16 _iconsPerDial = 10;
+	// Cursor types shown while hovering a dial's up/down hotspot. Nancy 10+
+	// stores these per-puzzle (e.g. a crank uses the rotate-clockwise cursor);
+	// older games and unset fields default to the up/down movement cursors.
+	CursorManager::CursorType _upCursorType = CursorManager::kMoveUp;
+	CursorManager::CursorType _downCursorType = CursorManager::kMoveDown;
 	SoundDescription _clickSound;
-	SceneChangeWithFlag _solveExitScene;
-	uint16 _solveSoundDelay = 0;
-	SoundDescription _solveSound;
-	SceneChangeWithFlag _exitScene;
-	Common::Rect _exitHotspot;
+	// Nancy16+: an event flag that also has to be set for the puzzle to count as solved
+	FlagDescription _solveCondition;
+
+	// Nancy17: a clicked up or down button shows as pressed for a moment. An
+	// empty picture means the button has none.
+	Common::Rect _upPressedSrc;
+	Common::Rect _downPressedSrc;
+	uint32 _pressedTime = 0;	// in milliseconds
+	Common::Rect _pressedButton;
+	uint32 _pressedEndTime = 0;
 
 	SolveState _solveState = kNotSolved;
-	Graphics::ManagedSurface _image;
 	Common::Array<byte> _currentSequence;
 	Time _solveSoundPlayTime;
 
@@ -63,7 +76,9 @@ public:
 protected:
 	Common::String getRecordTypeName() const override { return "RotatingLockPuzzle"; }
 
+	void readDataNancy16(Common::SeekableReadStream &stream);
 	void drawDial(uint id);
+	void drawPressedButton(const Common::Rect &src, const Common::Rect &button);
 };
 
 } // End of namespace Action

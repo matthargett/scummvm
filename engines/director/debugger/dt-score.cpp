@@ -140,7 +140,7 @@ static Common::String clipText(const Common::String &text, float availWidth) {
 }
 
 static void buildContinuationData(Window *window) {
-	if (_state->_loadedContinuationData == window->getCurrentMovie()->getMacName()) {
+	if (_state->_loadedContinuationData == movieId(window->getCurrentMovie())) {
 		return;
 	}
 
@@ -227,7 +227,7 @@ static void buildContinuationData(Window *window) {
 		}
 	}
 
-	_state->_loadedContinuationData = window->getCurrentMovie()->getMacName();
+	_state->_loadedContinuationData = movieId(window->getCurrentMovie());
 }
 
 static void drawSliderY(ImVec2 pos, int numChannels) {
@@ -769,6 +769,7 @@ static void drawSpriteGrid(ImDrawList *dl, ImVec2 startPos, Score *score, Window
 						CastMember *clickedCM = movie->getCastMember(sprite._castId);
 						if (clickedCM) {
 							_state->_castDetails._castMemberID = CastMemberID(clickedCM->getID(), clickedCM->getCast()->_castLibID);
+							_state->_castDetails._window = _state->_scoreWindow;
 							_state->_w.castDetails = true;
 						}
 					}

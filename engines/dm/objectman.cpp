@@ -115,18 +115,17 @@ void ObjectMan::loadObjectNames() {
 
 	_objectIconForMousePointer = new byte[16 * 16];
 
-	char *objectNames = new char[dispMan.getCompressedDataSize(kDMObjectNamesGraphicIndice) + kDMObjectNameCount];
-	Common::MemoryReadStream stream = dispMan.getCompressedData(kDMObjectNamesGraphicIndice);
+	uint16 graphicIdx = dispMan.getGraphicIndex(kDMObjectNamesGraphicIndice);
+	char *objectNames = new char[dispMan.getCompressedDataSize(graphicIdx) + kDMObjectNameCount];
+	Common::MemoryReadStream stream = dispMan.getCompressedData(graphicIdx);
 
 	for (uint16 objNameIndex = 0; objNameIndex < kDMObjectNameCount; ++objNameIndex) {
 		_objectNames[objNameIndex] = objectNames;
-
 		byte tmpByte;
-		for (tmpByte = stream.readByte(); !(tmpByte & 0x80); tmpByte = stream.readByte()) // last char of object name has 7th bit on
-			*objectNames++ = tmpByte; // write while not last char
-
-		*objectNames++ = tmpByte & 0x7F; // write without the 7th bit
-		*objectNames++ = '\0'; // terminate string
+		for (tmpByte = stream.readByte(); !(tmpByte & 0x80); tmpByte = stream.readByte())
+			*objectNames++ = tmpByte;
+		*objectNames++ = tmpByte & 0x7F;
+		*objectNames++ = '\0';
 	}
 }
 
@@ -135,8 +134,10 @@ IconIndice ObjectMan::getObjectType(Thing thing) {
 		return kDMIconIndiceNone;
 
 	int16 objectInfoIndex = _vm->_dungeonMan->getObjectInfoIndex(thing);
-	if (objectInfoIndex != -1)
+	if (objectInfoIndex >= 0 && objectInfoIndex < 180)
 		objectInfoIndex = _vm->_dungeonMan->_objectInfos[objectInfoIndex]._type;
+	else
+		objectInfoIndex = kDMIconIndiceNone;
 
 	return (IconIndice)objectInfoIndex;
 }
@@ -190,7 +191,8 @@ void ObjectMan::extractIconFromBitmap(uint16 iconIndex, byte *destBitmap) {
 		if (_iconGraphicFirstIndex[counter] > iconIndex)
 			break;
 	}
-	--counter;
+	if (counter > 0)
+		--counter;
 	byte *iconBitmap = _vm->_displayMan->getNativeBitmapOrGraphic(kDMGraphicIdxObjectIcons000To031 + counter);
 	iconIndex -= _iconGraphicFirstIndex[counter];
 	_vm->_displayMan->_useByteBoxCoordinates = true;
@@ -215,7 +217,8 @@ void ObjectMan::drawIconInSlotBox(uint16 slotBoxIndex, int16 iconIndex) {
 		if (_iconGraphicFirstIndex[iconGraphicIndex] > iconIndex)
 			break;
 	}
-	iconGraphicIndex--;
+	if (iconGraphicIndex > 0)
+		iconGraphicIndex--;
 	byte *iconBitmap = _vm->_displayMan->getNativeBitmapOrGraphic(iconGraphicIndex + kDMGraphicIdxObjectIcons000To031);
 	iconIndex -= _iconGraphicFirstIndex[iconGraphicIndex];
 	int16 byteWidth;
@@ -237,6 +240,9 @@ void ObjectMan::drawIconInSlotBox(uint16 slotBoxIndex, int16 iconIndex) {
 void ObjectMan::drawLeaderObjectName(Thing thing) {
 	Common::String objectName;
 	int16 iconIndex = getIconIndex(thing);
+	if (iconIndex < 0)
+		return;
+
 	if (iconIndex == kDMIconIndiceJunkChampionBones) {
 		Junk *junk = _vm->_dungeonMan->getJunk(thing);
 		Common::String champBonesName;

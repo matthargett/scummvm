@@ -27,6 +27,8 @@
 
 #include "graphics/managed_surface.h"
 
+#include "engines/nancy/enginedata.h"
+
 namespace Nancy {
 
 class CursorManager {
@@ -59,6 +61,8 @@ public:
 		kDragHand				= 23,	// Hand cursor used when dragging an item (Nancy 10+)
 		kDropHand				= 24,	// Drop-hand cursor used while a piece is held over a target (Nancy 10+)
 		kPuzzleArrow			= 25,	// Puzzle arrow cursor shown when hovering a clickable puzzle hotspot (Nancy 10+)
+		kDialCW					= 26,	// Dial turn cursors used by SafeDialPuzzle (Nancy 10+); the older
+		kDialCCW				= 27,	// games use kRotateCW / kRotateCCW instead
 
 		// Cursors in Nancy10 and newer games. The CURS chunk holds 37 system
 		// cursor types in pairs; type T's idle slot is (T*2) and its hotspot
@@ -88,19 +92,72 @@ public:
 		kNewRotateLeft			= 30,	// Type 15 — 360 scenes
 		kNewInvertedRotateRight = 32,	// Type 16 — Inverted 360 rotation
 		kNewInvertedRotateLeft	= 34,	// Type 17 — Inverted 360 rotation
-		kNewUseHand				= 36,	// Type 18 — Hand used while using items
-		kNewDragHand			= 38,	// Type 19 — Hand used while dragging puzzle pieces (e.g. SortPuzzle pickup action sets this)
+		kNewUseHand				= 36,	// Type 18 — Open hand, used while using items and while carrying a puzzle piece
+		kNewUseHandHotspot		= 37,	// Type 18 hotspot — Open hand shown over a slot a carried piece can be dropped into
+		kNewDragHand			= 38,	// Type 19 — Closed hand, used while dragging puzzle pieces
+		kNewDragHandHotspot		= 39,	// Type 19 hotspot — Closed hand shown over a piece that can be picked up
+		kNewRotatePiece			= 40,	// Type 20 — Rotate arrows shown over a rotatable puzzle piece
+		kNewDialCW				= 41,	// Type 20 hotspot — Dial turn cursors, used by SafeDialPuzzle
+		kNewDialCCW				= 43,	// Type 21 hotspot
 		kNewPuzzleArrow			= 45,	// Type 22 hotspot — Arrow cursor shown when hovering a clickable puzzle hotspot
+		kNewPuzzleSlideUp		= 47,	// Type 23 hotspot — Slide-arrow shown over a movable tile in CollisionPuzzle/TileMovePuzzle
+		kNewPuzzleSlideDown		= 49,	// Type 24 hotspot
+		kNewPuzzleSlideLeft		= 51,	// Type 25 hotspot
+		kNewPuzzleSlideRight	= 53,	// Type 26 hotspot
 		kNewDropHand			= 64,	// Type 32 — Hand shown when a held piece is dropped (briefly set on the drop action)
+		kNewDropHandHotspot		= 65,	// Type 32 hotspot — Hand shown over a slot a held piece can be dropped into
+		kNewBlank				= 72,	// Type 36 — Empty sprite, used while a puzzle draws a carried piece at the mouse itself
+
+		// Cursor types in Nancy13 and newer games. Nancy13 rebuilt the CURS
+		// sheet with 45 system cursor types, each stored as an [idle, hotspot]
+		// pair at slots (type * 2, type * 2 + 1). These constants are Nancy13
+		// system TYPE indices (not slot indices); resolveNancy13CursorID turns a
+		// type into the idle or hotspot slot.
+		// Types 25-34 are the blue in-puzzle variants of the plain ones.
+		kNancy13Normal				= 0,	// Eyeglass
+		kNancy13Talk				= 5,
+		kNancy13MoveUp				= 6,
+		kNancy13MoveDown			= 7,
+		kNancy13MoveLeft			= 8,
+		kNancy13MoveRight			= 9,
+		kNancy13MoveBackward		= 10,
+		kNancy13MoveForward			= 12,
+		kNancy13Arrow				= 14,
+		kNancy13RotateRight			= 17,
+		kNancy13RotateLeft			= 18,
+		kNancy13Exit				= 19,
+		kNancy13InvertedRotateRight	= 20,
+		kNancy13InvertedRotateLeft	= 21,
+		// Empty. Selected while the cell phone's camera viewfinder is up, so
+		// only the viewfinder is seen.
+		kNancy13Blank				= 24,
+		kNancy13PuzzleRotateCW		= 25,
+		kNancy13PuzzleRotateCCW		= 26,
+		kNancy13PuzzleDragHand		= 28,
+		kNancy13PuzzleDropHand		= 29,
+		kNancy13PuzzleMoveUp		= 30,
+		kNancy13PuzzleMoveDown		= 31,
+		kNancy13PuzzleArrow			= 34
 	};
 
 	CursorManager();
 
 	void init(Common::SeekableReadStream *chunkStream);
 
-	// Change the current cursor ID. Does not change the graphic
-	void setCursor(CursorType type, int16 itemID, bool setFromScript);
-	void setCursorType(CursorType type, bool setFromScript = false);
+	// Nancy19 and up describe their cursors in a boot script, and call them by name.
+	// A script picks one by passing the place of the name in the list as the type.
+	void init(const ScriptBootData &boot);
+	int getCursorTypeByName(const Common::String &name) const;
+
+	// The cursors of the items come after the others, one for every item
+	uint getItemCursorType(int16 itemID) const { return _numCursorTypes + itemID; }
+
+	// Change the current cursor ID. Does not change the graphic.
+	// When setFromScript is set, type is a raw Nancy 10+ system cursor type
+	// index resolved to its flat slot; hotspotVariant then picks the hotspot
+	// (type*2 + 1) or idle (type*2) sprite of the pair.
+	void setCursor(CursorType type, int16 itemID, bool setFromScript, bool hotspotVariant = true);
+	void setCursorType(CursorType type, bool setFromScript = false, bool hotspotVariant = true);
 	void setCursorItemID(int16 itemID);
 	void showCursor(bool shouldShow);
 
@@ -110,6 +167,7 @@ public:
 	void applyCursor();
 
 	const Common::Point &getCurrentCursorHotspot() { return _cursors[_curCursorID].hotspot;}
+	const Common::Rect &getCurrentCursorBounds() { return _cursors[_curCursorID].bounds; }
 	const Common::Rect &getPrimaryVideoInactiveZone() { return _primaryVideoInactiveZone; }
 	const Common::Point &getPrimaryVideoInitialPos() { return _primaryVideoInitialPos; }
 
@@ -119,7 +177,15 @@ private:
 	void adjustCursorHotspot();
 
 	// Resolve a CursorType + held-item pair to a Nancy 10+ cursor ID.
-	uint resolveNancy10CursorID(CursorType type, int16 itemID, bool setFromScript);
+	uint resolveNancy10CursorID(CursorType type, int16 itemID, bool setFromScript, bool hotspotVariant);
+
+	// Nancy13 rebuilt the cursor sheet (45 system types, new layout) and split
+	// held-item cursors into _invCursorsSurface. System cursors use a dedicated
+	// Nancy13 slot table.
+	uint resolveNancy13CursorID(CursorType type, int16 itemID, bool setFromScript, bool hotspotVariant);
+
+	uint resolveScriptedCursorID(CursorType type, int16 itemID, bool setFromScript, bool hotspotVariant);
+	void addScriptedCursors(const Common::Array<ScriptBootData::Cursor> &cursors);
 
 	struct Cursor {
 		Common::Rect bounds;
@@ -129,6 +195,11 @@ private:
 	// CURS data
 	Common::Array<Cursor> _cursors;
 
+	// Nancy19+
+	Common::Array<Common::String> _cursorNames;
+	Common::Array<bool> _cursorOverridesItem;
+	uint _defaultCursorType = 0;
+
 	Common::Rect _primaryVideoInactiveZone;
 	Common::Point _primaryVideoInitialPos;
 
@@ -137,6 +208,8 @@ private:
 
 	Common::Point _warpedMousePos;
 	CursorType _curCursorType;
+	bool _curSetFromScript;
+	bool _curHotspotVariant;
 	int16 _curItemID;
 	uint _curCursorID;
 	uint _lastCursorID;

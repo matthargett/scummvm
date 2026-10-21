@@ -32,6 +32,10 @@
 #include "common/stream.h"
 #include "common/system.h"
 #include "graphics/cursorman.h"
+#include "graphics/fontman.h"
+#include "graphics/macgui/macfontmanager.h"
+#include "graphics/macgui/macwindowmanager.h"
+#include "graphics/managed_surface.h"
 #include "graphics/surface.h"
 
 #include "colony/colony.h"
@@ -193,6 +197,7 @@ const AnimColorEntry kAnimColors[] = {
 	{ "vanity",      kBMC_Vanity,     ARRAYSIZE(kBMC_Vanity) },
 	{ "reactor",     kBMC_Reactor,    ARRAYSIZE(kBMC_Reactor) },
 	{ "security",    kBMC_Security,   ARRAYSIZE(kBMC_Security) },
+	{ "tele",        kBMC_Teleport,   ARRAYSIZE(kBMC_Teleport) },
 	{ "teleporter",  kBMC_Teleport,   ARRAYSIZE(kBMC_Teleport) },
 	{ "teleporter2", kBMC_Teleport,   ARRAYSIZE(kBMC_Teleport) },
 	{ "slides",      kBMC_Creatures,  ARRAYSIZE(kBMC_Creatures) },
@@ -279,6 +284,7 @@ bool ColonyEngine::loadAnimation(const Common::String &name) {
 		{ "elev",   "elevator" },
 		{ "slides", "slideshow" },
 		{ "lift",   "lifter" },
+		{ "tele",   "teleporter" },
 		{ nullptr,  nullptr }
 	};
 
@@ -366,6 +372,28 @@ bool ColonyEngine::loadAnimation(const Common::String &name) {
 	return true;
 }
 
+bool ColonyEngine::loadLiftAnimation(int objectType) {
+	switch (objectType) {
+	case kObjTeleport:
+		_liftObject = 1;
+		break;
+	case kObjBox1:
+	case kObjBox2:
+		_liftObject = 2;
+		break;
+	case kObjCryo:
+		_liftObject = 3;
+		break;
+	case kObjReactor:
+		_liftObject = 4;
+		break;
+	default:
+		return false;
+	}
+
+	return loadAnimation("lift");
+}
+
 void ColonyEngine::deleteAnimation() {
 	delete _backgroundMask;
 	_backgroundMask = nullptr;
@@ -395,6 +423,18 @@ void ColonyEngine::playAnimation() {
 	_rotateRight = false;
 
 	_animationRunning = true;
+	syncMacMenuChecks();
+	_animExitPressed = _animExitInside = false;
+	_animExitStrip = _animExitButton = Common::Rect();
+	_coderCursor = 0;
+	for (int i = 0; i < 4; i++)
+		_coderPick[i] = 0;
+	_coderWin = Common::Rect();
+	_coderPressed = -1;
+	_coderPressInside = false;
+	const bool useSquarePixelViewport = !isMacRenderMode();
+	if (useSquarePixelViewport)
+		_gfx->setSquarePixelViewport(true);
 	_system->lockMouse(false);
 	warpMouseLogical(_centerX, _centerY);
 	const char *cursorName = "default arrow cursor";
@@ -534,28 +574,10 @@ void ColonyEngine::playAnimation() {
 			setObjectOnOff(4, false);
 		}
 	} else if (_animationName == "lift") {
-		// Original DoLift: set up initial state based on forklift mode.
-		// _fl==1 → picking up (up=0, object starts at bottom)
-		// _fl==2 → putting down (up=1, object starts at top)
-		// Object sprite mapping: BOX1/BOX2→2, TELEPORT→1, CRYO→3, REACTOR→4
+		if (getPlatform() == Common::kPlatformMacintosh)
+			_sound->stop();
+
 		_liftUp = (_fl == 2);
-		switch (_fl == 2 ? _carryType : 0) {
-		case kObjBox1: case kObjBox2: _liftObject = 2; break;
-		case kObjTeleport: _liftObject = 1; break;
-		case kObjCryo: _liftObject = 3; break;
-		case kObjReactor: _liftObject = 4; break;
-		default: _liftObject = 2; break; // pickup: we don't know yet, but dolSprite handles it
-		}
-		// For pickup, determine object from what we're about to pick up
-		if (!_liftUp) {
-			// The interaction code sets _carryType AFTER the animation,
-			// but the object type is in the Thing we're interacting with.
-			// We can infer from which sprites are visible.
-			for (int i = 1; i <= 4; i++) {
-				if (i < (int)_lSprites.size() && _lSprites[i - 1] && _lSprites[i - 1]->onoff)
-					_liftObject = i;
-			}
-		}
 		// Hide all object sprites except the active one
 		for (int i = 1; i <= 4; i++) {
 			if (i != _liftObject)
@@ -581,18 +603,86 @@ void ColonyEngine::playAnimation() {
 	uint32 lastDrawTime = 0;
 	bool needsDraw = true;
 	while (_animationRunning && !shouldQuit()) {
+		if (updateScreenSize()) {
+			_animExitPressed = _animExitInside = false;
+			_coderPressed = -1;
+			_coderPressInside = false;
+			drawAnimation();
+			needsDraw = true;
+		}
 		Common::Event event;
-		while (_system->getEventManager()->pollEvent(event)) {
+		while (_animationRunning && _system->getEventManager()->pollEvent(event)) {
 			if (event.type == Common::EVENT_QUIT || event.type == Common::EVENT_RETURN_TO_LAUNCHER) {
 				_animationRunning = false;
-				return;
-			} else if (event.type == Common::EVENT_SCREEN_CHANGED) {
+				break;
+			}
+			if (event.type == Common::EVENT_SCREEN_CHANGED) {
 				_gfx->computeScreenViewport();
+				if (updateScreenSize()) {
+					_animExitPressed = _animExitInside = false;
+					_coderPressed = -1;
+					_coderPressInside = false;
+				}
+				drawAnimation();
 				needsDraw = true;
-			} else if (event.type == Common::EVENT_LBUTTONDOWN) {
-				int item = whichSprite(eventMouseToLogical(event.mouse));
-				if (item > 0) {
-					handleAnimationClick(item);
+				continue;
+			}
+			// Only an open menu captures input; the menu bar stays visible.
+			if (_macMenu && _macMenu->hasAllFocus() && event.type == Common::EVENT_CUSTOM_ENGINE_ACTION_START &&
+					event.customType == kActionEscape) {
+				_macMenu->closeMenu();
+				needsDraw = true;
+				continue;
+			}
+			if (processMacMenuEvent(event)) {
+				needsDraw = true;
+				if (!_animationRunning || shouldQuit())
+					break;
+				continue;
+			}
+			if (_macMenu && _macMenu->hasAllFocus())
+				continue;
+
+			if (event.type == Common::EVENT_LBUTTONDOWN) {
+				const Common::Point pt = eventMouseToLogical(event.mouse);
+				_messageSourceRect = Common::Rect();
+				if (handleColonyCoderClick(pt)) {
+					needsDraw = true;
+				} else if (!_animExitStrip.isEmpty() && _animExitStrip.contains(pt)) {
+					// gamesprt.c TestButton(): strip clicks never reach sprites
+					if (_animExitButton.contains(pt)) {
+						_animExitPressed = _animExitInside = true;
+						needsDraw = true;
+					}
+				} else {
+					int item = whichSprite(pt);
+					if (item > 0) {
+						handleAnimationClick(item);
+						_messageSourceRect = Common::Rect();
+						needsDraw = true;
+					}
+				}
+			} else if (event.type == Common::EVENT_LBUTTONUP) {
+				if (_coderPressed >= 0) {
+					if (_coderPressInside) {
+						if (_coderCursor >= 4) {
+							for (int j = 0; j < 4; j++)
+								_coderPick[j] = 0;
+							_coderCursor = 0;
+						}
+						_coderPick[_coderCursor++] = _coderPressed + 1;
+						_sound->play(Sound::kDit);
+					}
+					_coderPressed = -1;
+					_coderPressInside = false;
+					needsDraw = true;
+				}
+				if (_animExitPressed) {
+					if (_animExitInside) {
+						debugC(1, kColonyDebugAnimation, "Animation: EXIT button");
+						_animationRunning = false;
+					}
+					_animExitPressed = _animExitInside = false;
 					needsDraw = true;
 				}
 			} else if (event.type == Common::EVENT_RBUTTONDOWN) {
@@ -602,12 +692,28 @@ void ColonyEngine::playAnimation() {
 				_animationRunning = false;
 			} else if (event.type == Common::EVENT_MOUSEMOVE) {
 				const Common::Point logical = eventMouseToLogical(event.mouse);
+				if (_coderPressed >= 0) {
+					const bool inside = _coderIconRects[_coderPressed].contains(logical);
+					if (inside != _coderPressInside) {
+						_coderPressInside = inside;
+						needsDraw = true;
+					}
+				}
+				if (_animExitPressed) {
+					const bool inside = _animExitButton.contains(logical);
+					if (inside != _animExitInside) {
+						_animExitInside = inside;
+						needsDraw = true;
+					}
+				}
 				debugC(5, kColonyDebugAnimation, "Animation Mouse: %d, %d", logical.x, logical.y);
 			} else if (event.type == Common::EVENT_CUSTOM_ENGINE_ACTION_START) {
 				if (event.customType == kActionEscape) {
-					openMainMenuDialog();
-					_gfx->computeScreenViewport();
-					needsDraw = true;
+					// Exit the animation like right-click/Return. Opening the
+					// main menu here instead would be a dead end: save/load
+					// are disabled while _animationRunning is set.
+					debugC(1, kColonyDebugAnimation, "Animation: ESC exit");
+					_animationRunning = false;
 				}
 			} else if (event.type == Common::EVENT_KEYDOWN) {
 				if (event.kbd.keycode == Common::KEYCODE_RETURN) {
@@ -628,11 +734,14 @@ void ColonyEngine::playAnimation() {
 				}
 
 				if (item > 0) {
+					_messageSourceRect = Common::Rect();
 					handleAnimationClick(item);
 					needsDraw = true;
 				}
 			}
 		}
+		if (!_animationRunning || shouldQuit())
+			break;
 
 		// updateAnimation has its own 50ms throttle; only redraw when we know
 		// the visible state changed (click feedback) or the cadence is due.
@@ -653,11 +762,23 @@ void ColonyEngine::playAnimation() {
 		_system->delayMillis(2);
 	}
 
-	_system->lockMouse(true);
-	CursorMan.showMouse(false);
-	CursorMan.popAllCursors();
+	if (_animationName == "lift" && getPlatform() == Common::kPlatformMacintosh) {
+		// Mac KillTSound waits for the lift sample before returning.
+		while (_sound->isPlaying() && !shouldQuit())
+			responsiveAnimationDelay(_system, 10);
+		_sound->stop();
+	}
 
-	// Purge pending mouse/keyboard events AFTER re-locking the mouse,
+	if (useSquarePixelViewport)
+		_gfx->setSquarePixelViewport(false);
+	_animationRunning = false;
+	if (_macMenu)
+		_macMenu->closeMenu();
+	CursorMan.popAllCursors();
+	updateMouseCapture(true);
+	syncMacMenuChecks();
+
+	// Purge pending mouse/keyboard events after restoring mouse capture,
 	// so that any synthetic events from the lock transition are also
 	// drained and don't trigger actions (e.g. cShoot) in the main loop.
 	_system->getEventManager()->purgeMouseEvents();
@@ -713,6 +834,9 @@ uint32 ColonyEngine::resolveAnimColor(int16 bmEntry) const {
 void ColonyEngine::drawAnimation() {
 	// Full clear required: OpenGL framebuffer is undefined between frames.
 	_gfx->clear(0);
+
+	if (isMacRenderMode())
+		drawDashboardStep1();
 
 	// Center 416x264 animation area on screen (from original InitDejaVu)
 	int ox = _screenR.left + (_screenR.width() - 416) / 2;
@@ -818,6 +942,271 @@ void ColonyEngine::drawAnimation() {
 		if (_lSprites[i]->onoff)
 			drawComplexSprite(i, ox, oy);
 	}
+
+	drawAnimationExitButton(ox, oy);
+	drawColonyCoder(ox, oy);
+	drawMacMenuBar();
+}
+
+// gamesprt.c DrawButton(): 30px strip below the 416x264 scene with a framed
+// "EXIT" default button; TestButton() inverts it while pressed inside.
+void ColonyEngine::drawAnimationExitButton(int ox, int oy) {
+	if (!isMacRenderMode())
+		return;
+
+	Graphics::MacFont systemFont(Graphics::kMacFontSystem, 12);
+	const Graphics::Font *font = (_wm && _wm->_fontMan) ? _wm->_fontMan->getFont(systemFont) : nullptr;
+	if (!font)
+		font = FontMan.getFontByUsage(Graphics::FontManager::kGUIFont);
+	if (!font)
+		return;
+
+	Graphics::ManagedSurface strip;
+	strip.create(416, 30, _gfx->getPixelFormat());
+	const uint32 white = strip.format.ARGBToColor(255, 255, 255, 255);
+	const uint32 black = strip.format.ARGBToColor(255, 0, 0, 0);
+	strip.fillRect(Common::Rect(0, 0, 416, 30), white);
+	strip.hLine(0, 0, 415, black);
+
+	const int wd = font->getStringWidth("EXIT") / 2;
+	const Common::Rect button(208 - (wd + 15), 6, 208 + (wd + 15), 24);
+	const bool invert = _animExitPressed && _animExitInside;
+	strip.drawRoundRect(button, 8, black, invert);
+	Common::Rect ring(button.left - 3, button.top - 3, button.right + 3, button.bottom + 3);
+	strip.drawRoundRect(ring, 11, black, false);
+	ring.grow(-1);
+	strip.drawRoundRect(ring, 10, black, false);
+
+	const int textY = button.top + (button.height() - font->getFontHeight()) / 2 + 1;
+	font->drawString(&strip, "EXIT", button.left, textY, button.width(),
+		invert ? white : black, Graphics::kTextAlignCenter);
+
+	_gfx->drawSurface(&strip.rawSurface(), ox, oy + 264);
+	strip.free();
+
+	_animExitStrip = Common::Rect(ox, oy + 264, ox + 416, oy + 294);
+	_animExitButton = button;
+	_animExitButton.translate(ox, oy + 264);
+}
+
+void ColonyEngine::loadCoderTiles() {
+	_coderTilesLoaded = true;
+
+	Common::SeekableReadStream *file = Common::MacResManager::openFileOrDataFork(Common::Path("security"));
+	if (!file)
+		return;
+	Common::SeekableReadStreamEndianWrapper stream(file, true, DisposeAfterUse::YES);
+
+	byte bg[8];
+	stream.read(bg, 8);
+	stream.read(bg, 8);
+	stream.readSint16();
+	if (stream.readSint16() != 0) {
+		readRect(stream);
+		readRect(stream);
+		delete loadImage(stream);
+		delete loadImage(stream);
+	}
+
+	Common::Array<Image *> imgs;
+	const int16 maxsprite = stream.readSint16();
+	stream.readSint16();
+	for (int i = 0; i < maxsprite && !stream.err(); i++) {
+		imgs.push_back(loadImage(stream));
+		delete loadImage(stream); // mask
+		stream.readSint16();
+		readRect(stream);
+		readRect(stream);
+	}
+
+	// Object 2 (a digit key) provides the button faces (states 1..2),
+	// object 27 the four symbol tiles (states 2..5).
+	const int16 maxl = stream.readSint16();
+	stream.readSint16();
+	for (int i = 0; i < maxl && !stream.err(); i++) {
+		const int16 size = stream.readSint16();
+		for (int j = 0; j < size; j++) {
+			const int16 spritenum = stream.readSint16();
+			stream.readSint16();
+			stream.readSint16();
+			if (stream.err() || spritenum < 0 || spritenum >= (int16)imgs.size())
+				continue;
+			if (i == 1 && j == 0 && !_coderBtnUp) {
+				_coderBtnUp = imgs[spritenum];
+				imgs[spritenum] = nullptr;
+			} else if (i == 1 && j == 1 && !_coderBtnDown) {
+				_coderBtnDown = imgs[spritenum];
+				imgs[spritenum] = nullptr;
+			} else if (i == 26 && j >= 1 && j <= 4 && !_coderTiles[j - 1]) {
+				_coderTiles[j - 1] = imgs[spritenum];
+				imgs[spritenum] = nullptr;
+			}
+		}
+		readRect(stream);
+		for (int k = 0; k < 7; k++)
+			stream.readSint16();
+		stream.readByte();
+		stream.readByte();
+		stream.readByte();
+		stream.readSint16();
+		stream.readSint16();
+		stream.readSint16();
+	}
+
+	for (uint i = 0; i < imgs.size(); i++)
+		delete imgs[i];
+}
+
+void drawCoderTile(Graphics::ManagedSurface &s, const Image *img, int x, int y, uint32 fg, uint32 bg) {
+	if (!img || !img->data)
+		return;
+	for (int r = 0; r < img->height; r++) {
+		for (int c = 0; c < img->width; c++) {
+			const bool on = (img->data[r * img->rowBytes + (c >> 3)] >> (7 - (c & 7))) & 1;
+			s.setPixel(x + c, y + r, on ? fg : bg);
+		}
+	}
+}
+
+void ColonyEngine::drawColonyCoder(int animOx, int animOy) {
+	if (!isMacRenderMode())
+		return;
+	if (_animationName != "security" && _animationName != "reactor")
+		return;
+
+	if (!_coderTilesLoaded)
+		loadCoderTiles();
+	if (!_coderTiles[0] || !_coderTiles[1] || !_coderTiles[2] || !_coderTiles[3] ||
+			!_coderBtnUp || !_coderBtnDown)
+		return;
+
+	Graphics::MacFont systemFont(Graphics::kMacFontSystem, 12);
+	const Graphics::Font *font = (_wm && _wm->_fontMan) ? _wm->_fontMan->getFont(systemFont) : nullptr;
+	if (!font)
+		font = FontMan.getFontByUsage(Graphics::FontManager::kGUIFont);
+	if (!font)
+		return;
+	Graphics::MacFont genevaFont(Graphics::kMacFontGeneva, 9);
+	const Graphics::Font *instrFont = (_wm && _wm->_fontMan) ? _wm->_fontMan->getFont(genevaFont) : nullptr;
+	if (!instrFont)
+		instrFont = font;
+
+	const int contentW = 172;
+	const char *instrText = (_animationName == "security")
+		? "Press the symbols as shown on the display to determine the correct value."
+		: "Enter the appropriate symbol sequence to determine this reactor's code.";
+	Common::Array<Common::U32String> instrLines;
+	instrFont->wordWrapText(Common::U32String(instrText), contentW - 16, instrLines);
+	const int instrLineH = instrFont->getFontHeight() + 1;
+
+	const int btnSize = _coderBtnUp->width;
+	const int tile = _coderTiles[0]->width;
+	const int pitch = btnSize + 4;
+	const int x0 = (contentW - (3 * pitch + btnSize)) / 2;
+	const int btnY = 8;
+	const int slotY = btnY + btnSize + 9;
+	const int codeY = slotY + tile + 16;
+	const int instrY = codeY + font->getFontHeight() + 8;
+	const int contentH = instrY + (int)instrLines.size() * instrLineH + 8;
+
+	Graphics::MacWindowBorder border;
+	Graphics::BorderOffsets offsets = {};
+	bool hasBorder = false;
+	if (_wm) {
+		border.setWindowManager(_wm);
+		border.setBorderType(Graphics::kWindowWindow);
+		if (border.hasBorder(Graphics::kWindowBorderActive) && border.hasOffsets()) {
+			hasBorder = true;
+			offsets = border.getOffset();
+		}
+	}
+	const int offL = hasBorder ? offsets.left : 2;
+	const int offR = hasBorder ? offsets.right : 2;
+	const int offT = hasBorder ? offsets.top : 2;
+	const int offB = hasBorder ? offsets.bottom : 2;
+	const int winW = contentW + offL + offR;
+	const int winH = contentH + offT + offB;
+
+	// Right of the scene, vertically centered on the 416x294 animation window
+	int wx = animOx + 416 + 4;
+	if (wx + winW > _screenR.right)
+		wx = MAX<int>(_screenR.left, _screenR.right - winW - 2);
+	int wy = animOy + (294 - winH) / 2;
+	wy = MAX<int>(_screenR.top, wy);
+
+	Graphics::ManagedSurface win;
+	win.create(winW, winH, _gfx->getPixelFormat());
+	const uint32 white = win.format.ARGBToColor(255, 255, 255, 255);
+	const uint32 black = win.format.ARGBToColor(255, 0, 0, 0);
+	win.fillRect(Common::Rect(0, 0, winW, winH), white);
+	if (hasBorder) {
+		border.setTitle("Colony Coder", winW);
+		border.blitBorderInto(win, Graphics::kWindowBorderActive);
+	} else {
+		win.frameRect(Common::Rect(0, 0, winW, winH), black);
+		win.frameRect(Common::Rect(1, 1, winW - 1, winH - 1), black);
+	}
+
+	// Keypad buttons with the symbol tile covering the digit
+	const int inset = (btnSize - tile) / 2;
+	for (int i = 0; i < 4; i++) {
+		const int bx = offL + x0 + i * pitch;
+		const bool pressed = (_coderPressed == i && _coderPressInside);
+		drawCoderTile(win, pressed ? _coderBtnDown : _coderBtnUp, bx, offT + btnY, black, white);
+		drawCoderTile(win, _coderTiles[i], bx + inset, offT + btnY + inset,
+			pressed ? white : black, pressed ? black : white);
+		_coderIconRects[i] = Common::Rect(wx + bx, wy + offT + btnY, wx + bx + btnSize, wy + offT + btnY + btnSize);
+
+		const int sx = bx + inset;
+		const Common::Rect slot(sx - 2, offT + slotY - 2, sx + tile + 2, offT + slotY + tile + 2);
+		win.frameRect(slot, black);
+		if (_coderPick[i] > 0)
+			drawCoderTile(win, _coderTiles[_coderPick[i] - 1], sx, offT + slotY, black, white);
+	}
+
+	if (_coderCursor < 4) {
+		const int cx = offL + x0 + _coderCursor * pitch + inset;
+		win.fillRect(Common::Rect(cx, offT + slotY + tile + 6, cx + tile, offT + slotY + tile + 8), black);
+	}
+
+	bool complete = true;
+	for (int i = 0; i < 4; i++) {
+		if (_coderPick[i] == 0)
+			complete = false;
+	}
+	Common::String text;
+	if (complete) {
+		uint8 code[6];
+		cryptArray(code, _coderPick[0] - 1, _coderPick[1] - 1, _coderPick[2] - 1, _coderPick[3] - 1);
+		for (int i = 0; i < 6; i++)
+			text += (char)('0' + code[i] - 2);
+	} else {
+		text = "- - - - - -";
+	}
+	font->drawString(&win, text, offL, offT + codeY, contentW, black, Graphics::kTextAlignCenter);
+
+	for (uint i = 0; i < instrLines.size(); i++)
+		instrFont->drawString(&win, instrLines[i], offL + 8, offT + instrY + (int)i * instrLineH,
+			contentW - 16, black, Graphics::kTextAlignCenter);
+
+	_gfx->drawSurface(&win.rawSurface(), wx, wy);
+	win.free();
+
+	_coderWin = Common::Rect(wx, wy, wx + winW, wy + winH);
+}
+
+// Mouse-down half of the button tracking; commit happens on mouse-up.
+bool ColonyEngine::handleColonyCoderClick(const Common::Point &pt) {
+	if (_coderWin.isEmpty() || !_coderWin.contains(pt))
+		return false;
+	for (int i = 0; i < 4; i++) {
+		if (_coderIconRects[i].contains(pt)) {
+			_coderPressed = i;
+			_coderPressInside = true;
+			break;
+		}
+	}
+	return true;
 }
 
 void ColonyEngine::drawComplexSprite(int index, int ox, int oy) {
@@ -1062,6 +1451,8 @@ int ColonyEngine::whichSprite(const Common::Point &p) {
 
 		debugC(1, kColonyDebugAnimation, "Sprite %d HIT. type=%d frozen=%d Frame %d, Sprite %d. Box: (%d,%d,%d,%d)",
 			i + 1, ls->type, ls->frozen, cnum, spriteIdx, r.left, r.top, r.right, r.bottom);
+		r.translate(ox, oy);
+		_messageSourceRect = r;
 		return i + 1;
 	}
 
@@ -1123,6 +1514,8 @@ void ColonyEngine::handleAnimationClick(int item) {
 		handleAirlockClick(item);
 	} else if (_animationName == "elev" || _animationName == "elevator" || _animationName == "elevator2") {
 		handleElevatorClick(item);
+	} else if (_animationName == "tele" || _animationName == "teleporter2") {
+		handleTeleportClick(item);
 	} else if (_animationName == "controls") {
 		handleControlsClick(item);
 	} else if (_animationName == "forklift") {
@@ -1136,6 +1529,7 @@ void ColonyEngine::handleAnimationClick(int item) {
 		// item 8 = lower button (active when _liftUp)
 		// item 9 = raise button (active when !_liftUp)
 		if (item == 8 && _liftUp) {
+			_sound->play(Sound::kDrop);
 			// Lower the object: animate states 5→1
 			setObjectState(8, 2); // lower arrow OFF
 			setObjectState(9, 1); // raise arrow ON
@@ -1146,8 +1540,8 @@ void ColonyEngine::handleAnimationClick(int item) {
 				responsiveAnimationDelay(_system, 50);
 			}
 			_liftUp = false;
-			_animationResult = 1;
 		} else if (item == 9 && !_liftUp) {
+			_sound->play(Sound::kLift);
 			// Raise the object: animate states 1→5
 			setObjectState(9, 2); // raise arrow OFF
 			setObjectState(8, 1); // lower arrow ON
@@ -1158,8 +1552,8 @@ void ColonyEngine::handleAnimationClick(int item) {
 				responsiveAnimationDelay(_system, 50);
 			}
 			_liftUp = true;
-			_animationResult = 1;
 		}
+		_animationResult = (_liftUp != (_fl == 2));
 	}
 }
 
@@ -1700,29 +2094,96 @@ void ColonyEngine::handleElevatorClick(int item) {
 	}
 }
 
+// DoTeleport(): the screen inverts while the transport sound runs.
+void ColonyEngine::flashTeleportBooth() {
+	int ox = _screenR.left + (_screenR.width() - 416) / 2;
+	ox = (ox / 8) * 8;
+	const int oy = _screenR.top + (_screenR.height() - 264) / 2;
+	const Common::Rect booth(ox, oy, ox + 416, oy + 264);
+
+	for (int i = 0; i < 8; i++) {
+		_gfx->fillRect(booth, (i & 1) ? _gfx->black() : _gfx->white());
+		_gfx->copyToScreen();
+		responsiveAnimationDelay(_system, 60);
+	}
+	drawAnimation();
+	_gfx->copyToScreen();
+}
+
+// DoTeleport(): stepping in and closing the door are separate clicks, and the
+// player can leave either stage without being transported.
+void ColonyEngine::handleTeleportClick(int item) {
+	if (getPlatform() == Common::kPlatformMacintosh) {
+		if (_animationName == "teleporter2") {
+			if (item == 2 && !_teleportDone) {
+				_sound->play(Sound::kTeleport);
+				flashTeleportBooth();
+				_teleportDone = true;
+				teleportPlayer();
+			} else if (item == 1 && objectState(2) == 6) {
+				_animationRunning = false;
+			}
+			return;
+		}
+
+		if (item == 1) {
+			if (!loadAnimation("teleporter2")) {
+				_animationRunning = false;
+				return;
+			}
+			setObjectState(2, 6);
+			drawAnimation();
+			_gfx->copyToScreen();
+		}
+		return;
+	}
+
+	// DOS keeps both stages in one file.
+	if (!_teleportInside) {
+		if (item == 3) {
+			_teleportInside = true;
+			setObjectOnOff(3, false);
+			setObjectOnOff(1, false);
+			drawAnimation();
+			_gfx->copyToScreen();
+		}
+		return;
+	}
+
+	if (item == 4 && !_teleportDone) {
+		_sound->play(Sound::kTeleport);
+		flashTeleportBooth();
+		_teleportDone = true;
+		teleportPlayer();
+	} else if (item == 2) {
+		_animationRunning = false;
+	}
+}
+
 void ColonyEngine::handleControlsClick(int item) {
 	switch (item) {
 	case 4: // Accelerator
+		// GANIMATE.C: if(corepower<2) DoStopSound(); else if(corestate!=0) DoStopSound();
 		if (_corePower[_coreIndex] < 2 || _coreState[_coreIndex] != 0) {
-			// GANIMATE.C: if(corepower<2) DoStopSound(); else if(corestate!=0) DoStopSound();
 			_sound->play(Sound::kStop);
 			debugC(1, kColonyDebugAnimation, "Accelerator failed: power=%d, state=%d", _corePower[_coreIndex], _coreState[_coreIndex]);
 			setObjectState(4, 1);
-			for (int i = 6; i > 0; i--) {
-				setObjectState(4, i);
-				drawAnimation();
-				_gfx->copyToScreen();
-				responsiveAnimationDelay(_system, 20);
-			}
-			break;
-		}
-
-		_animationRunning = false;
-		if (_orbit) {
+		} else if (_orbit) {
+			_animationRunning = false;
 			gameOver(false);
+			return;
 		} else {
 			takeOff();
 			_orbit = 1;
+		}
+
+		// The lever sweeps whether or not it fired, and the console stays open
+		// so the next press can launch.
+		for (int i = 6; i > 0; i--) {
+			setObjectState(4, i);
+			drawAnimation();
+			_gfx->copyToScreen();
+			responsiveAnimationDelay(_system, 20);
 		}
 		break;
 	case 5: // Emergency power

@@ -121,38 +121,6 @@ void blitBigMapMarker(Graphics::ManagedSurface &dstSurface, const Picture &marke
 	}
 }
 
-void blitMacBigMapPartnerFrame(Graphics::ManagedSurface &dstSurface,
-							   const Picture &frame, int anchorX,
-							   int anchorY) {
-	const byte transp = (byte)(frame.flags >> 8);
-	const int x = anchorX - (int)(int16)frame.miscflags;
-	const int y = anchorY - (int)(int16)frame.rowoff;
-	for (int row = 0; row < frame.surface.h; row++) {
-		const int dstY = y + row;
-		if (dstY < 0 || dstY >= dstSurface.h)
-			continue;
-		const byte *src = (const byte *)frame.surface.getBasePtr(0, row);
-		byte *dst = (byte *)dstSurface.getBasePtr(0, dstY);
-		for (int col = 0; col < frame.surface.w; col++) {
-			const int dstX = x + col;
-			if (dstX < 0 || dstX >= dstSurface.w)
-				continue;
-			const byte color = src[col];
-			if (color != transp) {
-				// The map partner frames are authored against the overview
-				// ColorTable: 0 is white and 0xff is black. The detail-map
-				// ColorTable swaps those endpoints.
-				if (color == 0x00)
-					dst[dstX] = 0xff;
-				else if (color == 0xff)
-					dst[dstX] = 0x00;
-				else
-					dst[dstX] = color;
-			}
-		}
-	}
-}
-
 struct BigMapEntryInfo {
 	uint16 overviewX = 0;
 	uint16 overviewY = 0;
@@ -162,12 +130,12 @@ struct BigMapEntryInfo {
 	uint16 crime = 0;
 };
 
-bool readBigMapEntryInfo(const byte *entry, bool floppy, bool macintosh,
+bool readBigMapEntryInfo(const byte *entry, const EEMEngine &vm, bool compactMac,
 						 BigMapEntryInfo &out) {
 	if (!entry)
 		return false;
 
-	if (macintosh) {
+	if (compactMac) {
 		out.detailX   = READ_LE_UINT16(entry + 0x0);
 		out.detailY   = READ_LE_UINT16(entry + 0x2);
 		out.buttonId  = entry[0x5];
@@ -177,7 +145,7 @@ bool readBigMapEntryInfo(const byte *entry, bool floppy, bool macintosh,
 		return true;
 	}
 
-	if (floppy) {
+	if (vm.isFloppy()) {
 		out.detailX   = READ_LE_UINT16(entry + 0x0);
 		out.detailY   = READ_LE_UINT16(entry + 0x2);
 		out.buttonId  = entry[0x4];
@@ -193,6 +161,13 @@ bool readBigMapEntryInfo(const byte *entry, bool floppy, bool macintosh,
 	out.detailX   = READ_LE_UINT16(entry + 0x8);
 	out.detailY   = READ_LE_UINT16(entry + 0xa);
 	out.crime     = READ_LE_UINT16(entry + 0xc);
+	if (vm.isMacCD()) {
+		// Mac CD scales DOS map coordinates and truncates the result (CODE 6).
+		out.overviewX = out.overviewX * kMacScreenWidth / kScreenWidth;
+		out.overviewY = out.overviewY * kMacScreenHeight / kScreenHeight;
+		out.detailX = out.detailX * kMacScreenWidth / kScreenWidth;
+		out.detailY = out.detailY * kMacScreenHeight / kScreenHeight;
+	}
 	return true;
 }
 
@@ -613,8 +588,6 @@ bool EEMEngine::bigMapTrySelectDetailSite(int mouseX, int mouseY,
 		Common::Rect rect;
 	};
 	Common::Array<DetailMapHit> hits;
-	const bool floppyMap = _mystery.isLoaded() && isFloppy();
-	const bool macMap = isMacintosh() && _mystery.usesCompactMacData();
 	for (uint i = 0; i < _mystery.numSites(); i++) {
 		// On-map flag alone, matching `_SearchMapButtons`.
 		if (!_mystery._onSites[i])
@@ -623,7 +596,7 @@ bool EEMEngine::bigMapTrySelectDetailSite(int mouseX, int mouseY,
 		if (!entry)
 			continue;
 		BigMapEntryInfo info;
-		if (!readBigMapEntryInfo(entry, floppyMap, macMap, info))
+		if (!readBigMapEntryInfo(entry, *this, _mystery.usesCompactMacData(), info))
 			continue;
 
 		Picture button;
@@ -875,6 +848,24 @@ void EEMEngine::doBigMap() {
 	}
 }
 
+bool skipLondonApproachVideo(const Common::Event &ev, bool mac, bool &done) {
+	if (ev.type == Common::EVENT_KEYDOWN) {
+		done = ev.kbd.keycode == Common::KEYCODE_ESCAPE ||
+			ev.kbd.keycode == Common::KEYCODE_RETURN ||
+			ev.kbd.keycode == Common::KEYCODE_KP_ENTER;
+		return true;
+	}
+	if (ev.type == Common::EVENT_LBUTTONDOWN) {
+		const Common::Rect doneRect = mac
+			? Common::Rect(kMacLondonApproachDoneLeft, kMacLondonApproachDoneTop,
+						   kMacLondonApproachDoneRight, kMacLondonApproachDoneBottom)
+			: kLondonApproachButtons[0].rect();
+		done = doneRect.contains(ev.mouse);
+		return true;
+	}
+	return false;
+}
+
 bool EEMEngine::doLondonApproach(uint16 approachId) {
 	if (!isLondon())
 		return false;
@@ -892,15 +883,17 @@ bool EEMEngine::doLondonApproach(uint16 approachId) {
 	byte palette[768] = {};
 	const bool haveVideo =
 		decodeLondonApproachFirstFrame(data.videoId, base, palette, mac);
+	bool havePalette = haveVideo;
 	if (!haveVideo)
 		base.clear();
 	if (mac) {
+		havePalette = getSitePalette(0x45 + data.videoId, palette) || havePalette;
 		Picture background;
 		const uint16 backgroundPic =
 			kMacLondonApproachBackgroundBasePic + data.videoId;
 		if (_picsArchive.getPicture(backgroundPic, background) &&
 			!background.surface.empty()) {
-			if (haveVideo) {
+			if (havePalette) {
 				const byte black =
 					closestPaletteIndex(palette, 0x00, 0x00, 0x00, 0xfe);
 				remapSurfaceColor(background.surface, 0xff, black);
@@ -949,7 +942,7 @@ bool EEMEngine::doLondonApproach(uint16 approachId) {
 		return -1;
 	};
 	const byte approachTextColor =
-		closestPaletteIndex(haveVideo ? palette : nullptr, 0, 0, 0,
+		closestPaletteIndex(havePalette ? palette : nullptr, 0, 0, 0,
 							mac ? (byte)0xfe : (byte)1);
 
 	auto drawApproachOverlay = [&](Graphics::ManagedSurface &scratch,
@@ -992,6 +985,7 @@ bool EEMEngine::doLondonApproach(uint16 approachId) {
 		g_system->updateScreen();
 	};
 
+	bool done = false;
 	auto playVideo = [&](uint page) {
 		if (mac) {
 			Video::FlicDecoder flic;
@@ -1024,7 +1018,7 @@ bool EEMEngine::doLondonApproach(uint16 approachId) {
 				if (flic.hasDirtyPalette()) {
 					const byte *fpal = flic.getPalette();
 					if (fpal)
-						g_system->getPaletteManager()->setPalette(fpal, 0, 256);
+						getPaletteManager()->setPalette(fpal, 0, 256);
 				}
 				g_system->updateScreen();
 
@@ -1037,8 +1031,7 @@ bool EEMEngine::doLondonApproach(uint16 approachId) {
 						if (ev.type == Common::EVENT_QUIT ||
 							ev.type == Common::EVENT_RETURN_TO_LAUNCHER)
 							return;
-						if (ev.type == Common::EVENT_LBUTTONDOWN ||
-							ev.type == Common::EVENT_KEYDOWN) {
+						if (skipLondonApproachVideo(ev, mac, done)) {
 							skip = true;
 							break;
 						}
@@ -1091,8 +1084,7 @@ bool EEMEngine::doLondonApproach(uint16 approachId) {
 						ev.type == Common::EVENT_RETURN_TO_LAUNCHER) {
 						return;
 					}
-					if (ev.type == Common::EVENT_LBUTTONDOWN ||
-						ev.type == Common::EVENT_KEYDOWN) {
+					if (skipLondonApproachVideo(ev, mac, done)) {
 						skip = true;
 						break;
 					}
@@ -1107,20 +1099,19 @@ bool EEMEngine::doLondonApproach(uint16 approachId) {
 	fadeCurrentPaletteToBlack();
 	CursorMan.showMouse(true);
 	setSiteHotspotCursorId(6);
-	if (_music && _voiceOn)
+	if (_music && _musicOn)
 		_music->playMus(0x27, /* loop= */ true);
 
 	uint page = 0;
 	drawScreen(page);
-	if (haveVideo)
+	if (havePalette)
 		fadePaletteFromBlack(palette);
 	else
 		setSitePalette(0x3b);
-	if (haveVideo) {
+	if (haveVideo && !mac) {
 		playVideo(page);
 		drawScreen(page);
 	}
-	bool done = false;
 	uint32 lastShimmer = g_system->getMillis();
 	while (!shouldQuit() && !done) {
 		Common::Event ev;
@@ -1257,10 +1248,8 @@ void EEMEngine::drawBigMapOverview(uint32 elapsedMs) {
 		if (!entry)
 			continue;
 
-		const bool floppy  = _mystery.isLoaded() && isFloppy();
 		BigMapEntryInfo info;
-		if (!readBigMapEntryInfo(entry, floppy,
-								 mac && _mystery.usesCompactMacData(), info))
+		if (!readBigMapEntryInfo(entry, *this, _mystery.usesCompactMacData(), info))
 			continue;
 		const bool isDone = (i < Mystery::kVisitedSiteCap)
 							 && _mystery._visitedSite[i];
@@ -1343,7 +1332,6 @@ void EEMEngine::drawBigMapDetail(int scrollX, int scrollY,
 	scratch.copyRectToSurface(mapPixels.data() + scrollY * mapW + scrollX,
 							  mapW, kMapWinX, kMapWinY, copyW, copyH);
 
-	const bool floppyMap = _mystery.isLoaded() && isFloppy();
 	for (uint i = 0; i < _mystery.numSites(); i++) {
 		// `_DrawBigMapButtons` gates markers on the on-map flag alone, never the
 		// current site: a sublocation (in-site jump, never flagged) must not draw.
@@ -1353,8 +1341,7 @@ void EEMEngine::drawBigMapDetail(int scrollX, int scrollY,
 		if (!entry)
 			continue;
 		BigMapEntryInfo info;
-		if (!readBigMapEntryInfo(entry, floppyMap,
-								 mac && _mystery.usesCompactMacData(), info))
+		if (!readBigMapEntryInfo(entry, *this, _mystery.usesCompactMacData(), info))
 			continue;
 		Picture button;
 		if (!_buttonArchive.loadEntry(info.buttonId, button))
@@ -1383,8 +1370,8 @@ void EEMEngine::drawBigMapDetail(int scrollX, int scrollY,
 		const int anchorX = mac ? scaleX(0x101) : 0x101;
 		const int anchorY = mac ? scaleY(0x50) : 0x50;
 		if (mac)
-			blitMacBigMapPartnerFrame(scratch, detailAnim[frameIdx],
-									  anchorX, anchorY);
+			blitMacAnimFrameAnchored(scratch.surfacePtr(), detailAnim[frameIdx],
+									 anchorX, anchorY);
 		else
 			blitAnimFrameAnchored(scratch.surfacePtr(),
 								  detailAnim[frameIdx],

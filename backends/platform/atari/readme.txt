@@ -1,4 +1,4 @@
-ScummVM 2026.3.1git
+ScummVM 2026.4.1git
 ================
 
 This is a port of ScummVM (https://www.scummvm.org), a program which allows you
@@ -35,7 +35,7 @@ Differences between the versions
 --------------------------------
 
 After talking to Keith we have decided to provide three flavours of ScummVM.
-Please refer to https://docs.scummvm.org/en/v2026.3.1git/other_platforms/atari.html
+Please refer to https://docs.scummvm.org/en/v2026.4.1git/other_platforms/atari.html
 for more details (TBD).
 
 Atari Full package
@@ -71,6 +71,8 @@ Minimum hardware requirements: Atari Falcon with 4 + 32 MB RAM and 68040 CPU.
 
 - Native MIDI output.
 
+- Native OPL2/OPL3 output.
+
 - Native CDDA support.
 
 - Runs also in Hatari and ARAnyM but in case of ARAnyM don't forget to disable
@@ -104,8 +106,9 @@ executable size.
   but still allows playing speech/sfx samples and/or CD audio and/or native
   MIDI music).
 
-- "null" music driver is automatically enabled (i.e. OPL emulation is never
-  used but still allows playing speech/sfx samples and/or CD audio).
+- "None" AdLib emulator is automatically enabled (i.e. OPL emulation is never
+  used but still allows playing speech/sfx samples and/or CD audio and/or
+  native OPL music).
 
 - DOSBox and MAME OPL emulator is disabled => smaller executable size.
 
@@ -166,9 +169,10 @@ systems without an external DSP clock, these frequencies are adjusted to
 the exact value; it will be rounded automatically to the nearest suitable
 value.
 
-"output_channels" in scummvm.ini: mono (1) or stereo (2) mixing. Please note
-that Falcon doesn't allow mixing in 16-bit mono, so this will have no effect on
-this machine.
+"output_channels" in scummvm.ini: mono (1) or stereo (2) mixing. Falcon always
+outputs 16-bit stereo however when set to mono, a fast mono-to-stereo
+conversion takes place (so I encourage everyone to use mono when music playback
+is too demanding).
 
 "audio_buffer_size" in scummvm.ini: number of samples to preload. Default is
 2048 which equals to about 83ms of audio lag and seems to be about right for
@@ -177,6 +181,12 @@ most games on my CT60@66 MHz.
 If you want to play with "audio_buffer_size", the rule of thumb is: (lag in ms)
 = (audio_buffer_size / output_rate) * 1000. But it's totally OK just to double
 the samples value to get rid of stuttering in a heavier game.
+
+Please note that unlike previous versions, these values will never be written
+back to scummvm.ini. This is beneficial if you want to switch between Falcon
+and TT or between Falcon with and without external DSP clock (as mentioned,
+DOS/Windows friendly values are automatically converted to a frequency which
+TT/Falcon supports).
 
 "gaudio" debug channel: used for optimising sample playback (where
 available). It prints input and output sample format as well as the name of the
@@ -365,23 +375,27 @@ MIDI vs. AdLib vs. sampled music
 
 It could seem that sampled music replay must be the most demanding one but on
 the contrary! Always choose a CD version of a game (with *.wav tracks) over any
-other version. With one exception: if you have a native MIDI device able to
-replay the given game's MIDI notes (using the STMIDI plugin).
+other version. With two exceptions: if you have a native MIDI device able to
+replay the given game's MIDI notes (using the STMIDI plugin) or a real OPL chip
+able to replay the given game's AdLib music (using one of the "[nFM]" devices
+in "AdLib emulator", e.g. the NokturnFM2/NokturnFM3 cartridge or Hatari once
+nFM's patch is merged).
 
 MIDI emulation (synthesis) can easily eat as much as 50% of all used CPU time
-(on the CT60). By default, this port uses the MAME OPL emulation (which is said
-to be fastest but also least accurate) but some engines require the DOSBOX one
-which is even more demanding. By the way, you can put "FM_high_quality=true" or
+(on the CT60 and even if no OPL music is produced at the moment). By default,
+this port uses the MAME OPL emulation (which is said to be fastest but also
+least accurate) but some engines require the DOSBOX one which is even more
+demanding. By the way, you can put "FM_high_quality=true" or
 "FM_medium_quality=true" into scummvm.ini if you want to experiment with a
 better quality synthesis, otherwise the lowest quality will be used (applies
 for MAME OPL only).
 
 On TT, in most cases it makes sense to use ScummVM only if you own a native
-MIDI synthesiser (like mt32-pi: https://github.com/dwhinham/mt32-pi). MIDI
-emulation is out of the question and downsampling to 8-bit resolution takes a
-good chunk of CPU time which could be utilised elsewhere. However, there are
-games which are fine with sampled music/speech even on a plain TT (e.g. Lands
-of Lore).
+MIDI synthesiser (like mt32-pi: https://github.com/dwhinham/mt32-pi) or a real
+OPL chip (like the NokturnFM cartridge). MIDI/OPL emulation is out of the
+question and downsampling to 8-bit resolution takes a good chunk of CPU time
+which could be utilised elsewhere. However, there are games which are fine with
+sampled music/speech even on a plain TT (e.g. Lands of Lore).
 
 CD music slows everything down
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -401,15 +415,20 @@ Mute vs. "No music"
 
 Currently ScummVM requires each backend to mix samples, even though they may
 contain muted output (i.e. zeroes). This is because the progression of sample
-playback tells ScummVM how much time has passed in e.g. an animation.
+playback tells ScummVM how much time has passed in e.g. an animation. However,
+an optimisation kicks in for muted channels: the input stream is still loaded
+and decoded but it is not mixed which alone leads to an enormous performance
+boost!
 
 "No music" means using the null audio plugin which prevents generating any MIDI
 music (and therefore avoiding the expensive synthesis emulation) but beware, it
-doesn't affect CD (*.wav) playback at all! Same applies for speech and sfx.
+doesn't affect CD (*.wav) playback at all! Same applies for speech and sfx. So
+mute one or all of those if frame rate drops noticeably.
 
 The least amount of cycles is spent when:
 - "No music" as "Preferred device": This prevents MIDI/OPL synthesis of any
   kind.
+- "Mute all" in "Volume" setting.
 - "output_rate" set to a DOS/Windows compatible value (default). Even if game
   uses 22050 Hz and your Falcon supports 22050 Hz, it is always faster to use
   11025 Hz!
@@ -436,15 +455,8 @@ MetaDOS API allows mixing various components:
   unidrive.dos (ExtenDOS)
 - cd.bos from ExtenDOS strictly requires unidrive.dos
 
-There is a bug in ExtenDOS 4.10's cd.bos: under very specific circumstances
-ScummVM seemingly freezes while seeking for a file on CD (black screen). I'm
-working with the author on fixing this problem, in the meantime you can:
-
-- Copy data files from CD to hard disk (makes sense also for speed reasons),
-  and ignore the message box with advice about ripping tracks from CD.
-- Reconfigure ExtenDOS to use its own SCSI routines (disabled by default).
-- Edit extendos.cnf and replace cd.bos with e.g. spin_sd.bos.
-- Not use ExtenDOS.
+To speed things up you can copy data files from CD to hard disk and ignore the
+message box with advice about ripping tracks from CD.
 
 Sample rate
 ~~~~~~~~~~~
@@ -500,8 +512,9 @@ Changes to upstream
 -------------------
 
 - This port contains experimental / pending optimisations to audio mixing
-  (https://github.com/scummvm/scummvm/pull/7385). I'll try to get them merged
-  in the next release.
+  (https://github.com/scummvm/scummvm/pull/7599). I'll try to get them merged
+  in the next release. It also contains fake audio thread implementation by
+  Anders Granlund (which more or less depend on the PR).
 
 
 Known issues
@@ -558,6 +571,12 @@ Known issues
 
 - When using EmuTOS, ScummVM requires a recent release (>= 1.3), otherwise
   various screen- and sound-related issues may appear.
+
+- When using ExtenDOS for Audio CD, ScummVM requires a recent release (>= 4.11),
+  otherwise playback could freeze the whole program.
+
+- When using SuperVidel, ScummVM requires a recent drivers release (>= 2026),
+  otherwise video wouldn't be restored correctly.
 
 Future plans
 ------------

@@ -23,6 +23,7 @@
 #define MACS2_SCRIPTEXECUTOR_H
 
 #include "common/array.h"
+#include "common/path.h"
 #include "common/rect.h"
 #include "common/scummsys.h"
 #include "common/str-array.h"
@@ -67,12 +68,19 @@ enum class ExecutorState {
 	WaitingForCallback
 };
 
-enum class ExecutionResult {
-	// We have finished executing the script
-	ScriptFinished,
-
-	// We are now waiting for a callback
-	WaitingForCallback
+/** Result of a script opcode handler / executeOpcodes(). */
+enum class OpcodeResult {
+	/** Continue with the next opcode in the current script. */
+	Continue,
+	/** Break the opcode loop, then finish (clears running flag). */
+	FinishScript,
+	/** Pause execution and wait for an external callback (leaves running flag set). */
+	WaitForCallback,
+	/**
+	 * Finish immediately (leaves running flag set).
+	 * Used by changeScene / waitForWalk / showDialogueChoice / dismissPanel.
+	 */
+	ReturnFinished
 };
 
 enum class ScriptExecutionState {
@@ -97,88 +105,166 @@ enum class ScriptExecutionState {
  *
  */
 class ScriptExecutor {
+public:
+	typedef OpcodeResult (ScriptExecutor::*OpcodeHandler)();
+
+	struct OpcodeEntry {
+		const char *name;
+		OpcodeHandler handler;
+	};
+
+	/** Install the active opcode table (use when a platform/version remaps opcodes). */
+	void setOpcodeTable(const OpcodeEntry *table, uint size);
+	/** Name for opcode, or "?" if unset/out of range. */
+	const char *opcodeName(uint8 opcode) const;
+
+	/** Script dialect v1 opcode table (MCS / Amiga demo bytecode). */
+	static const OpcodeEntry kV1OpcodeTable[];
+	static const uint kV1OpcodeTableSize;
+	/**
+	 * Script dialect v2 opcode table (extends v1 through 0x6D).
+	 * Remaps a few audio slots and adds 0x4F..0x6D
+	 */
+	static const OpcodeEntry kV2OpcodeTable[];
+	static const uint kV2OpcodeTableSize;
+
 private:
 #ifdef DEMACS2
 public:
 #endif
-	void scriptSetVar();
-	void scriptSetVarOr();
-	void scriptIfTrue();
-	void scriptIfFalse();
-	bool scriptCompare();
-	void scriptIfInteraction();
-	void scriptEndIf();
-	void scriptElse();
-	void scriptNop09();
-	void scriptPrintStringLeft();
-	void scriptMoveObject();
-	ExecutionResult scriptChangeScene();
-	ExecutionResult scriptShowDialogue();
-	void scriptWalkToPosition();
-	ExecutionResult scriptWaitForWalk();
-	void scriptSkipWord();
-	void scriptClearDialogueChoices();
-	void scriptAddDialogueChoice();
-	ExecutionResult scriptShowDialogueChoice();
-	ExecutionResult scriptDismissPanel();
-	void scriptWalkToAndPickup();
-	bool scriptSetPickupFrames();
-	void scriptSetupObject();
-	void scriptSetSkippable();
-	void scriptClearSkippable();
-	void scriptPlayAnimation();
-	void scriptTestPathfinding();
-	void scriptSetYOffset();
-	void scriptSetMotion();
-	bool scriptSetOrientation();
-	void scriptMoveToPosition();
-	void scriptAddValues();
-	void scriptSubValues();
-	void scriptLoadSpecialAnim();
-	void scriptSetDirection();
-	void scriptStopAnimation();
-	void scriptOpenInventory();
-	void scriptLoadObjectAnim();
-	void scriptCheckObjectData();
-	void scriptCheckInventory();
-	void scriptSetSnapToTarget();
-	void scriptTestObjectAnimFrame();
-	void scriptPrintStringRight();
-	void scriptSetPaletteDarkness();
-	void scriptSetObjectShading();
-	void scriptSetObjectScaling();
-	void scriptSetHotspotOverride();
-	void scriptSetObjectBounds();
-	void scriptDismissAllPanels();
-	void scriptResetToSceneScript();
-	void scriptLoadOverlayFont();
-	void scriptAddOverlayTextEntry();
-	void scriptClearOverlayText();
-	void scriptFadeToBlack();
-	void scriptLoadPcmSound();
-	void scriptPlayPcmSound();
-	bool scriptWaitForSound();
-	void scriptStopPcmSound();
-	void scriptLoadMusicSlot();
-	void scriptPlayMusicSlot();
-	void scriptStopMusicSlot();
-	bool scriptWaitForMusic();
-	void scriptFreeMusicSlot();
-	void scriptGetObjectX();
-	void scriptGetObjectY();
-	void scriptGetObjectField8();
-	void scriptGetObjectOrientation();
-	void scriptClearActorInventory();
-	void scriptSetPathfindingRemap();
-	bool scriptWaitForAdlib();
-	void scriptSkipUntil14();
-	void scriptChangeAnimation();
-	void scriptFrameWait();
-	void scriptSetPathfinding();
-	void scriptTestSceneAnimFrame();
-	void scriptEndOverlayText();
-	void scriptFadeFromBlack();
-	void scriptFreePcmSound();
+	OpcodeResult scriptSetVar();
+	OpcodeResult scriptSetVarOr();
+	OpcodeResult scriptIfTrue();
+	OpcodeResult scriptIfFalse();
+	OpcodeResult scriptCompare();
+	OpcodeResult scriptIfInteraction();
+	OpcodeResult scriptEndIf();
+	OpcodeResult scriptElse();
+	OpcodeResult scriptNop09();
+	OpcodeResult scriptPrintStringLeft();
+	OpcodeResult scriptMoveObject();
+	OpcodeResult scriptChangeScene();
+	OpcodeResult scriptShowDialogue();
+	OpcodeResult scriptWalkToPosition();
+	OpcodeResult scriptWaitForWalk();
+	OpcodeResult scriptSkipWord();
+	OpcodeResult scriptClearDialogueChoices();
+	OpcodeResult scriptAddDialogueChoice();
+	OpcodeResult scriptShowDialogueChoice();
+	OpcodeResult scriptDismissPanel();
+	OpcodeResult scriptWalkToAndPickup();
+	OpcodeResult scriptSetPickupFrames();
+	OpcodeResult scriptSetupObject();
+	OpcodeResult scriptSetSkippable();
+	OpcodeResult scriptClearSkippable();
+	OpcodeResult scriptPlayAnimation();
+	OpcodeResult scriptTestPathfinding();
+	OpcodeResult scriptSetYOffset();
+	OpcodeResult scriptSetMotion();
+	OpcodeResult scriptSetOrientation();
+	OpcodeResult scriptMoveToPosition();
+	OpcodeResult scriptAddValues();
+	OpcodeResult scriptSubValues();
+	OpcodeResult scriptLoadSpecialAnim();
+	OpcodeResult scriptSetDirection();
+	OpcodeResult scriptStopAnimation();
+	OpcodeResult scriptOpenInventory();
+	OpcodeResult scriptLoadObjectAnim();
+	OpcodeResult scriptCheckObjectData();
+	OpcodeResult scriptCheckInventory();
+	OpcodeResult scriptSetSnapToTarget();
+	OpcodeResult scriptTestObjectAnimFrame();
+	OpcodeResult scriptPrintStringRight();
+	OpcodeResult scriptSetPaletteDarkness();
+	OpcodeResult scriptSetObjectShading();
+	OpcodeResult scriptSetObjectScaling();
+	OpcodeResult scriptSetHotspotOverride();
+	OpcodeResult scriptSetObjectBounds();
+	OpcodeResult scriptDismissAllPanels();
+	OpcodeResult scriptResetToSceneScript();
+	OpcodeResult scriptLoadOverlayFont();
+	OpcodeResult scriptAddOverlayTextEntry();
+	OpcodeResult scriptClearOverlayText();
+	OpcodeResult scriptFadeToBlack();
+	OpcodeResult scriptLoadPcmSound();
+	OpcodeResult scriptPlayPcmSound();
+	OpcodeResult scriptWaitForSound();
+	OpcodeResult scriptStopPcmSound();
+	OpcodeResult scriptLoadMusicSlot();
+	OpcodeResult scriptPlayMusicSlot();
+	OpcodeResult scriptStopMusicSlot();
+	OpcodeResult scriptWaitForMusic();
+	OpcodeResult scriptFreeMusicSlot();
+	OpcodeResult scriptGetObjectX();
+	OpcodeResult scriptGetObjectY();
+	OpcodeResult scriptGetObjectField8();
+	OpcodeResult scriptGetObjectOrientation();
+	OpcodeResult scriptClearActorInventory();
+	OpcodeResult scriptSetPathfindingRemap();
+	OpcodeResult scriptWaitForAdlib();
+	OpcodeResult scriptSkipUntil14();
+	OpcodeResult scriptChangeAnimation();
+	OpcodeResult scriptFrameWait();
+	OpcodeResult scriptSetPathfinding();
+	OpcodeResult scriptTestSceneAnimFrame();
+	OpcodeResult scriptEndOverlayText();
+	OpcodeResult scriptFadeFromBlack();
+	OpcodeResult scriptFreePcmSound();
+
+	/** Seek to the length-prefixed end of the current opcode payload. */
+	void scriptSkipOpcodeRemainder(uint8 opcode);
+
+	// Dialect v2: remapped audio slots (v1 PCM/music-slot opcodes are NOPs here).
+	OpcodeResult scriptNopSkipRemainder();
+	OpcodeResult scriptPlaySfx();
+	OpcodeResult scriptPlaySong();
+	OpcodeResult scriptStopSong();
+	/** Fixed 13-byte Pascal-style filename field from the script stream. */
+	Common::String scriptReadFixedFileName();
+	Common::String scriptParsePascalFileName(const Common::String &raw);
+	/** Resolve SPEECH/SOUNDFX basename (no extension) for openStreamFile; empty if none. */
+	Common::Path resolveAudioFilePath(const Common::String &fileName, bool preferSpeech) const;
+	/** Resolve MUSICGS then MUSICOPL; empty if neither exists. */
+	Common::Path resolveMidiFilePath(const Common::String &fileName) const;
+	/**
+	 * Optional generated dialogue audio (kEnhAudioChanges):
+	 * scene -> SPEECH/sSS_OOOO.*, object -> SPEECH/oOOO_OOOO.*.
+	 * Missing files are ignored. If no voice plays, speak `lines` via TTS.
+	 */
+	void tryPlayDialogueSpeech(uint16 stringOffset, const Common::Array<Common::String> &lines);
+
+	// Dialect v2: extended opcodes 0x4F..0x6D (stubs until backends exist).
+	OpcodeResult scriptSetMainActor();
+	OpcodeResult scriptLoadDeltaAnim();
+	OpcodeResult scriptPlayDeltaAnim();
+	OpcodeResult scriptRemoveDeltaAnim();
+	OpcodeResult scriptSetButtonStep();
+	OpcodeResult scriptTestButtonAnimFrame();
+	OpcodeResult scriptScreenShot();
+	OpcodeResult scriptWaitObjectAnimStep();
+	OpcodeResult scriptWaitSpecialAnimStep();
+	OpcodeResult scriptSetObjectAdjust();
+	OpcodeResult scriptReloadSpecialAnim();
+	OpcodeResult scriptPlayDiskDelta();
+	OpcodeResult scriptSetDiskCache();
+	OpcodeResult scriptSetMidiVolume();
+	OpcodeResult scriptSetWaveVolume();
+	OpcodeResult scriptLoadSpecialAnimSlot();
+	OpcodeResult scriptSetSpecialAnimSlot();
+	OpcodeResult scriptClearSpecialAnimSlot();
+	OpcodeResult scriptSetDeltaRange();
+	OpcodeResult scriptClearDeltaRange();
+	OpcodeResult scriptAddDeltaSfx();
+	OpcodeResult scriptClearDeltaSfxList();
+	OpcodeResult scriptShowActionBar();
+	OpcodeResult scriptHideActionBar();
+	OpcodeResult scriptSetCursorType();
+	OpcodeResult scriptCheckDeltaSpeed();
+	OpcodeResult scriptLoadDistanceMask();
+	OpcodeResult scriptLoadAreaMask();
+	OpcodeResult scriptLoadWalkMask();
+	OpcodeResult scriptLoadShadowMask();
+	OpcodeResult scriptTalkTo();
 
 	inline void scriptUnimplementedOpcode(const char *source, uint16 opcode) {
 		debug("Unimplemented opcode (%s): %.2x.", source, opcode);
@@ -186,6 +272,10 @@ public:
 #ifdef DEMACS2
 private:
 #endif
+
+	// Active opcode table
+	const OpcodeEntry *_opcodeTable = nullptr;
+	uint _opcodeTableSize = 0;
 
 	// State variables from here
 
@@ -253,7 +343,13 @@ private:
 	void scriptSkipAlternate();
 
 	bool loadIndexedResource(Common::Array<uint8> &outData, uint8 resourceIndex, uint16 objectTableOffset = 0x189);
-	bool loadSoundResource(Common::Array<uint8> &outData, uint8 resourceIndex);
+	/**
+	 * Load PCM for opcode 0x3E.
+	 * DOS: indexed MCS resource (2-byte header). Amiga: OS_/MXOS from DataA (raw PCM).
+	 * On success, rateHz/headerSkip describe how playSample should consume the buffer.
+	 */
+	bool loadSoundResource(Common::Array<uint8> &outData, uint8 resourceIndex,
+						   int &rateHz, int &headerSkip);
 	bool loadMusicResource(Common::Array<uint8> &outData, uint8 resourceIndex);
 
 	// scriptReadValue: reads a typed value from the script stream
@@ -264,6 +360,12 @@ private:
 
 	// Returns only the first of the two 16 bit values
 	uint16 scriptReadValue16();
+
+	/** Read a script value and convert to screen/runtime coordinates. */
+	int16 scriptReadCoord16();
+
+	/** Skip optional padding word after a script variable index when required. */
+	void skipOptionalVarIndexPadding();
 
 	// Saves the given value in a script variable
 	void scriptSaveVariableHelper(uint32 value);
@@ -281,12 +383,37 @@ private:
 	// e.g. opcode 0x29). The binary drives the whole script-selection flow off
 	// this single value; there is no separate scene-vs-object state flag.
 	uint16 _executingScriptObjectId = 0;
+	// Binary g_wScriptEndPosition [0xf90] and g_wScriptIsExecuting [0xf88].
+	// End is the active script byte limit (scene+0x520b or object runtime+0x18b);
+	// isExecuting is (position < end), persisted in savegames.
+	uint32 _scriptEndPosition = 0;
+	bool _scriptIsExecuting = false;
+
+	uint32 effectiveScriptEnd() const;
+	void clampScriptEndToStream();
 
 public:
-	ScriptExecutor();
+	ScriptExecutor(Macs2::Macs2Engine *engine);
 	~ScriptExecutor();
 
+	void syncScriptIsExecutingFlag();
+
+	/** Strip a trailing audio extension (.wav/.ogg/...) if present. */
+	static Common::String stripAudioExtension(const Common::String &fileName);
+
 	void setIdle() { _state = ExecutorState::Idle; }
+
+	/**
+	 * Restore mid-script execution after loadGameFromFile (1008:747e).
+	 * When isExecuting, mirrors binary: reattach scene/object script at saved
+	 * position and leave the executor resumable (WaitingForCallback) so the next
+	 * runScriptExecutor continues instead of rewinding to a fresh scene pass.
+	 */
+	void restoreScriptExecutionAfterLoad(bool isExecuting, uint16 executingObjectId,
+										 uint16 scriptPosition, uint16 scriptEndPosition);
+
+	/** Align executing object id / end position with the active script stream before save. */
+	void prepareScriptStateForSave();
 
 	Common::Array<uint16> _dialogueChoiceScriptIndices;
 	Common::Array<Common::StringArray> _dialogueChoices;
@@ -309,7 +436,7 @@ public:
 	bool _pathWalkableResult = false;
 	bool _isRepeatRun = false;
 
-	// Scene data [di+53B7h] - TODO: Confirm that we use a script variable as well as this thing
+	// chosen dialogue script index
 	int _chosenDialogueOption = 0;
 	uint16 _dialogueSpeakerObjectID = 0;
 
@@ -350,6 +477,8 @@ public:
 	bool _scriptSkippable = false;
 	bool _musicEnabled = true;
 	bool _soundSystemActive = true;
+	/** Dialogue/subtitle text display toggle (native options HUD). */
+	bool _textEnabled = true;
 	bool _overlayTextStageActive = false;
 	bool _inventoryActionFlag = false;
 	bool _inventoryCombineFlag = false;
@@ -365,16 +494,29 @@ public:
 	bool _waitForPcmSound = false;
 	bool _waitForMusicControl = false;
 	bool _waitForAdlibReady = false;
+	// Dialect-v2: wait until an object/scene anim sequencePosition reaches a target.
+	bool _waitForObjectAnimStep = false;
+	uint16 _waitObjectAnimObjectId = 0;
+	uint16 _waitObjectAnimSlot = 0;
+	uint16 _waitObjectAnimTargetStep = 0;
+	bool _waitForSpecialAnimStep = false;
+	uint16 _waitSpecialAnimIndex = 0;
+	uint16 _waitSpecialAnimTargetStep = 0;
+	bool _waitForDeltaAnim = false;
+	bool _waitForDeltaSpeed = false;
 	bool _debugPaused = false;
 	bool _pickupInProgress = false;
 	uint16 _pickupActorObjectID = 0;
 	uint16 _pickupTargetObjectID = 0;
 
-	bool _isRunningScript = false;
-	// Mutex indicating if the A3D2 function is active
-	bool _isSkipping = false;
+	Macs2::Macs2Engine *_engine;
 
-	Macs2::Macs2Engine *_engine = nullptr;
+	/**
+	 * Restart the active music slot if music is enabled and the system is active.
+	 * Used after save load and when closing the original save/load panel (button 7).
+	 * Returns true if playback was started.
+	 */
+	bool resumeActiveMusic();
 
 	// Button 8 skip from handleInput (1008:e8bf)
 	bool skipToEndOfSkippableSection();
@@ -389,11 +531,10 @@ public:
 	Common::Point getCharPosition();
 
 	// executeOpcodes (1008:db56): the opcode dispatch loop for the current script.
-	ExecutionResult executeOpcodes();
+	OpcodeResult executeOpcodes();
 
-	// Will execute the script and any object scripts until execution should be stopped
-	// TODO: Consider if we should let the executor also figure out where to get the
-	// first script from
+	// Execute the scene script and any object scripts until execution should stop.
+	// Fresh runs bind Scenes::_currentSceneScript at offset 0; mid-script resumes continue in place.
 	void run(bool firstRun = false);
 
 	void setScript(Common::MemoryReadStream *stream);
@@ -412,25 +553,50 @@ public:
 	bool isScriptWaitDeferred() const {
 		return _state == ExecutorState::WaitingForCallback ||
 			   _frameWaitTicksRemaining != 0 || _walkTargetObjectIndex != 0 ||
-			   _waitForPcmSound || _waitForMusicControl || _waitForAdlibReady;
+			   _waitForPcmSound || _waitForMusicControl || _waitForAdlibReady ||
+			   _waitForObjectAnimStep || _waitForSpecialAnimStep ||
+			   _waitForDeltaAnim || _waitForDeltaSpeed;
 	}
 
 	bool isExecuting() const {
 		return _state != ExecutorState::Idle;
 	}
 
+	/** Binary g_wScriptIsExecuting: script VM paused mid-bytecode (incl. UI waits). */
+	bool isScriptMidExecution() const {
+		return _scriptIsExecuting;
+	}
+
 	uint32 getScriptPosition() const;
 	// Returns the position of the last executed/executing opcode (for debugger highlight)
 	uint32 getDebugOpcodePosition() const;
-	bool isWaitingForCallback() const { return _state == ExecutorState::WaitingForCallback; }
+	bool isWaitingForCallback() const {
+		return _state == ExecutorState::WaitingForCallback;
+	}
 	uint32 getScriptEndPosition() const;
-	uint16 getExecutingObjectId() const { return _executingObjectIndex; }
-	void setExecutingObjectId(uint16 id) { _executingObjectIndex = id; }
-	uint16 getFrameWaitCounter() const { return _frameWaitTicksRemaining; }
-	void setFrameWaitCounter(uint16 val) { _frameWaitTicksRemaining = val; }
-	bool isFrameWaitActive() const { return _isFrameWaitActive; }
-	bool getRepeatRunFlag() const { return _repeatRunFlag; }
-	void setRepeatRunFlag(bool val) { _repeatRunFlag = val; }
+	// Binary g_wExecutingScriptObjectId [0xf92]: 0 = scene script, 1..0x200 = object.
+	// Not _executingObjectIndex (iteration cursor / last scene index after Idle).
+	uint16 getExecutingObjectId() const {
+		return _executingScriptObjectId;
+	}
+	void setExecutingObjectId(uint16 id) {
+		_executingScriptObjectId = id;
+	}
+	uint16 getFrameWaitCounter() const {
+		return _frameWaitTicksRemaining;
+	}
+	void setFrameWaitCounter(uint16 val) {
+		_frameWaitTicksRemaining = val;
+	}
+	bool isFrameWaitActive() const {
+		return _isFrameWaitActive;
+	}
+	bool getRepeatRunFlag() const {
+		return _repeatRunFlag;
+	}
+	void setRepeatRunFlag(bool val) {
+		_repeatRunFlag = val;
+	}
 	uint32 getVariableValue(int index) const;
 
 	// Plate / walk debugging: log actor position, area, walkability, script waits.
@@ -448,7 +614,7 @@ public:
 	// g_wScriptErrorCode (1020:0f86): non-zero halts opcode dispatch (1008:db56).
 	uint16 _scriptErrorCode = 0;
 	Character *getOrCreateCharacter(uint16 objectID);
-	void saveWalkRuntime(const Character *c, GameObject *o);
+	void saveWalkRuntime(const Character *c, GameObject *o) const;
 	void restoreWalkRuntime(Character *c, const GameObject *o);
 	void clearStoredWalkRuntime(GameObject *o);
 	void seedMoveToPositionState(GameObject *object, Character *c, const Common::Point &target, uint16 targetVerticalOffset);
@@ -456,9 +622,15 @@ public:
 	void saveOpenInventoryScriptContext();
 	void restoreOpenInventoryScriptContext();
 	void setScriptError(uint16 code);
-	bool hasScriptError() const { return _scriptErrorCode != 0; }
-	void clearScriptError() { _scriptErrorCode = 0; }
-	uint16 getScriptErrorCode() const { return _scriptErrorCode; }
+	bool hasScriptError() const {
+		return _scriptErrorCode != 0;
+	}
+	void clearScriptError() {
+		_scriptErrorCode = 0;
+	}
+	uint16 getScriptErrorCode() const {
+		return _scriptErrorCode;
+	}
 
 	// Debug globals PTR_LOOP_1020_06c2 / PTR_LOOP_1020_06c4 (saved on script halt).
 	uint32 _errorScriptPosition = 0;

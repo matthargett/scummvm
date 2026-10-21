@@ -26,8 +26,10 @@
 #include "common/str-enc.h"
 #include "common/system.h"
 #include "common/ustr.h"
+#include "common/util.h"
 #include "macs2/detection.h"
 #include "macs2/gameobjects.h"
+#include "macs2/hotspot_names.h"
 #include "macs2/macs2.h"
 #include "macs2/music.h"
 #include "macs2/view1.h"
@@ -87,166 +89,9 @@ static const char *getSpecialName(uint16 val) {
 }
 
 static const char *getOpcodeName(uint8 opcode) {
-	switch (opcode) {
-	case 0x01:
-		return "setVar";
-	case 0x02:
-		return "setVarOr";
-	case 0x03:
-		return "ifFalse";
-	case 0x04:
-		return "ifTrue";
-	case 0x05:
-		return "compare";
-	case 0x06:
-		return "ifInteraction";
-	case 0x07:
-		return "endIf";
-	case 0x08:
-		return "else";
-	case 0x09:
-		return "nop09";
-	case 0x0A:
-		return "printStringLeft";
-	case 0x0B:
-		return "moveObject";
-	case 0x0C:
-		return "changeScene";
-	case 0x0D:
-		return "showDialogue";
-	case 0x0E:
-		return "changeAnimation";
-	case 0x0F:
-		return "frameWait";
-	case 0x10:
-		return "walkToPosition";
-	case 0x11:
-		return "waitForWalk";
-	case 0x12:
-		return "setPathfinding";
-	case 0x13:
-		return "skipUntil14";
-	case 0x14:
-		return "skipWord";
-	case 0x15:
-		return "clearDialogueChoices";
-	case 0x16:
-		return "addDialogueChoice";
-	case 0x17:
-		return "showDialogueChoice";
-	case 0x18:
-		return "dismissPanel";
-	case 0x19:
-		return "walkToAndPickup";
-	case 0x1A:
-		return "setPickupFrames";
-	case 0x1B:
-		return "setupObject";
-	case 0x1C:
-		return "setSkippable";
-	case 0x1D:
-		return "clearSkippable";
-	case 0x1E:
-		return "playAnimation";
-	case 0x1F:
-		return "pathWalkable = testPathfinding";
-	case 0x20:
-		return "setYOffset";
-	case 0x21:
-		return "setMotion";
-	case 0x22:
-		return "setOrientation";
-	case 0x23:
-		return "moveToPosition";
-	case 0x24:
-		return "addValues";
-	case 0x25:
-		return "subValues";
-	case 0x26:
-		return "loadSpecialAnim";
-	case 0x27:
-		return "setDirection";
-	case 0x28:
-		return "stopAnimation";
-	case 0x29:
-		return "openInventory";
-	case 0x2A:
-		return "loadObjectAnim";
-	case 0x2B:
-		return "checkObjectData";
-	case 0x2C:
-		return "invCheck = checkInventory";
-	case 0x2D:
-		return "setSnapToTarget";
-	case 0x2E:
-		return "animRangeTest = testSceneAnimFrame";
-	case 0x2F:
-		return "animRangeTest = testObjectAnimFrame";
-	case 0x30:
-		return "printStringRight";
-	case 0x31:
-		return "setPaletteDarkness";
-	case 0x32:
-		return "setObjectShading";
-	case 0x33:
-		return "setObjectScaling";
-	case 0x34:
-		return "setHotspotOverride";
-	case 0x35:
-		return "setObjectBounds";
-	case 0x36:
-		return "dismissAllPanels";
-	case 0x37:
-		return "resetToSceneScript";
-	case 0x38:
-		return "loadOverlayFont";
-	case 0x39:
-		return "endOverlayText";
-	case 0x3A:
-		return "addOverlayTextEntry";
-	case 0x3B:
-		return "clearOverlayText";
-	case 0x3C:
-		return "fadeToBlack";
-	case 0x3D:
-		return "fadeFromBlack";
-	case 0x3E:
-		return "loadPcmSound";
-	case 0x3F:
-		return "freePcmSound";
-	case 0x40:
-		return "playPcmSound";
-	case 0x41:
-		return "waitForSound";
-	case 0x42:
-		return "stopPcmSound";
-	case 0x43:
-		return "loadMusicSlot";
-	case 0x44:
-		return "playMusicSlot";
-	case 0x45:
-		return "stopMusicSlot";
-	case 0x46:
-		return "freeMusicSlot";
-	case 0x47:
-		return "waitForMusic";
-	case 0x48:
-		return "getObjectX";
-	case 0x49:
-		return "getObjectY";
-	case 0x4A:
-		return "getObjectField8";
-	case 0x4B:
-		return "getObjectOrientation";
-	case 0x4C:
-		return "clearActorInventory";
-	case 0x4D:
-		return "setPathfindingRemap";
-	case 0x4E:
-		return "waitForAdlib";
-	default:
-		return "???";
-	}
+	if (g_engine && g_engine->_scriptExecutor)
+		return g_engine->_scriptExecutor->opcodeName(opcode);
+	return "?";
 }
 
 static const char *getCompareOpName(uint8 sub) {
@@ -371,12 +216,15 @@ static Common::String decodeParams(Common::MemoryReadStream *script, uint8 opcod
 		result = Common::String::format(" %s", v.c_str());
 		break;
 	}
-	case 0x10: {
+	case 0x10:
+	case 0x1F: {
 		Common::String o = decodeScriptValue(script), x = decodeScriptValue(script), y = decodeScriptValue(script);
 		result = Common::String::format(" obj=%s pos=(%s,%s)", o.c_str(), x.c_str(), y.c_str());
 		break;
 	}
 	case 0x11:
+	case 0x29:
+	case 0x2B:
 	case 0x47: {
 		Common::String o = decodeScriptValue(script);
 		result = Common::String::format(" obj=%s", o.c_str());
@@ -447,11 +295,6 @@ static Common::String decodeParams(Common::MemoryReadStream *script, uint8 opcod
 		result = Common::String::format(" obj=%s slot=%s frame=%s", o.c_str(), s.c_str(), f.c_str());
 		break;
 	}
-	case 0x1F: {
-		Common::String o = decodeScriptValue(script), x = decodeScriptValue(script), y = decodeScriptValue(script);
-		result = Common::String::format(" obj=%s pos=(%s,%s)", o.c_str(), x.c_str(), y.c_str());
-		break;
-	}
 	case 0x20: {
 		Common::String o = decodeScriptValue(script), v = decodeScriptValue(script);
 		result = Common::String::format(" obj=%s offset=%s", o.c_str(), v.c_str());
@@ -492,20 +335,10 @@ static Common::String decodeParams(Common::MemoryReadStream *script, uint8 opcod
 		result = Common::String::format(" obj=%s maxFrame=%s", o.c_str(), v.c_str());
 		break;
 	}
-	case 0x29: {
-		Common::String o = decodeScriptValue(script);
-		result = Common::String::format(" obj=%s", o.c_str());
-		break;
-	}
 	case 0x2A: {
 		Common::String o = decodeScriptValue(script), s = decodeScriptValue(script), d = decodeScriptValue(script);
 		uint8 ai = script->readByte();
 		result = Common::String::format(" obj=%s slot=%s decode=%s idx=%u", o.c_str(), s.c_str(), d.c_str(), ai);
-		break;
-	}
-	case 0x2B: {
-		Common::String o = decodeScriptValue(script);
-		result = Common::String::format(" obj=%s", o.c_str());
 		break;
 	}
 	case 0x2C:
@@ -587,7 +420,7 @@ static Common::String decodeParams(Common::MemoryReadStream *script, uint8 opcod
 	case 0x4E:
 		break;
 	default:
-		if (length > 0 && length <= 30) {
+		if (length <= 30) {
 			result = " [";
 			for (uint8 i = 0; i < length && script->pos() < script->size(); i++) {
 				if (i)
@@ -959,11 +792,11 @@ static void showVariablesWindow() {
 				ImGui::Text("Showing: Y | Count: %u", view->_dialogueChoiceCount);
 				ImGui::Text("BoxPos: (%d,%d)", view->_stringBoxPosition.x, view->_stringBoxPosition.y);
 				Common::Point mousePos = g_system->getEventManager()->getMousePos();
-				int lineHeight = g_engine->maxGlyphHeight + 2;
+				int lineHeight = g_engine->_text._maxGlyphHeight + 2;
 				int firstLineY = view->_stringBoxPosition.y + 9;
 				int relY = mousePos.y - firstLineY;
 				int hoveredChoice = -1;
-				if (relY >= 0 && lineHeight > 0) {
+				if (relY >= 0) {
 					int hoveredLine = relY / lineHeight;
 					int cumulativeLines = 0;
 					for (uint i = 0; i < view->_dialogueChoiceLineCounts.size(); i++) {
@@ -1058,7 +891,7 @@ static void showAnimViewerWindow() {
 						}
 					}
 
-					ImTextureID texId = (ImTextureID)(intptr_t)g_system->getImGuiTexture(*animViewSurface.surfacePtr(), g_engine->_pal, 256);
+					ImTextureID texId = (ImTextureID)(intptr_t)g_system->getImGuiTexture(*animViewSurface.surfacePtr(), g_engine->_pal.data(), g_engine->_pal.size());
 					if (texId) {
 						float scale = MIN(128.0f / (float)fi.width, 128.0f / (float)fi.height);
 						if (scale > 3.0f)
@@ -1155,12 +988,8 @@ static void showCharactersWindow() {
 						// --- Editable GameObject fields ---
 						int orient = (int)c->_gameObject->_orientation;
 						if (ImGui::InputInt("Orientation", &orient)) {
-							c->_gameObject->_orientation = (uint8)CLIP(orient, 0, 255);
-						}
-
-						int animIdx = (int)c->_animationIndex;
-						if (ImGui::InputInt("Animation Index", &animIdx)) {
-							c->_animationIndex = (uint8)CLIP(animIdx, 0, 255);
+							// TODO: add a combo box for orientation instead of raw int input including speaking names
+							c->_gameObject->_orientation = (ObjectOrientation)CLIP((uint16)orient, (uint16)OrientationNone, (uint16)OrientationPickup);
 						}
 
 						ImGui::Text("Vertical Offset: %u", c->getVerticalOffset());
@@ -1192,9 +1021,6 @@ static void showCharactersWindow() {
 							if (ImGui::InputInt("Progress", &motionProg))
 								c->_motionProgress = (uint16)CLIP(motionProg, 0, 65535);
 							ImGui::Text("Pending VOffset Motion: %s", c->hasPendingVerticalMotion() ? "Y" : "N");
-							bool shouldMirror = c->_shouldMirrorCurrentAnimation;
-							if (ImGui::Checkbox("Mirror Animation", &shouldMirror))
-								c->_shouldMirrorCurrentAnimation = shouldMirror;
 							ImGui::TreePop();
 						}
 
@@ -1308,7 +1134,6 @@ static void showCharactersWindow() {
 								df.writeString(Common::String::format("  \"character\": {\n"));
 								df.writeString(Common::String::format("    \"positionX\": %d,\n", c->getPosition().x));
 								df.writeString(Common::String::format("    \"positionY\": %d,\n", c->getPosition().y));
-								df.writeString(Common::String::format("    \"shouldMirror\": %s,\n", c->_shouldMirrorCurrentAnimation ? "true" : "false"));
 								df.writeString(Common::String::format("    \"verticalOffset\": %u\n", c->getVerticalOffset()));
 								df.writeString("  }\n");
 								df.writeString("}\n");
@@ -1375,9 +1200,9 @@ static void showInventoryWindow() {
 			if (ImGui::CollapsingHeader("Current Inventory", ImGuiTreeNodeFlags_DefaultOpen)) {
 				for (uint i = 0; i < view->_inventoryItems.size(); i++) {
 					GameObject *obj = view->_inventoryItems[i];
-					const Common::String &name = (obj->_index < GameObjects::instance()._objectNames.size() && !GameObjects::instance()._objectNames[obj->_index].empty())
-													 ? GameObjects::instance()._objectNames[obj->_index]
-													 : "???";
+					Common::String name = lookupObjectHotspotName(obj->_index);
+					if (name.empty())
+						name = "???";
 					Common::String utf8Name = Common::U32String(name.c_str(), Common::kDos850).encode(Common::kUtf8);
 					ImGui::PushID(obj->_index);
 					if (ImGui::Button("Remove")) {
@@ -1399,9 +1224,9 @@ static void showInventoryWindow() {
 						continue;
 					if (obj->_blobs.size() <= 0x13 || obj->_blobs[0x13].empty())
 						continue;
-					const Common::String &name = (obj->_index < GameObjects::instance()._objectNames.size() && !GameObjects::instance()._objectNames[obj->_index].empty())
-													 ? GameObjects::instance()._objectNames[obj->_index]
-													 : "???";
+					Common::String name = lookupObjectHotspotName(obj->_index);
+					if (name.empty())
+						name = "???";
 					Common::String utf8Name = Common::U32String(name.c_str(), Common::kDos850).encode(Common::kUtf8);
 					if (filterBuf[0] != '\0' && !utf8Name.contains(filterBuf))
 						continue;
@@ -1484,17 +1309,17 @@ static void showSceneMapsWindow() {
 		static Graphics::ManagedSurface overlayComposite;
 
 		if (selectedTab == 0) {
-			surface = &g_engine->_pathfindingMap;
+			surface = &g_engine->_pathfinding._map;
 		} else if (selectedTab == 1) {
 			surface = &g_engine->_depthMap;
 		} else if (selectedTab == 2) {
 			// Composite: pathfinding map + character path overlay + pathfinding points
-			overlayComposite.copyFrom(g_engine->_pathfindingMap);
+			overlayComposite.copyFrom(g_engine->_pathfinding._map);
 			View1 *view = (View1 *)g_engine->findView("View1");
 			if (view) {
 				// Draw pathfinding point nodes and connections
 				for (int i = 0; i < 16; i++) {
-					PathfindingPoint &pt = g_engine->pathfindingPoints[i];
+					PathfindingPoint &pt = g_engine->_pathfinding._points[i];
 					if (pt._position.x >= 0 && pt._position.x < kScreenWidth && pt._position.y >= 0 && pt._position.y < kGameHeight) {
 						// Draw cross at node
 						for (int d = -2; d <= 2; d++) {
@@ -1510,16 +1335,21 @@ static void showSceneMapsWindow() {
 						for (uint8 adj : pt._adjacentPoints) {
 							if (adj == 0 || adj > 16)
 								continue;
-							PathfindingPoint &other = g_engine->pathfindingPoints[adj - 1];
+							PathfindingPoint &other = g_engine->_pathfinding._points[adj - 1];
 							overlayComposite.drawLine(pt._position.x, pt._position.y, other._position.x, other._position.y, 0xFE);
 						}
 					}
 				}
-				// Draw current path
-				if (g_engine->_path.size() >= 2) {
-					for (uint i = 0; i < g_engine->_path.size() - 1; i++) {
-						overlayComposite.drawLine(g_engine->_path[i].x, g_engine->_path[i].y,
-												  g_engine->_path[i + 1].x, g_engine->_path[i + 1].y, 0x0F);
+				// Draw each character's remaining walk
+				Common::Array<Common::Point> pathPts;
+				for (uint i = 0; i < view->_characters.size(); i++) {
+					Character *c = view->_characters[i];
+					if (c == nullptr)
+						continue;
+					c->getPathPolyline(pathPts);
+					for (uint p = 0; p + 1 < pathPts.size(); p++) {
+						overlayComposite.drawLine(pathPts[p].x, pathPts[p].y,
+												  pathPts[p + 1].x, pathPts[p + 1].y, 0x0F);
 					}
 				}
 				// Draw character positions
@@ -1567,7 +1397,7 @@ static void showSceneMapsWindow() {
 		}
 
 		if (surface && surface->w > 0 && surface->h > 0) {
-			ImTextureID texId = (ImTextureID)(intptr_t)g_system->getImGuiTexture(*surface->surfacePtr(), g_engine->_pal, 256);
+			ImTextureID texId = (ImTextureID)(intptr_t)g_system->getImGuiTexture(*surface->surfacePtr(), g_engine->_pal.data(), g_engine->_pal.size());
 			if (texId) {
 				ImVec2 avail = ImGui::GetContentRegionAvail();
 				float scale = MIN(avail.x / (float)kScreenWidth, avail.y / (float)kGameHeight);
@@ -1578,7 +1408,7 @@ static void showSceneMapsWindow() {
 					ImDrawList *dl = ImGui::GetWindowDrawList();
 					ImVec2 imgOrigin = ImGui::GetItemRectMin();
 					for (int i = 0; i < 16; i++) {
-						PathfindingPoint &pt = g_engine->pathfindingPoints[i];
+						PathfindingPoint &pt = g_engine->_pathfinding._points[i];
 						if (pt._position.x >= 0 && pt._position.x < kScreenWidth && pt._position.y >= 0 && pt._position.y < kGameHeight) {
 							char buf[4];
 							snprintf(buf, sizeof(buf), "%d", i);
@@ -1669,11 +1499,11 @@ static void showSceneMapsWindow() {
 					uint8 val = surface->getPixel(mx, my);
 					if (val >= 0xC8 && val <= 0xEF) {
 						uint16 overrideResult;
-						bool overrideActive = g_engine->getPathfindingOverride(val, overrideResult);
+						bool overrideActive = g_engine->_pathfinding.getWalkOverride(val, overrideResult);
 						if (overrideActive)
 							ImGui::SetTooltip("(%d, %d) = %u (0x%02X) [override zone → %u = %s]",
 											  mx, my, val, val, overrideResult,
-											  Macs2Engine::isWalkabilityWalkable(overrideResult) ? "WALKABLE" : "non-walkable");
+											  Pathfinding::isWalkabilityWalkable(overrideResult) ? "WALKABLE" : "non-walkable");
 						else
 							ImGui::SetTooltip("(%d, %d) = %u (0x%02X) [override zone, DISABLED → non-walkable]",
 											  mx, my, val, val);
@@ -1702,24 +1532,26 @@ static void showSceneMapsWindow() {
 		ImGui::Separator();
 		ImGui::Text("_walkDepthThresholdY=%u  _walkDepthScaleFactor=%u  _walkBaseSpeedPct=%u",
 					g_engine->_walkDepthThresholdY, g_engine->_walkDepthScaleFactor, g_engine->_walkBaseSpeedPct);
+
+		View1 *view = (View1 *)g_engine->findView("View1");
+		Character *protagonist = view ? view->getCharacterByIndex(Scenes::instance()._currentActorIndex) : nullptr;
 		ImGui::Text("Pathfinding points: %u  Path nodes: %u",
-					(uint)g_engine->pathfindingPoints.size(), (uint)g_engine->_path.size());
+					(uint)g_engine->_pathfinding._points.size(),
+					protagonist ? (uint)protagonist->_path.size() : 0);
 
 		// Node detail table
 		if (ImGui::CollapsingHeader("Node Graph", ImGuiTreeNodeFlags_DefaultOpen)) {
-			View1 *view = (View1 *)g_engine->findView("View1");
-			Character *protagonist = view ? view->getCharacterByIndex(Scenes::instance()._currentActorIndex) : nullptr;
 			Common::Point charPos = protagonist ? protagonist->getPosition() : Common::Point(0, 0);
 
-			for (int i = 0; i < (int)g_engine->pathfindingPoints.size(); i++) {
-				const PathfindingPoint &pt = g_engine->pathfindingPoints[i];
+			for (int i = 0; i < (int)g_engine->_pathfinding._points.size(); i++) {
+				const PathfindingPoint &pt = g_engine->_pathfinding._points[i];
 				// Check reachability from character
-				bool reachable = protagonist && g_engine->isPathWalkable(charPos.y, charPos.x, pt._position.y, pt._position.x);
+				bool reachable = protagonist && g_engine->_pathfinding.isLineWalkable(charPos.y, charPos.x, pt._position.y, pt._position.x);
 				// Check if node is in current path
 				bool inPath = false;
 				if (protagonist) {
 					for (uint p = 0; p < protagonist->_path.size(); p++) {
-						if (protagonist->_path[p] == (uint16)i) {
+						if (protagonist->_path[p] == (uint16)(i + 1)) {
 							inPath = true;
 							break;
 						}
@@ -1814,7 +1646,7 @@ static void showImageResourcesWindow() {
 				x += f._width;
 			}
 
-			ImTextureID texId = (ImTextureID)(intptr_t)g_system->getImGuiTexture(*imgSurface.surfacePtr(), g_engine->_pal, 256);
+			ImTextureID texId = (ImTextureID)(intptr_t)g_system->getImGuiTexture(*imgSurface.surfacePtr(), g_engine->_pal.data(), g_engine->_pal.size());
 			if (texId) {
 				ImVec2 avail = ImGui::GetContentRegionAvail();
 				float scale = MIN(avail.x / (float)kScreenWidth, avail.y / (float)totalH);
@@ -2066,7 +1898,6 @@ static void showDebugToolbarWindow() {
 			} channels[] = {
 				{kDebugGraphics, "Graphics"},
 				{kDebugPath, "Path"},
-				{kDebugScan, "Scan"},
 				{kDebugFilePath, "FilePath"},
 				{kDebugInput, "Input"},
 				{kDebugImGui, "ImGui"},
@@ -2086,13 +1917,13 @@ static void showDebugToolbarWindow() {
 		}
 		if (ImGui::BeginMenu("Speed")) {
 			if (ImGui::MenuItem("Normal", NULL, g_engine->_gameSpeedMode == 0)) {
-				g_engine->_gameSpeedMode = 0;
+				g_engine->setGameSpeedMode(0);
 			}
 			if (ImGui::MenuItem("Fast", NULL, g_engine->_gameSpeedMode == 1)) {
-				g_engine->_gameSpeedMode = 1;
+				g_engine->setGameSpeedMode(1);
 			}
 			if (ImGui::MenuItem("Slow", NULL, g_engine->_gameSpeedMode == 2)) {
-				g_engine->_gameSpeedMode = 2;
+				g_engine->setGameSpeedMode(2);
 			}
 			ImGui::EndMenu();
 		}
@@ -2209,7 +2040,7 @@ static void showSoundWindow() {
 		return;
 	}
 
-	Music *adlib = g_engine->getAdlib();
+	Music *adlib = g_engine->getMusic();
 	const Music::DebugState &ds = adlib->_debug;
 
 	ImGui::Text("Master Volume: %u/63", ds.masterVolume);
@@ -2219,7 +2050,7 @@ static void showSoundWindow() {
 	// Channel selector
 	static int selectedVoice = 0;
 	if (ImGui::BeginCombo("Voice", Common::String::format("Voice %d", selectedVoice).c_str())) {
-		for (int i = 0; i < 9; i++) {
+		for (int i = 0; i < ARRAYSIZE(ds.voices); i++) {
 			bool selected = (selectedVoice == i);
 			const char *label = ds.voices[i].active
 									? Common::String::format("Voice %d [CH%d N%02X]", i, ds.voices[i].channel, ds.voices[i].note).c_str()
@@ -2249,7 +2080,7 @@ static void showSoundWindow() {
 	// All voices overview
 	ImGui::Separator();
 	ImGui::TextUnformatted("All Voices:");
-	for (int i = 0; i < 9; i++) {
+	for (int i = 0; i < ARRAYSIZE(ds.regHistory); i++) {
 		float voiceData[Music::kDebugRingSize];
 		for (int j = 0; j < Music::kDebugRingSize; j++) {
 			voiceData[j] = ds.regHistory[i][(ringPos + j) % Music::kDebugRingSize];

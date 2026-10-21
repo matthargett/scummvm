@@ -27,6 +27,9 @@
 
 namespace Harvester {
 
+void wrapCftTextByCharacterCount(const Graphics::Font &font, const Common::String &text,
+	int width, Common::Array<Common::String> &lines);
+
 class HarvesterCftFont : public Graphics::Font {
 public:
 	explicit HarvesterCftFont(const CftFontResource &resource);
@@ -37,6 +40,7 @@ public:
 	Common::String getFontName() const override { return _resource.name; }
 	int getMaxCharWidth() const override { return _maxCharWidth; }
 	int getCharWidth(uint32 chr) const override;
+	bool hasGlyph(uint32 chr) const;
 	void drawChar(Graphics::Surface *dst, uint32 chr, int x, int y, uint32 color) const override;
 
 private:

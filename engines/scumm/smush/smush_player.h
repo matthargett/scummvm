@@ -26,6 +26,7 @@
 #include "common/list.h"
 #include "common/rect.h"
 #include "scumm/charset_v7.h"
+#include "scumm/smush/saud.h"
 
 namespace Audio {
 class SoundHandle;
@@ -57,21 +58,6 @@ namespace Scumm {
 
 #define TRK_TYPE_MASK 0xC0
 
-#define SAUD_OP_INIT          1
-#define SAUD_OP_UPDATE_HEADER 2
-#define SAUD_OP_SET_PARAM     3
-#define SAUD_OP_INCR_PARAM    4
-#define SAUD_OP_SET_OFFSET    6
-#define SAUD_OP_SET_LENGTH    7
-#define SAUD_OP_COMPARE_GT    8
-#define SAUD_OP_COMPARE_LT    9
-#define SAUD_OP_COMPARE_EQ    10
-#define SAUD_OP_COMPARE_NE    11
-
-#define SAUD_VALUEID_ALL_VOLS 0xFF
-#define SAUD_VALUEID_TRK_VOL  0xFE
-#define SAUD_VALUEID_TRK_PAN  0xFD
-
 #define TRK_USERID_SPEECH 1
 #define TRK_USERID_MUSIC  2
 #define TRK_USERID_SFX    3
@@ -86,6 +72,11 @@ namespace Scumm {
 #define SMUSH_CODEC_SKIP_RLE     23   // RA1: additive line-update overlay; RA2: skip/copy with embedded RLE
 #define SMUSH_CODEC_DELTA_BLOCKS 37
 #define SMUSH_CODEC_LINE_UPDATE2 44   // RA2: Variant of codec 21
+
+#define SMUSH_CODEC_SEGACD_RLE     31   // RA1 Sega CD: transparent 4bpp line RLE
+#define SMUSH_CODEC_SEGACD_OPAQUE  32   // RA1 Sega CD: opaque 4bpp line RLE
+#define SMUSH_CODEC_SEGACD_BLOCK33 33   // RA1 Sega CD: codec 4 with Sega glyph table
+#define SMUSH_CODEC_SEGACD_BLOCK34 34   // RA1 Sega CD: codec 5 with Sega glyph table and no skip glyph
 #define SMUSH_CODEC_RA2_BOMP     45   // RA2: BOMP RLE with variable header
 #define SMUSH_CODEC_DELTA_GLYPHS 47
 
@@ -253,7 +244,7 @@ public:
 	virtual ~SmushPlayer();
 
 	void pause();
-	void unpause();
+	virtual void unpause();
 
 	void play(const char *filename, int32 speed, int32 offset = 0, int32 startFrame = 0);
 	void release();

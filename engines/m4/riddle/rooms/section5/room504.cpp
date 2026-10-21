@@ -740,7 +740,7 @@ void Room504::daemon() {
 	case 521:
 		series_unload(_mzTakesEmerald);
 		_menendezShould = 4;
-		digi_play("504Z15", 1, 255, 522);
+		digi_play("504Z14", 1, 255, 522);
 		break;
 
 	case 522:
@@ -1602,6 +1602,8 @@ void Room504::daemon() {
 		setVines();
 		_vineMachine2 = TriggerMachineByHash(1, 1, 0, 0, 0, 0, 0, 0, 100, 0xe00, false,
 			triggerMachineByHashCallback, "Rope Rising");
+		sendWSMessage_10000(1, _vineMachine2, _leftVineTie, 1, 9, 644,
+			_leftVineTie, 9, 9, 0);
 		sendWSMessage_120000(640);
 		break;
 
@@ -1640,7 +1642,7 @@ void Room504::daemon() {
 
 	case 642:
 		setVines();
-		terminateMachineAndNull(_vineMachine1);
+		terminateMachineAndNull(_vine);
 		series_unload(_vineTie);
 		sendWSMessage_150000(643);
 		break;
@@ -2125,7 +2127,7 @@ void Room504::daemon() {
 	case 727:
 		player_set_commands_allowed(false);
 		_ripMedReach = series_load("RIP TREK MED REACH HAND POS1");
-		setGlobals1(_ripHiReach2Handed, 1, 10, 10, 10);
+		setGlobals1(_ripMedReach, 1, 10, 10, 10);
 		sendWSMessage_110000(728);
 		break;
 
@@ -3524,7 +3526,7 @@ void Room504::addHotspot(int x1, int y1, int x2, int y2,
 	hotspot_newVerb(hs, verb);
 	hotspot_newVocab(hs, vocab);
 	hs->cursor_number = 6;
-	hotspot_add(_G(currentSceneDef).hotspots, hs, true);
+	_G(currentSceneDef).hotspots = hotspot_add(_G(currentSceneDef).hotspots, hs, true);
 }
 
 void Room504::addShovel() {

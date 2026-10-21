@@ -24,31 +24,89 @@
 
 #include "video/bink_decoder.h"
 
+#include "engines/nancy/nancy.h"
 #include "engines/nancy/video.h"
+#include "engines/nancy/graphics.h"
+#include "engines/nancy/util.h"
 #include "engines/nancy/commontypes.h"
+
+#include "audio/mixer.h"
 
 #include "engines/nancy/movieplayer.h"
 
 namespace Nancy {
 
+// Fills the Bink frame cache forward in spare time (see MoviePlayer::_frameCache).
+class BinkCacheLoader : public DeferredLoader {
+public:
+	BinkCacheLoader(MoviePlayer &owner) : _owner(owner) {}
+
+private:
+	bool loadInner() override { return _owner.fillNextCacheFrame(); }
+
+	MoviePlayer &_owner;
+};
+
 MoviePlayer::MoviePlayer() {}
 
-MoviePlayer::~MoviePlayer() {}
+MoviePlayer::~MoviePlayer() {
+	unregisterMovie();
+}
 
-bool MoviePlayer::loadFile(const Common::Path &name, bool bidirectionalCache) {
+void MoviePlayer::unregisterMovie() {
+	for (uint i = 0; i < g_nancy->_loadedMovies.size(); ++i) {
+		if (g_nancy->_loadedMovies[i] == this) {
+			g_nancy->_loadedMovies.remove_at(i);
+			break;
+		}
+	}
+
+	_loadedName.clear();
+}
+
+MoviePlayer *MoviePlayer::findLoadedMovie(const Common::Path &name) {
+	for (MoviePlayer *movie : g_nancy->_loadedMovies) {
+		if (movie->_loadedName.equalsIgnoreCase(name)) {
+			return movie;
+		}
+	}
+
+	return nullptr;
+}
+
+byte MoviePlayer::resolvePlaytype(byte videoPlaytype) {
+	if (videoPlaytype != kVideoPlaytypeAuto) {
+		return videoPlaytype;
+	}
+
+	// Scene backgrounds only look for .bik from Nancy10 on.
+	return g_nancy->getGameType() >= kGameTypeNancy10 ? kVideoPlaytypeBink : kVideoPlaytypeAVF;
+}
+
+bool MoviePlayer::loadFile(const Common::Path &name, byte videoPlaytype, bool bidirectionalCache, bool screenFormat) {
+	freeFrameCache();
+	unregisterMovie();
+
 	const Common::Path avfPath = name.append(".avf");
 	const Common::Path bikPath = name.append(".bik");
 
-	// Detect the format from which file exists (AVF wins if both do).
-	if (Common::File::exists(avfPath)) {
-		_videoType = kVideoPlaytypeAVF;
-		_decoder.reset(new AVFDecoder(bidirectionalCache ? AVFDecoder::kLoadBidirectional : AVFDecoder::kLoadForward));
-	} else if (Common::File::exists(bikPath)) {
-		_videoType = kVideoPlaytypeBink;
-		_decoder.reset(new Video::BinkDecoder());
+	// Use the requested container, the other one only if its file is missing.
+	const byte preferred = resolvePlaytype(videoPlaytype);
+	const byte fallback = preferred == kVideoPlaytypeBink ? kVideoPlaytypeAVF : kVideoPlaytypeBink;
+
+	if (Common::File::exists(preferred == kVideoPlaytypeBink ? bikPath : avfPath)) {
+		_videoType = preferred;
+	} else if (Common::File::exists(fallback == kVideoPlaytypeBink ? bikPath : avfPath)) {
+		_videoType = fallback;
 	} else {
 		_decoder.reset();
 		return false;
+	}
+
+	if (_videoType == kVideoPlaytypeBink) {
+		_decoder.reset(new Video::BinkDecoder());
+	} else {
+		_decoder.reset(new AVFDecoder(bidirectionalCache ? AVFDecoder::kLoadBidirectional : AVFDecoder::kLoadForward));
 	}
 
 	_currentSurface = nullptr;
@@ -57,6 +115,37 @@ bool MoviePlayer::loadFile(const Common::Path &name, bool bidirectionalCache) {
 		_decoder.reset();
 		return false;
 	}
+
+	// Bink decodes YUV into Codec::getDefaultYUVFormat(), i.e. the *screen* format, but
+	// our surfaces - and the transparent colour derived from the BSUM chunk - use the
+	// *input* format. Those differ before Nancy13 (screen RGB565, input RGB555), so a
+	// chroma-keyed video such as Nancy11's Nigel_Fidget.bik ends up storing its key
+	// colour as 0x07E0 while the engine keys on 0x03E0, and the green background is
+	// never keyed out. From Nancy13 both formats are BGRA32 and this is a no-op.
+	// Opaque videos may keep the screen format: RGB555 drops a bit of green, which
+	// bands smooth gradients such as the Nancy11 LIB_AlanLogin_TEXT_PUZ background.
+	// Has to come after loadFile(): setOutputPixelFormat() walks the decoder's tracks,
+	// and those only exist once the file is loaded.
+	if (_videoType == kVideoPlaytypeBink) {
+		const Graphics::PixelFormat &outputFormat = screenFormat ?
+			g_nancy->_graphics->getScreenPixelFormat() : g_nancy->_graphics->getInputPixelFormat();
+		if (outputFormat.bytesPerPixel == 2 || outputFormat.bytesPerPixel == 4) {
+			_decoder->setOutputPixelFormat(outputFormat);
+		}
+	}
+
+	// The AVF decoder caches frames itself, so only the Bink path needs ours.
+	_useFrameCache = bidirectionalCache && _videoType == kVideoPlaytypeBink;
+	if (_useFrameCache) {
+		_frameCache.resize(_decoder->getFrameCount());
+		_cacheFillNext = 0;
+		_cacheLoader.reset(new BinkCacheLoader(*this));
+		g_nancy->addDeferredLoader(_cacheLoader);
+	}
+
+	_loadedName = name;
+	g_nancy->_loadedMovies.push_back(this);
+
 	return true;
 }
 
@@ -66,9 +155,45 @@ bool MoviePlayer::isVideoLoaded() const {
 
 void MoviePlayer::close() {
 	_currentSurface = nullptr;
+	freeFrameCache();
+	unregisterMovie();
 	if (_decoder) {
 		_decoder->close();
 	}
+}
+
+void MoviePlayer::freeFrameCache() {
+	_cacheLoader.reset();
+	_cacheFillNext = 0;
+	for (Graphics::Surface &surf : _frameCache) {
+		surf.free();
+	}
+	_frameCache.clear();
+	_useFrameCache = false;
+}
+
+bool MoviePlayer::fillNextCacheFrame() {
+	// Skip frames already decoded by interactive scrubbing.
+	while (_cacheFillNext < _frameCache.size() && _frameCache[_cacheFillNext].getPixels()) {
+		++_cacheFillNext;
+	}
+
+	if (_cacheFillNext >= _frameCache.size()) {
+		return true;
+	}
+
+	// Decode forward; only seek to resync after interactive scrubbing moved us.
+	if (_decoder->getCurFrame() + 1 != (int)_cacheFillNext) {
+		_decoder->seekToFrame(_cacheFillNext);
+	}
+
+	const Graphics::Surface *frame = _decoder->decodeNextFrame();
+	if (frame) {
+		_frameCache[_cacheFillNext].copyFrom(*frame);
+	}
+	++_cacheFillNext;
+
+	return _cacheFillNext >= _frameCache.size();
 }
 
 void MoviePlayer::start()					{ if (_decoder) _decoder->start(); }
@@ -101,6 +226,12 @@ Audio::Timestamp MoviePlayer::getDuration() const	{ return _decoder->getDuration
 uint16 MoviePlayer::getWidth() const		{ return _decoder->getWidth(); }
 uint16 MoviePlayer::getHeight() const		{ return _decoder->getHeight(); }
 
+void MoviePlayer::setVolume(byte percent) {
+	if (_decoder) {
+		_decoder->setVolume(MIN<byte>(percent, 100) * Audio::Mixer::kMaxChannelVolume / 100);
+	}
+}
+
 void MoviePlayer::addFrameTime(uint16 timeToAdd) {
 	if (_decoder && _videoType == kVideoPlaytypeAVF) {
 		((AVFDecoder *)_decoder.get())->addFrameTime(timeToAdd);
@@ -119,8 +250,26 @@ const Graphics::Surface *MoviePlayer::decodeNextFrame(int frameNr) {
 		return frame;
 	}
 
-	_decoder->seekToFrame(frameNr);
-	return _decoder->decodeNextFrame();
+	// Bink path.
+	if (_useFrameCache && (uint)frameNr < _frameCache.size() && _frameCache[frameNr].getPixels()) {
+		return &_frameCache[frameNr];
+	}
+
+	// seekToFrame() re-decodes from the previous keyframe, so only seek when the
+	// frame can't be reached by decoding forward one step.
+	if (_decoder->getCurFrame() + 1 != frameNr) {
+		_decoder->seekToFrame(frameNr);
+	}
+
+	const Graphics::Surface *frame = _decoder->decodeNextFrame();
+
+	// The decoder reuses one surface per frame, so cache a copy.
+	if (_useFrameCache && frame && (uint)frameNr < _frameCache.size()) {
+		_frameCache[frameNr].copyFrom(*frame);
+		return &_frameCache[frameNr];
+	}
+
+	return frame;
 }
 
 // --- Simple frame-range player ------------------------------------------

@@ -79,6 +79,8 @@ void ScummEngine::runScript(int script, bool freezeResistant, bool recursive, in
 		scriptOffs = _localScriptOffsets[script - _numGlobalScripts];
 		if (scriptOffs == 0)
 			error("Local script %d is not in room %d", script, _roomResource);
+		if (_scriptOverrides.contains(_roomResource * 100000 + script))
+			scriptOffs = 0;
 		scriptType = WIO_LOCAL;
 
 		debugC(DEBUG_SCRIPTS, "runScript(%d) from %d-%d", script,
@@ -441,6 +443,13 @@ void ScummEngine::getScriptBaseAddress() {
 			_scriptOrgPointer = getResourceAddress(rtRoom, _roomResource);
 			assert(_roomResource < _numRooms);
 			_lastCodePtr = &_res->_types[rtRoom][_roomResource]._address;
+
+			int cacheIdx = _roomResource * 100000 + ss->number;
+			if (_scriptOverrides.contains(cacheIdx)) {
+				_lastCodePtr = (const byte *const *)_scriptOverrides[cacheIdx];
+				// LSC2 block layout: [4 tag][4 BE size][4 LE script id][bytecode]
+				_scriptOrgPointer = (const byte *)_scriptOverrides[cacheIdx] + _resourceHeaderSize + 4;
+			}
 		}
 		break;
 
@@ -505,7 +514,7 @@ void ScummEngine::executeScript() {
 		_opcode = fetchScriptByte();
 		if (_game.version > 2) // V0-V2 games didn't use the didexec flag
 			vm.slot[_currentScript].didexec = true;
-		debugC(DEBUG_OPCODES, "Script %d, offset 0x%x: [%X] %s()",
+				debugC(DEBUG_OPCODES, "Script %d, offset 0x%x: [%X] %s()",
 				vm.slot[_currentScript].number,
 				(uint)(_scriptPointer - _scriptOrgPointer),
 				_opcode,
@@ -609,12 +618,6 @@ int ScummEngine::readVar(uint var) {
 				!(_currentRoom == 4 && (currentScriptSlotIs(2150) || currentScriptSlotIs(2208) || currentScriptSlotIs(2210)))) {
 				return 263;
 			}
-			// Mod for Backyard Baseball 2001 online competitive play: allow random bounces
-			// Normally they only happen offline; this script checks var399, here we tell this
-			// script that we're not in online play even if we are
-			if (_game.id == GID_BASEBALL2001 && currentScriptSlotIs(39) && var == 399) {
-				return 0;
-			}
 		}
 #endif
 		assertRange(0, var, _numVariables - 1, "variable (reading)");
@@ -625,18 +628,6 @@ int ScummEngine::readVar(uint var) {
 		if (_game.heversion >= 80) {
 			var &= 0xFFF;
 			assertRange(0, var, _numRoomVariables - 1, "room variable (reading)");
-
-#if defined(USE_ENET) && defined(USE_BASIC_NET)
-			if (_enableHECompetitiveOnlineMods) {
-				// Mod for Backyard Baseball 2001 online competitive play: don't give powerups for double plays
-				// Return true for this variable, which dictates whether powerups are disabled, but only in this script
-				// that detects double plays (among other things)
-				if (_game.id == GID_BASEBALL2001 && _currentRoom == 3 && currentScriptSlotIs(2099) && var == 32 && readVar(399) == 1) {
-					return 1;
-				}
-			}
-#endif
-
 			return _roomVars[var];
 
 		} else if (_game.version <= 3 && !(_game.id == GID_INDY3 && _game.platform == Common::kPlatformFMTowns) &&
@@ -677,32 +668,6 @@ int ScummEngine::readVar(uint var) {
 			assertRange(0, var, 25, "local variable (reading)");
 		else
 			assertRange(0, var, 20, "local variable (reading)");
-#if defined(USE_ENET) && defined(USE_BASIC_NET)
-		// Mod for Backyard Baseball 2001 online competitive play: change impact of
-		// batter's power stat on hit power
-		if (_enableHECompetitiveOnlineMods) {
-			if (_game.id == GID_BASEBALL2001 &&
-				_currentRoom == 4 && currentScriptSlotIs(2090)  // The script that calculates hit power
-				&& readVar(399) == 1  // Check that we're playing online
-				&& var == 2  // Local var for batter's hitting power stat
-			) {
-				int swingType = vm.localvar[_currentScript][0];
-				int powerStat, powerStatModified;
-				switch (swingType) {
-				case 2:  // Line drive or grounder swing
-					powerStat = vm.localvar[_currentScript][var];
-					powerStatModified = 20 + powerStat * 4 / 5;
-					return powerStatModified;
-				case 1:  // Power swing
-					powerStat = vm.localvar[_currentScript][var];
-					powerStatModified = 10 + powerStat * 17 / 20;;
-					return powerStatModified;
-				default:
-					break;
-				}
-			}
-		}
-#endif
 		return vm.localvar[_currentScript][var];
 	}
 

@@ -23,6 +23,7 @@
 #include "common/system.h"
 #include "common/events.h"
 #include "common/util.h"
+#include "graphics/blit.h"
 #include "graphics/paletteman.h"
 
 #include "audio/mixer.h"
@@ -37,10 +38,12 @@
 #include "scumm/smush/rebel/smush_multi_font.h"
 
 #include "scumm/insane/rebel2/rebel.h"
+#include "scumm/insane/rebel2/shared.h"
+#include "scumm/insane/highscores.h"
 
 namespace Scumm {
 
-static void setRebel2MixerVolume(ScummEngine_v7 *vm, int volumeLevel) {
+void setRebel2MixerVolume(ScummEngine_v7 *vm, int volumeLevel) {
 	const int mixerVolume = CLIP<int>(volumeLevel * 2, 0, (int)Audio::Mixer::kMaxMixerVolume);
 	vm->_mixer->setVolumeForSoundType(Audio::Mixer::kMusicSoundType, mixerVolume);
 	vm->_mixer->setVolumeForSoundType(Audio::Mixer::kSFXSoundType, mixerVolume);
@@ -67,6 +70,7 @@ bool InsaneRebel2::isMenuTextInputActive() const {
 	return _gameState == kStateChapterSelect &&
 	       _chapterSelection >= 0 &&
 	       _chapterSelection < 16 &&
+	       _release.isChapterAvailable(_chapterSelection + 1) &&
 	       !_chapterUnlocked[_chapterSelection];
 }
 
@@ -88,8 +92,18 @@ void InsaneRebel2::updateMenuVirtualKeyboard() {
 void InsaneRebel2::unlockAllChapters() {
 	debugC(DEBUG_INSANE, "Unlocking all chapters for testing");
 	for (int i = 0; i < 16; i++) {
-		_chapterUnlocked[i] = true;
-		_levelUnlocked[i] = true;
+		_chapterUnlocked[i] = _release.isChapterAvailable(i + 1);
+		_levelUnlocked[i] = _chapterUnlocked[i];
+	}
+}
+
+void InsaneRebel2::updateChapterUnlocks() {
+	for (int i = 0; i < 16; i++) {
+		// 0xFF is PilotData::init()'s "never played" marker.
+		const bool reached = (_activePilot >= 0 && _activePilot < _numPilots) ?
+			_pilots[_activePilot].damage[i] < 0xFF : i + 1 == _release.levels[0];
+		_chapterUnlocked[i] = _release.isChapterAvailable(i + 1) &&
+			(_debugUnlockAll || _release.unlockAvailableLevels || reached);
 	}
 }
 
@@ -120,41 +134,14 @@ int InsaneRebel2::processMenuInput() {
 		switch (event.type) {
 		case Common::EVENT_KEYDOWN:
 			_menuInactivityTimer = 0;
-
-			switch (event.kbd.keycode) {
-			case Common::KEYCODE_UP:
-				_menuSelection--;
-				if (_menuSelection < 0) {
-					_menuSelection = _menuItemCount - 1;
-				}
-				_menuRepeatDelay = 3;
-				debugC(DEBUG_INSANE, "Menu: Selection changed to %d (UP)", _menuSelection);
-				break;
-
-			case Common::KEYCODE_DOWN:
-				_menuSelection++;
-				if (_menuSelection >= _menuItemCount) {
-					_menuSelection = 0;
-				}
-				_menuRepeatDelay = 3;
-				debugC(DEBUG_INSANE, "Menu: Selection changed to %d (DOWN)", _menuSelection);
-				break;
-
-			case Common::KEYCODE_RETURN:
-			case Common::KEYCODE_KP_ENTER:
-				if (_menuSelection >= 0 && _menuSelection < _menuItemCount) {
-					result = _menuSelection;
-					debugC(DEBUG_INSANE, "Menu: Item %d selected (ENTER)", _menuSelection);
-				}
-				break;
-
-			case Common::KEYCODE_ESCAPE:
-				result = _menuItemCount - 1;
-				debugC(DEBUG_INSANE, "Menu: Back action - selecting quit (item %d)", result);
-				break;
-
-			default:
-				break;
+			{
+				const Rebel2MenuCommand command = getRebel2MenuCommand(event.kbd);
+				const int oldSelection = _menuSelection;
+				result = applyRebel2MenuCommand(command, _menuItemCount, _menuSelection);
+				if (result == kRebel2MenuResultCancel)
+					result = _menuItemCount - 1;
+				if (_menuSelection != oldSelection)
+					_menuRepeatDelay = 3;
 			}
 			break;
 
@@ -178,8 +165,7 @@ int InsaneRebel2::processMenuInput() {
 				int mouseY = event.mouse.y;
 				for (int i = 0; i < _menuItemCount; i++) {
 					int itemY = baseY + i * itemSpacing;
-					if (mouseY >= itemY - itemHitTop - 3 * (highRes ? 2 : 1) &&
-							mouseY < itemY - itemHitTop + itemHitHeight - 3 * (highRes ? 2 : 1)) {
+					if (mouseY >= itemY - itemHitTop && mouseY < itemY - itemHitTop + itemHitHeight) {
 						if (i != _menuSelection) {
 							_menuSelection = i;
 							debugC(DEBUG_INSANE, "Menu: Hover selection changed to %d (mouseY=%d)", _menuSelection, mouseY);
@@ -318,17 +304,21 @@ int InsaneRebel2::getMenuStringWidth(const char *str) const {
 	if (!defaultFont)
 		return 0;
 
+	const char *end = str + strlen(str);
+	const bool useCJK = _vm->_language == Common::JA_JPN;
 	int w = 0;
 	NutRenderer *curFont = defaultFont;
 	int dummyColor = 0;
-	while (*str) {
+	while (str < end) {
 		int fc = parseFormatCode(str, dummyColor);
 		if (fc >= 0) { curFont = (fonts[fc] ? fonts[fc] : defaultFont); continue; }
 		if (fc == -2) continue;
-		byte c = (byte)*str++;
+		uint charLen;
+		uint16 c = decodeRebel2Char(str, end - str, charLen, useCJK);
+		str += charLen;
 		if (c >= 'a' && c <= 'z') c = c - 'a' + 'A';
-		if (curFont && c < curFont->getNumChars())
-			w += curFont->getCharWidth(c);
+		if (curFont && (c > 0xff || c < curFont->getNumChars()))
+			w += curFont->getCharWidth((byte)c);
 	}
 	return w;
 }
@@ -342,16 +332,20 @@ void InsaneRebel2::drawMenuString(byte *renderBitmap, const char *str, int x, in
 	Common::Rect clipRect(0, 0, _vm->_screenWidth, _vm->_screenHeight);
 	int pitch = _vm->_screenWidth;
 
+	const char *end = str + strlen(str);
+	const bool useCJK = _vm->_language == Common::JA_JPN;
 	NutRenderer *curFont = defaultFont;
 	int curColor = defaultColor;
-	while (*str) {
+	while (str < end) {
 		int fc = parseFormatCode(str, curColor);
 		if (fc >= 0) { curFont = (fonts[fc] ? fonts[fc] : defaultFont); continue; }
 		if (fc == -2) continue;
-		byte c = (byte)*str++;
+		uint charLen;
+		uint16 c = decodeRebel2Char(str, end - str, charLen, useCJK);
+		str += charLen;
 		if (c >= 'a' && c <= 'z') c = c - 'a' + 'A';
-		if (!curFont || c >= curFont->getNumChars()) continue;
-		int charW = curFont->getCharWidth(c);
+		if (!curFont || (c <= 0xff && c >= curFont->getNumChars())) continue;
+		int charW = curFont->getCharWidth((byte)c);
 		if (x >= 0 && y >= 0 && charW > 0)
 			drawRebel2Char(curFont, renderBitmap, clipRect, x, y, pitch, curColor, c);
 		x += charW;
@@ -387,78 +381,110 @@ void InsaneRebel2::drawMenuOverlay(byte *renderBitmap, int pitch, int width, int
 	drawMenuItems(renderBitmap, pitch, width, height, menuItems, 7, _menuSelection);
 }
 
-void pauseFillRect(byte *buf, int bufW, int bufH, int x, int y, int w, int h, byte color) {
-	if (x < 0) { w += x; x = 0; }
-	if (y < 0) { h += y; y = 0; }
-	if (x + w > bufW) w = bufW - x;
-	if (y + h > bufH) h = bufH - y;
-	if (w <= 0 || h <= 0) return;
-	for (int row = y; row < y + h; row++)
-		memset(buf + row * bufW + x, color, w);
+byte blendRebel2PausePixels(byte a, byte b) {
+	if (a > b)
+		SWAP(a, b);
+	if (a >= 16 && b < 80)
+		return (a + b) / 2;
+	if (b == 0 || b == 4 || (b >= 16 && b < 80))
+		return b;
+	return a;
+}
+
+void scaleRebel2PauseBackground(const Graphics::Surface &src, Graphics::Surface &dst) {
+	dst.create(src.w * 2, src.h * 2, src.format);
+	for (int y = 0; y < src.h; y++) {
+		const byte *srcRow = (const byte *)src.getBasePtr(0, y);
+		byte *dstRow = (byte *)dst.getBasePtr(0, y * 2);
+		for (int x = 0; x < src.w; x++) {
+			dstRow[x * 2] = srcRow[x];
+			const byte nextColor = x + 1 < src.w ? srcRow[x + 1] : 0;
+			dstRow[x * 2 + 1] = blendRebel2PausePixels(srcRow[x], nextColor);
+		}
+	}
+	for (int y = 1; y < dst.h - 1; y += 2) {
+		byte *row = (byte *)dst.getBasePtr(0, y);
+		for (int x = 0; x < dst.w; x++)
+			row[x] = blendRebel2PausePixels(row[x - dst.pitch], row[x + dst.pitch]);
+	}
+	memcpy(dst.getBasePtr(0, dst.h - 1), dst.getBasePtr(0, dst.h - 2), dst.w);
 }
 
 void InsaneRebel2::showPauseOverlay() {
 	SmushPlayer *splayer = ((ScummEngine_v7 *)_vm)->_splayer;
-	if (!splayer)
+	if (!splayer || _pauseOverlayActive)
 		return;
 
-	byte *frameBuffer = splayer->_dst;
-	byte *palette = splayer->_pal;
-	int width = splayer->_width;
-	int height = splayer->_height;
-
-	if (!frameBuffer || !palette || width <= 0 || height <= 0)
+	// Capture the visible viewport without modifying the video decoder's buffers.
+	Graphics::Surface *screen = _vm->_system->lockScreen();
+	if (!screen)
 		return;
-
-	int screenW = MIN(width, (int)_vm->_screenWidth);
-	int screenH = MIN(height, (int)_vm->_screenHeight);
-
-	memcpy(_savedPausePalette, palette, 768);
+	_savedPauseScreen.copyFrom(*screen);
+	_vm->_system->unlockScreen();
+	_vm->_system->getPaletteManager()->grabPalette(_savedPausePalette, 0, 256);
 	_pauseOverlayActive = true;
 
-	byte dimPal[768];
-	memcpy(dimPal, palette, 768);
-	for (int i = 0; i < 768; i++)
-		dimPal[i] >>= 2;
+	Graphics::Surface background;
+	background.create(320, 200, Graphics::PixelFormat::createFormatCLUT8());
+	byte *pixels = (byte *)background.getPixels();
+	Graphics::scaleBlit(pixels, (const byte *)_savedPauseScreen.getPixels(),
+		background.pitch, _savedPauseScreen.pitch, background.w, background.h,
+		_savedPauseScreen.w, _savedPauseScreen.h, background.format);
 
-	dimPal[0x50 * 3 + 0] = 80; dimPal[0x50 * 3 + 1] = 80; dimPal[0x50 * 3 + 2] = 80;
-	dimPal[0x51 * 3 + 0] = 110; dimPal[0x51 * 3 + 1] = 110; dimPal[0x51 * 3 + 2] = 110;
-	dimPal[1 * 3 + 0] = 255; dimPal[1 * 3 + 1] = 255; dimPal[1 * 3 + 2] = 255;
-	dimPal[2 * 3 + 0] = 188; dimPal[2 * 3 + 1] = 188; dimPal[2 * 3 + 2] = 188;
-	dimPal[3 * 3 + 0] = 128; dimPal[3 * 3 + 1] = 128; dimPal[3 * 3 + 2] = 128;
-	dimPal[4 * 3 + 0] = 0;   dimPal[4 * 3 + 1] = 0;   dimPal[4 * 3 + 2] = 0;
-	dimPal[5 * 3 + 0] = 252; dimPal[5 * 3 + 1] = 252; dimPal[5 * 3 + 2] = 252;
+	// The original uses a 64-shade tint, then repeats the neighbouring film frames.
+	byte previousColor = pixels[0];
+	for (int i = 0; i < background.w * background.h; i++) {
+		const byte color = pixels[i];
+		pixels[i] = ((_savedPausePalette[previousColor * 3 + 1] + _savedPausePalette[color * 3 + 1]) >> 3) + 16;
+		previousColor = color;
+	}
+	memcpy(background.getBasePtr(0, 0), background.getBasePtr(0, 150), 25 * background.pitch);
+	memcpy(background.getBasePtr(0, 175), background.getBasePtr(0, 25), 25 * background.pitch);
 
-	_vm->_system->getPaletteManager()->setPalette(dimPal, 0, 256);
-
-	pauseFillRect(frameBuffer, width, height, 0, 0x17, 0x140, 2, 0x50);
-	pauseFillRect(frameBuffer, width, height, 0, 0xAF, 0x140, 2, 0x50);
-
-	pauseFillRect(frameBuffer, width, height, 0,     0, 0x28, 200, 0x50);
-	pauseFillRect(frameBuffer, width, height, 0x118, 0, 0x28, 200, 0x50);
-
-	for (int i = 0; i < 6; i++) {
-		int yOff = i * 0x24;  // i * 36
-		pauseFillRect(frameBuffer, width, height, 0x0C, yOff,     0x19, 0x11, 0x51);
-		pauseFillRect(frameBuffer, width, height, 0x0B, yOff + 1, 0x1B, 0x0F, 0x51);
-		pauseFillRect(frameBuffer, width, height, 0x0D, yOff,     0x17, 0x11, 4);
-		pauseFillRect(frameBuffer, width, height, 0x0B, yOff + 2, 0x1B, 0x0D, 4);
-		pauseFillRect(frameBuffer, width, height, 0x0C, yOff + 1, 0x19, 0x0F, 4);
+	background.fillRect(Common::Rect(0, 23, 320, 25), 80);
+	background.fillRect(Common::Rect(0, 175, 320, 177), 80);
+	background.fillRect(Common::Rect(0, 0, 40, 200), 80);
+	background.fillRect(Common::Rect(280, 0, 320, 200), 80);
+	for (int side = 0; side < 2; side++) {
+		const int x = side ? 282 : 11;
+		for (int i = 0; i < 6; i++) {
+			const int y = i * 36;
+			background.fillRect(Common::Rect(x + 1, y, x + 26, y + 17), 81);
+			background.fillRect(Common::Rect(x, y + 1, x + 27, y + 16), 81);
+			background.fillRect(Common::Rect(x + 2, y, x + 25, y + 17), 4);
+			background.fillRect(Common::Rect(x, y + 2, x + 27, y + 15), 4);
+			background.fillRect(Common::Rect(x + 1, y + 1, x + 26, y + 16), 4);
+		}
 	}
 
-	for (int i = 0; i < 6; i++) {
-		int yOff = i * 0x24;
-		int xBase = 0x11A;
-		pauseFillRect(frameBuffer, width, height, xBase,     yOff,     0x19, 0x11, 0x51);
-		pauseFillRect(frameBuffer, width, height, xBase - 1, yOff + 1, 0x1B, 0x0F, 0x51);
-		pauseFillRect(frameBuffer, width, height, xBase + 1, yOff,     0x17, 0x11, 4);
-		pauseFillRect(frameBuffer, width, height, xBase - 1, yOff + 2, 0x1B, 0x0D, 4);
-		pauseFillRect(frameBuffer, width, height, xBase,     yOff + 1, 0x19, 0x0F, 4);
+	byte pausePalette[768];
+	memcpy(pausePalette, _savedPausePalette, sizeof(pausePalette));
+	const byte textColors[] = {
+		0, 0, 0, 255, 255, 255, 188, 188, 188, 128, 128, 128, 0, 0, 0,
+		0, 255, 0, 0, 199, 0, 0, 147, 0, 0, 95, 0
+	};
+	memcpy(pausePalette, textColors, sizeof(textColors));
+	for (int i = 0; i < 64; i++) {
+		// Original HLS palette: hue 10, lightness 2*i, saturation 78.
+		const int m1 = 354 * i;
+		const int m2 = 666 * i;
+		pausePalette[(16 + i) * 3] = m2 / 255;
+		pausePalette[(16 + i) * 3 + 1] = (m1 + (m2 - m1) * 60 / 255) / 255;
+		pausePalette[(16 + i) * 3 + 2] = m1 / 255;
 	}
+	const byte filmColors[] = {65, 36, 39, 33, 18, 29, 49, 27, 34, 65, 36, 39};
+	memcpy(pausePalette + 80 * 3, filmColors, sizeof(filmColors));
+
+	Graphics::Surface overlay;
+	if (isHiRes())
+		scaleRebel2PauseBackground(background, overlay);
+	else
+		overlay.copyFrom(background);
+	background.free();
 
 	const char *pauseText = splayer->getString(0x78);
 	if (!pauseText || !pauseText[0])
-		pauseText = "Game Paused";
+		pauseText = "^f01^c005Game Paused";
 
 	SmushMultiFont *multiFont = splayer->getMultiFont();
 	if (!multiFont) {
@@ -466,12 +492,27 @@ void InsaneRebel2::showPauseOverlay() {
 		multiFont = splayer->getMultiFont();
 	}
 	if (multiFont) {
-		Common::Rect clipRect(0, 0, screenW, screenH);
-		multiFont->drawString(pauseText, frameBuffer, clipRect, 10, 10, width, 4, kStyleAlignLeft);
+		Common::Rect clipRect(overlay.w, overlay.h);
+		multiFont->drawString(pauseText, (byte *)overlay.getPixels(), clipRect,
+			10, isHiRes() ? 20 : 10, overlay.pitch, 1, kStyleAlignLeft);
 	}
 
-	_vm->_system->copyRectToScreen(frameBuffer, width, 0, 0, screenW, screenH);
+	_vm->_system->getPaletteManager()->setPalette(pausePalette, 0, 256);
+	_vm->_system->copyRectToScreen(overlay.getPixels(), overlay.pitch, 0, 0, overlay.w, overlay.h);
 	_vm->_system->updateScreen();
+	overlay.free();
+}
+
+void InsaneRebel2::hidePauseOverlay() {
+	if (!_pauseOverlayActive)
+		return;
+
+	_vm->_system->getPaletteManager()->setPalette(_savedPausePalette, 0, 256);
+	_vm->_system->copyRectToScreen(_savedPauseScreen.getPixels(), _savedPauseScreen.pitch,
+		0, 0, _savedPauseScreen.w, _savedPauseScreen.h);
+	_vm->_system->updateScreen();
+	_savedPauseScreen.free();
+	_pauseOverlayActive = false;
 }
 
 int InsaneRebel2::runMainMenu() {
@@ -635,6 +676,12 @@ int InsaneRebel2::runChapterSelect() {
 		}
 
 		if (_chapterSelection >= 0 && _chapterSelection < 16) {
+			if (!_release.isChapterAvailable(_chapterSelection + 1)) {
+				_passwordInput.clear();
+				playSfx(3, 127, 0);
+				continue;
+			}
+
 			if (_chapterUnlocked[_chapterSelection]) {
 				_selectedChapter = _chapterSelection;
 				debugC(DEBUG_INSANE, "Chapter %d selected (unlocked)", _selectedChapter + 1);
@@ -771,8 +818,7 @@ int InsaneRebel2::processChapterSelectInput() {
 
 				for (int i = 0; i < _chapterItemCount; i++) {
 					int itemY = baseY + i * itemSpacing;
-					if (mouseY >= itemY - itemHitTop - 3 * (highRes ? 2 : 1) &&
-							mouseY < itemY - itemHitTop + itemHitHeight - 3 * (highRes ? 2 : 1)) {
+					if (mouseY >= itemY - itemHitTop && mouseY < itemY - itemHitTop + itemHitHeight) {
 						if (i != _chapterSelection) {
 							_chapterSelection = i;
 							_previewOffsetY = _chapterSelection * -50 + 75;
@@ -887,6 +933,8 @@ Common::String InsaneRebel2::getChapterPassword(int level, int difficulty) {
 void InsaneRebel2::drawChapterInfoLine(byte *renderBitmap, int pitch, int width, int height) {
 	if (_chapterSelection < 0 || _chapterSelection >= 16)
 		return;
+	if (!_release.isChapterAvailable(_chapterSelection + 1))
+		return;
 
 	SmushPlayer *splayer = ((ScummEngine_v7 *)_vm)->_splayer;
 	if (!splayer)
@@ -902,7 +950,9 @@ void InsaneRebel2::drawChapterInfoLine(byte *renderBitmap, int pitch, int width,
 		int32 pilotLives = 0;
 		int32 pilotScore = 0;
 		int16 pilotRating = 0;
-		if (_activePilot >= 0 && _activePilot < _numPilots) {
+		if (_release.unlockAvailableLevels) {
+			pilotLives = 3;
+		} else if (_activePilot >= 0 && _activePilot < _numPilots) {
 			pilotLives = _pilots[_activePilot].lives[_chapterSelection];
 			pilotScore = _pilots[_activePilot].score[_chapterSelection];
 			pilotRating = _pilots[_activePilot].rating[_chapterSelection];
@@ -968,7 +1018,7 @@ int InsaneRebel2::runLevelSelect() {
 
 	_levelSelection = 0;
 	_levelItemCount = _numPilots + 4;
-	_selectedLevel = 1;
+	_selectedLevel = _release.levels[0];
 	_menuRepeatDelay = 0;
 	_gameState = kStatePilotSelect;
 	_pilotMenuMode = kPilotModeSelect;
@@ -1004,9 +1054,7 @@ int InsaneRebel2::runLevelSelect() {
 				savePilots();
 				_activePilot = _pilotEditIndex;
 
-				for (int i = 0; i < 16; i++) {
-					_chapterUnlocked[i] = _debugUnlockAll || (_pilots[_activePilot].damage[i] < 0xFF);
-				}
+				updateChapterUnlocks();
 			}
 			_pilotMenuMode = kPilotModeSelect;
 			_levelItemCount = _numPilots + 4;
@@ -1058,12 +1106,7 @@ int InsaneRebel2::runLevelSelect() {
 		debugC(DEBUG_INSANE, "Pilot selection: %d (numPilots=%d)", _levelSelection, _numPilots);
 
 		if (_levelSelection < _numPilots) {
-			_activePilot = _levelSelection;
-			_difficulty = _pilots[_activePilot].difficulty;
-
-			for (int i = 0; i < 16; i++) {
-				_chapterUnlocked[i] = _debugUnlockAll || (_pilots[_activePilot].damage[i] < 0xFF);
-			}
+			selectPilot(_levelSelection);
 
 			debugC(DEBUG_INSANE, "Pilot '%s' selected (slot %d, difficulty %d)",
 			      _pilots[_activePilot].name, _activePilot, _difficulty);
@@ -1246,8 +1289,7 @@ int InsaneRebel2::processLevelSelectInput() {
 			_vm->_mouse.y = event.mouse.y;
 			for (int i = 0; i < itemCount; i++) {
 				int itemY = itemBaseY + i * itemSpacing;
-				if (event.mouse.y >= itemY - itemHitTop - 3 * (highRes ? 2 : 1) &&
-						event.mouse.y < itemY - itemHitTop + itemHitHeight - 3 * (highRes ? 2 : 1)) {
+				if (event.mouse.y >= itemY - itemHitTop && event.mouse.y < itemY - itemHitTop + itemHitHeight) {
 					selection = i;
 					break;
 				}
@@ -1350,6 +1392,40 @@ void InsaneRebel2::drawLevelSelectOverlay(byte *renderBitmap, int pitch, int wid
 	}
 
 	drawMenuItems(renderBitmap, pitch, width, height, pilotItems, _numPilots + 4, _levelSelection);
+
+	drawPilotInfoLines(renderBitmap);
+}
+
+// Difficulty and current chapter of the highlighted pilot, at the bottom left.
+void InsaneRebel2::drawPilotInfoLines(byte *renderBitmap) {
+	if (_pilotMenuMode != kPilotModeSelect || _levelSelection < 0 || _levelSelection >= _numPilots)
+		return;
+
+	SmushPlayer *splayer = ((ScummEngine_v7 *)_vm)->_splayer;
+	if (!splayer)
+		return;
+
+	const PilotData &pilot = _pilots[_levelSelection];
+	const int scale = isHiRes() ? 2 : 1;
+
+	const char *diffFmt = splayer->getString(25);
+	if (!diffFmt || !diffFmt[0])
+		diffFmt = "^f01^c248Difficulty: %s";
+	const char *diffName = splayer->getString(111 + CLIP<int>(pilot.difficulty, 0, 5));
+	if (diffName && strlen(diffName) > 9) {
+		// Skip the ^f01^c005 prefix so the name inherits the line's color.
+		Common::String line = Common::String::format(diffFmt, diffName + 9);
+		drawMenuString(renderBitmap, line.c_str(), 30 * scale, 180 * scale);
+	}
+
+	int chapterIdx = 15;
+	while (chapterIdx > 0 && pilot.damage[chapterIdx] >= 0xFF)
+		chapterIdx--;
+	const char *chapFmt = splayer->getString(26);
+	if (!chapFmt || !chapFmt[0])
+		chapFmt = "^f01^c248Chapter:    %hd";
+	Common::String line = Common::String::format(chapFmt, (short)(chapterIdx + 1));
+	drawMenuString(renderBitmap, line.c_str(), 30 * scale, 190 * scale);
 }
 
 void InsaneRebel2::initDefaultRankings() {
@@ -1372,10 +1448,7 @@ void InsaneRebel2::insertRanking(const char *name, int32 score, int32 rating,
 	if (score == 0)
 		return;
 
-	int insertPos = 0;
-	while (insertPos < _numRankings && score <= _rankings[insertPos].score) {
-		insertPos++;
-	}
+	int insertPos = findHighScorePosition(_rankings, _numRankings, score);
 	if (insertPos > kMaxRankings - 1)
 		return;
 
@@ -1392,19 +1465,14 @@ void InsaneRebel2::insertRanking(const char *name, int32 score, int32 rating,
 		}
 	}
 
-	int lastIdx = MIN(_numRankings, kMaxRankings - 1);
-	for (int i = lastIdx; i > insertPos; i--)
-		_rankings[i] = _rankings[i - 1];
-
-	RankingEntry &r = _rankings[insertPos];
+	RankingEntry r = {};
 	Common::strlcpy(r.name, name, sizeof(r.name));
 	r.score = score;
 	r.rating = rating;
 	r.difficulty = difficulty;
 	r.chapter = chapter;
 
-	if (_numRankings < kMaxRankings)
-		_numRankings++;
+	_numRankings = insertHighScoreEntry(_rankings, _numRankings, kMaxRankings, insertPos, r);
 }
 
 void InsaneRebel2::showTopPilots() {
@@ -1588,6 +1656,8 @@ int InsaneRebel2::processOptionsInput() {
 					break;
 				case 5:
 					_optRapidFire = !_optRapidFire;
+					ConfMan.setBool("rebel2_rapid_fire", _optRapidFire);
+					ConfMan.flushToDisk();
 					break;
 				case 6:
 					break;

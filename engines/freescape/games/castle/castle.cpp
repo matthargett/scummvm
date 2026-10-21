@@ -35,7 +35,8 @@
 #include "freescape/freescape.h"
 #include "freescape/gfx.h"
 #include "freescape/games/castle/castle.h"
-#include "freescape/language/8bitDetokeniser.h"
+#include "freescape/games/castle/c64.music.h"
+#include "freescape/language/variables.h"
 #include "freescape/music.h"
 
 namespace Freescape {
@@ -93,6 +94,8 @@ CastleEngine::CastleEngine(OSystem *syst, const ADGameDescription *gd) : Freesca
 	_spiritsMeterBgCLUT8 = nullptr;
 	_spiritsMeterIndCLUT8 = nullptr;
 	_keysBorderCLUT8 = nullptr;
+	_spiritsMeterSideCLUT8 = nullptr;
+	_backgroundCLUT8 = nullptr;
 	_menu = nullptr;
 	_menuButtons = nullptr;
 	_cursorData = nullptr;
@@ -189,6 +192,13 @@ CastleEngine::~CastleEngine() {
 		if (_thunderFrames[i]) {
 			_thunderFrames[i]->free();
 			delete _thunderFrames[i];
+		}
+	}
+
+	for (int i = 0; i < int(_thunderCLUT8Frames.size()); i++) {
+		if (_thunderCLUT8Frames[i]) {
+			_thunderCLUT8Frames[i]->free();
+			delete _thunderCLUT8Frames[i];
 		}
 	}
 
@@ -412,6 +422,43 @@ void CastleEngine::updateCPCSpritesPalette() {
 		palette[c * 3 + 2] = b;
 	}
 
+	updateFourColorSpritesPalette(palette);
+}
+
+void CastleEngine::updateCGASpritesPalette() {
+	// swapPalette() already picked the palette for the current area
+	if (_gfx->_palette)
+		updateCGAPalette(_gfx->_palette);
+}
+
+void CastleEngine::updateCGAPalette(const byte *palette) {
+	updateFourColorSpritesPalette(palette);
+
+	// The CGA glyphs use color 2 for their body and 3 for the highlights, which
+	// Font::drawChar() maps to the secondary and tertiary colors
+	uint32 secondary = _gfx->_texturePixelFormat.ARGBToColor(0xFF, palette[6], palette[7], palette[8]);
+	uint32 tertiary = _gfx->_texturePixelFormat.ARGBToColor(0xFF, palette[9], palette[10], palette[11]);
+
+	_font.setSecondaryColor(secondary);
+	_font.setTertiaryColor(tertiary);
+	_fontRiddle.setSecondaryColor(secondary);
+	_fontRiddle.setTertiaryColor(tertiary);
+}
+
+void CastleEngine::updateFourColorSpritesPalette(const byte *palette) {
+	// convertCPCSprite() writes through a reference, so the destinations must be
+	// as long as the indexed arrays. This also covers the conversion after loading
+	while (_keysBorderCLUT8 && _keysBorderFrames.empty())
+		_keysBorderFrames.push_back(nullptr);
+	while (_strenghtWeightsFrames.size() < _strenghtWeightsCLUT8.size())
+		_strenghtWeightsFrames.push_back(nullptr);
+	while (_flagFrames.size() < _flagCLUT8.size())
+		_flagFrames.push_back(nullptr);
+	while (_keysBorderFrames.size() < _keysBorderCLUT8Frames.size())
+		_keysBorderFrames.push_back(nullptr);
+	while (_keysMenuFrames.size() < _keysMenuCLUT8Frames.size())
+		_keysMenuFrames.push_back(nullptr);
+
 	if (_keysBorderCLUT8) {
 		_keysBorderCLUT8->setPalette(palette, 0, 4);
 		convertCPCSprite(_keysBorderCLUT8, _keysBorderFrames[0], true);
@@ -423,6 +470,25 @@ void CastleEngine::updateCPCSpritesPalette() {
 	if (_spiritsMeterIndCLUT8) {
 		_spiritsMeterIndCLUT8->setPalette(palette, 0, 4);
 		convertCPCSprite(_spiritsMeterIndCLUT8, _spiritsMeterIndicatorFrame, true);
+	}
+	for (int f = 0; f < (int)_keysBorderCLUT8Frames.size(); f++) {
+		_keysBorderCLUT8Frames[f]->setPalette(palette, 0, 4);
+		convertCPCSprite(_keysBorderCLUT8Frames[f], _keysBorderFrames[f], true);
+	}
+	for (int f = 0; f < (int)_keysMenuCLUT8Frames.size(); f++) {
+		_keysMenuCLUT8Frames[f]->setPalette(palette, 0, 4);
+		convertCPCSprite(_keysMenuCLUT8Frames[f], _keysMenuFrames[f], true);
+	}
+	if (_spiritsMeterSideCLUT8) {
+		_spiritsMeterSideCLUT8->setPalette(palette, 0, 4);
+		convertCPCSprite(_spiritsMeterSideCLUT8, _spiritsMeterIndicatorSideFrame);
+	}
+	if (_backgroundCLUT8) {
+		// Uploaded once as a texture, so drop it to have it rebuilt recolored
+		_backgroundCLUT8->setPalette(palette, 0, 4);
+		convertCPCSprite(_backgroundCLUT8, _background);
+		delete _skyTexture;
+		_skyTexture = nullptr;
 	}
 	if (_strenghtBackgroundCLUT8) {
 		_strenghtBackgroundCLUT8->setPalette(palette, 0, 4);
@@ -488,9 +554,9 @@ void CastleEngine::initKeymaps(Common::Keymap *engineKeyMap, Common::Keymap *inf
 	act->addDefaultInputMapping("q");
 	infoScreenKeyMap->addAction(act);
 
-	act = new Common::Action("TOGGLESOUND", _("Toggle sound"));
+	act = new Common::Action("TOGGLESOUND", isC64() ? _("Toggle music/sound effects") : _("Toggle sound"));
 	act->setCustomEngineActionEvent(kActionToggleSound);
-	act->addDefaultInputMapping("t");
+	act->addDefaultInputMapping(isC64() ? "f" : "t");
 	infoScreenKeyMap->addAction(act);
 
 	act = new Common::Action("ROTL", _("Rotate left"));
@@ -545,6 +611,8 @@ void CastleEngine::beforeStarting() {
 		waitInLoop(250);
 	else if (isSpectrum() || isCPC())
 		waitInLoop(100);
+	else if (isC64())
+		liftC64Gate();
 	else if (isAmiga() || isAtariST())
 		waitInLoop(250);
 }
@@ -562,6 +630,8 @@ void CastleEngine::gotoArea(uint16 areaID, int entranceID) {
 
 	assert(_areaMap.contains(areaID));
 	_currentArea = _areaMap[areaID];
+	if (isC64())
+		_c64SpiritAttackStartTicks = -1;
 	_currentArea->show();
 	_maxFallingDistance = MAX(32, _currentArea->getScale() * 16 - 2);
 
@@ -608,10 +678,13 @@ void CastleEngine::gotoArea(uint16 areaID, int entranceID) {
 	// Ignore sky/ground fields
 	_gfx->_keyColor = 0;
 	_gfx->clearColorPairArray();
-	if (isCPC() || isC64())
+	// CGA takes its color pairs from the area color map, like CPC and C64 do
+	if (isCPC() || isC64() || _renderMode == Common::kRenderCGA)
 		_gfx->fillColorPairArray();
 
 	swapPalette(areaID);
+	if (isC64())
+		updateC64BackgroundPalette();
 
 	// Enable/disable COLOR15 cycling based on per-area flag (Amiga/Atari)
 	if ((isAmiga() || isAtariST()) && _currentArea)
@@ -619,15 +692,21 @@ void CastleEngine::gotoArea(uint16 areaID, int entranceID) {
 
 	if (isCPC())
 		updateCPCSpritesPalette();
+	else if (isDOS() && _renderMode == Common::kRenderCGA)
+		updateCGASpritesPalette();
 
-	if (isDOS()) {
+	// The per area extra colors are pairs of EGA indexes, useless in CGA
+	if (isDOS() && _renderMode != Common::kRenderCGA) {
 		_gfx->_colorPair[_currentArea->_underFireBackgroundColor] = _currentArea->_extraColor[1];
 		_gfx->_colorPair[_currentArea->_usualBackgroundColor] = _currentArea->_extraColor[0];
 		_gfx->_colorPair[_currentArea->_paperColor] = _currentArea->_extraColor[2];
 		_gfx->_colorPair[_currentArea->_inkColor] = _currentArea->_extraColor[3];
 	} else if (isAmiga() || isAtariST()) {
-		// Unclear why these colors are always overwritten (the Atari ST build
-		// shares the Amiga rendering and needs the same 3D-world greys).
+		// The 3D world always draws its structural greys from a fixed ramp of
+		// 0x44, 0x66, 0x88, 0xaa and 0xcc, whatever the area palette holds. 126
+		// of the 128 area palettes already store 0xaaa at index 4, so writing it
+		// only matters where one does not: the Wizard's Hut leaves 0 through 5
+		// unset, and its door and cabinet came out black.
 		byte (*palette)[16][3] = (byte (*)[16][3])_gfx->_palette;
 
 		(*palette)[1][0] = 0x44;
@@ -642,9 +721,15 @@ void CastleEngine::gotoArea(uint16 areaID, int entranceID) {
 		(*palette)[3][1] = 0x88;
 		(*palette)[3][2] = 0x88;
 
+		(*palette)[4][0] = 0xaa;
+		(*palette)[4][1] = 0xaa;
+		(*palette)[4][2] = 0xaa;
+
 		(*palette)[5][0] = 0xcc;
 		(*palette)[5][1] = 0xcc;
 		(*palette)[5][2] = 0xcc;
+
+		updateThunderFramesPalette();
 	}
 
 	if (isSpectrum())
@@ -662,18 +747,26 @@ void CastleEngine::gotoArea(uint16 areaID, int entranceID) {
 }
 
 void CastleEngine::initGameState() {
+	if (isC64()) {
+		stopAllSounds();
+		stopAllSounds(Sound::kTypeMovement);
+		_syncSound = false;
+		_c64SpiritAttackStartTicks = -1;
+		resetC64Lightning();
+	}
 	FreescapeEngine::initGameState();
 	_playerHeightNumber = 1;
 
 	// Platform-specific message strings (indices differ between DOS and Amiga)
-	if (isAmiga() || isAtariST()) {
+	if ((isAmiga() || isAtariST()) && !isCastleMaster2()) {
 		_notEnoughRoomMessage = _messagesList[21];
 		_tooWeakMessage = _messagesList[22];
 		_crawlSelectedMessage = _messagesList[23];
 		_walkSelectedMessage = _messagesList[24];
 		_runSelectedMessage = _messagesList[25];
 		_ghostInAreaMessage = _messagesList[126];
-	} else if (isDOS()) {
+	} else if (isDOS() || isAtariST() || isAmiga()) {
+		// The Crypt's Amiga and Atari ST entries 0 to 124 are the DOS ones
 		_notEnoughRoomMessage = _messagesList[11];
 		_tooWeakMessage = _messagesList[12];
 		_crawlSelectedMessage = _messagesList[13];
@@ -698,7 +791,8 @@ void CastleEngine::initGameState() {
 		}
 	}
 
-	_gameStateVars[k8bitVariableShield] = 16;
+	// The Amiga and Atari ST releases start with three weights per side
+	_gameStateVars[k8bitVariableShield] = (isAmiga() || isAtariST()) ? 12 : 16;
 	_gameStateVars[k8bitVariableEnergy] = 1;
 	_gameStateVars[8] = 128; // -1
 	_countdown = INT_MAX - 8;
@@ -719,10 +813,12 @@ void CastleEngine::initGameState() {
 	_lastMinute = minutes;
 	_lastTenSeconds = seconds / 10;
 
-	_droppingGateStartTicks = 0;
+	_droppingGateStartTicks = isC64() ? -1 : 0;
 	_thunderFrameDuration = 0;
 
-	if (_playerMusic)
+	if (isC64())
+		enableCastleC64Sound(_sound, !_c64MusicEnabled);
+	if (_playerMusic && (!isC64() || _c64MusicEnabled))
 		_playerMusic->startMusic();
 }
 
@@ -772,7 +868,7 @@ void CastleEngine::endGame() {
 	_endGamePlayerEndArea = true;
 
 	if (hasEscaped()) {
-		insertTemporaryMessage(_messagesList[(isAmiga() || isAtariST()) ? 15 : 5], INT_MIN);
+		insertTemporaryMessage(_messagesList[((isAmiga() || isAtariST()) && !isCastleMaster2()) ? 15 : 5], INT_MIN);
 
 		if (isDOS() && !isCastleMaster2()) {
 			drawFullscreenEndGameAndWait();
@@ -973,7 +1069,7 @@ void CastleEngine::drawInfoMenu() {
 		CursorMan.showMouse(true);
 		surface->copyRectToSurface(*_menu, 47, 35, Common::Rect(0, 0, _menu->w, _menu->h));
 
-		_gfx->readFromPalette(10, r, g, b);
+		_gfx->readFromPalette(_renderMode == Common::kRenderCGA ? 3 : 10, r, g, b);
 		front = _gfx->_texturePixelFormat.ARGBToColor(0xFF, r, g, b);
 		drawStringInSurface(Common::String::format("%07d", score), 166, 71, front, black, surface);
 		drawStringInSurface(centerAndPadString(Common::String::format("%s", _messagesList[135 + shield / 6].c_str()), 10), 151, 102,  front, black, surface);
@@ -1013,40 +1109,50 @@ void CastleEngine::drawInfoMenu() {
 		// Score at (167, 71): move.w #$a7,d0; move.w #$47,d1
 		drawStringInSurface(Common::String::format("%07d", score), 167, 71, front, black, surface);
 
+		// The Crypt dropped Castle Master's ten key names from the front of the
+		// string table, so every index below moves. Its entries were read off the
+		// data, not shifted: Castle Master's own constants sit two entries above
+		// the strings they name.
+		const bool crypt = isCastleMaster2();
+
 		// Shield at (154, 102): move.w #$9a,d0; move.w #$66,d1
 		// Index = (shield - 1) / 4 (from: subq #1,d0; lsr #2,d0; muls #$c,d0)
-		// Amiga shield text at message indices 171-177 (skipping 174 which is empty)
+		// The original indexes 12-byte records; the two whose text is only 10
+		// characters long leave a spare terminator that reaches the engine as an
+		// extra empty string, which is why 172 and 176 are skipped here.
 		{
-			static const int kAmigaShieldMsgIdx[] = {171, 172, 173, 175, 176, 177};
+			static const int kAmigaShieldMsgIdx[] = {169, 170, 171, 173, 174, 175};
+			static const int kCryptShieldMsgIdx[] = {158, 159, 160, 162, 163, 164};
 			int shieldIdx = (shield > 0) ? (shield - 1) / 4 : 0;
 			if (shieldIdx > 5) shieldIdx = 5;
-			drawStringInSurface(centerAndPadString(_messagesList[kAmigaShieldMsgIdx[shieldIdx]], 10), 154, 102, front, black, surface);
+			int idx = crypt ? kCryptShieldMsgIdx[shieldIdx] : kAmigaShieldMsgIdx[shieldIdx];
+			drawStringInSurface(centerAndPadString(_messagesList[idx], 10), 154, 102, front, black, surface);
 		}
 
 		// Keys collected at (104, 41): move.w #$68,d0; move.w #$29,d1 (from FUN_22CC)
-		// Messages: 162="NO KEYS COLLECTED", 163="XX KEYS COLLECTED", 164=" 1 KEY COLLECTED"
+		// Messages: 160="NO KEYS COLLECTED", 161="XX KEYS COLLECTED", 162=" 1 KEY COLLECTED"
 		{
 			Common::String keysText;
 			int numKeys = _keysCollected.size();
 			if (numKeys == 0)
-				keysText = _messagesList[162];
+				keysText = _messagesList[crypt ? 149 : 160];
 			else if (numKeys == 1)
-				keysText = _messagesList[164];
+				keysText = _messagesList[crypt ? 151 : 162];
 			else {
-				keysText = _messagesList[163];
+				keysText = _messagesList[crypt ? 150 : 161];
 				Common::replace(keysText, "XX", Common::String::format("%2d", numKeys));
 			}
 			drawStringInSurface(keysText, 104, 41, front, black, surface);
 		}
 
 		// Spirits destroyed at (145, 133): move.w #$91,d0; move.w #$85,d1
-		// Messages: 156="NONE DESTROYED", 157=" XX DESTROYED "
+		// Messages: 154="NONE DESTROYED", 155=" XX DESTROYED "
 		{
 			Common::String spiritsText;
 			if (spiritsDestroyed == 0)
-				spiritsText = _messagesList[156];
+				spiritsText = _messagesList[crypt ? 143 : 154];
 			else {
-				spiritsText = _messagesList[157];
+				spiritsText = _messagesList[crypt ? 144 : 155];
 				Common::replace(spiritsText, "XX", Common::String::format("%2d", spiritsDestroyed));
 			}
 			drawStringInSurface(spiritsText, 145, 133, front, black, surface);
@@ -1074,6 +1180,8 @@ void CastleEngine::drawInfoMenu() {
 				surface->copyRectToSurfaceWithKey((const Graphics::Surface)*sndIndicator, 96, 103,
 					Common::Rect(0, 0, sndIndicator->w, sndIndicator->h), black);
 		}
+	} else if (isC64()) {
+		drawC64InfoMenu(surface);
 	} else if (isSpectrum() || isCPC()) {
 		Common::Array<Common::String> lines;
 		lines.push_back(centerAndPadString("********************", 21));
@@ -1162,6 +1270,10 @@ void CastleEngine::drawInfoMenu() {
 
 					loadGameDialog();
 					_eventManager->purgeMouseEvents();
+					if (isC64()) {
+						drawC64InfoMenu(surface);
+						menuTexture->update(surface);
+					}
 					if (isDOS() || isAmiga() || isAtariST()) {
 						g_system->lockMouse(false);
 						CursorMan.showMouse(true);
@@ -1181,6 +1293,10 @@ void CastleEngine::drawInfoMenu() {
 					}
 
 					_gfx->setViewport(_viewArea);
+				} else if (isC64() && event.customType == kActionToggleSound) {
+					toggleC64AudioMode();
+					drawC64InfoMenu(surface);
+					menuTexture->update(surface);
 				} else if (isDOS() && event.customType == kActionToggleSound) {
 					// TODO
 				} else if (event.customType == kActionQuit) {
@@ -1205,7 +1321,7 @@ void CastleEngine::drawInfoMenu() {
 			case Common::EVENT_RBUTTONDOWN:
 			// fallthrough
 			case Common::EVENT_LBUTTONDOWN:
-				if (isSpectrum() || isCPC())
+				if (isSpectrum() || isCPC() || isC64())
 					break;
 
 				mousePos = getNormalizedPosition(event.mouse);
@@ -1380,7 +1496,10 @@ void CastleEngine::drawFullscreenGameOverAndWait() {
 	Common::String keysCollectedString;
 	if (isDOS())
 		keysCollectedString = _messagesList[130];
-	else if (isSpectrum()) {
+	else if (isC64()) {
+		keysCollectedString = _messagesList[72];
+		Common::replace(keysCollectedString, "XX", "X");
+	} else if (isSpectrum()) {
 		if (_language == Common::EN_ANY)
 			keysCollectedString = "X COLLECTED";
 		else if (_language == Common::ES_ESP)
@@ -1398,6 +1517,8 @@ void CastleEngine::drawFullscreenGameOverAndWait() {
 	Common::String scoreString;
 	if (isDOS())
 		scoreString = _messagesList[131];
+	else if (isC64())
+		scoreString = _messagesList[74];
 	else if (isSpectrum() || isCPC()) {
 		if (_language == Common::EN_ANY)
 			scoreString = "SCORE XXXXXXX";
@@ -1413,7 +1534,10 @@ void CastleEngine::drawFullscreenGameOverAndWait() {
 	Common::String spiritsDestroyedString;
 	if (isDOS())
 		spiritsDestroyedString = _messagesList[133];
-	else if (isSpectrum() || isCPC()) {
+	else if (isC64()) {
+		spiritsDestroyedString = _messagesList[73];
+		Common::replace(spiritsDestroyedString, "XX", "X");
+	} else if (isSpectrum() || isCPC()) {
 		if (_language == Common::EN_ANY)
 			spiritsDestroyedString = "X DESTROYED";
 		else if (_language == Common::ES_ESP)
@@ -1430,10 +1554,12 @@ void CastleEngine::drawFullscreenGameOverAndWait() {
 		// TODO: playSound(X, false);
 	} else if (isSpectrum() || isCPC()) {
 		playSound(9, false);
+	} else if (isC64() && !hasEscaped()) {
+		dropC64Gate();
 	}
 
 	if (!isDOS() && hasEscaped()) {
-		insertTemporaryMessage(_messagesList[(isAmiga() || isAtariST()) ? 15 : 5], _countdown - 1);
+		insertTemporaryMessage(_messagesList[((isAmiga() || isAtariST()) && !isCastleMaster2()) ? 15 : 5], _countdown - 1);
 	}
 
 	while (!shouldQuit() && cont) {
@@ -1442,7 +1568,7 @@ void CastleEngine::drawFullscreenGameOverAndWait() {
 			insertTemporaryMessage(spiritsDestroyedString, _countdown - 4);
 			insertTemporaryMessage(keysCollectedString, _countdown - 6);
 			if (!isDOS() && hasEscaped()) {
-				insertTemporaryMessage(_messagesList[(isAmiga() || isAtariST()) ? 15 : 5], _countdown - 8);
+				insertTemporaryMessage(_messagesList[((isAmiga() || isAtariST()) && !isCastleMaster2()) ? 15 : 5], _countdown - 8);
 			}
 		}
 
@@ -1474,7 +1600,7 @@ void CastleEngine::drawFullscreenGameOverAndWait() {
 	}
 }
 
-// Same as FreescapeEngine::executeExecute but updates the spirits destroyed counter
+// Same as FreescapeEngine::executeCall but updates the spirits destroyed counter
 void CastleEngine::executeDestroy(FCLInstruction &instruction) {
 	uint16 objectID = 0;
 	uint16 areaID = _currentArea->getAreaID();
@@ -1518,7 +1644,9 @@ void CastleEngine::executePrint(FCLInstruction &instruction) {
 		drawFullscreenRiddleAndWait(index);
 		return;
 	}
-	if (isAmiga() || isAtariST()) {
+	// Past the ten key names, as everywhere else in the Amiga and Atari ST
+	// tables; The Crypt has none of them
+	if ((isAmiga() || isAtariST()) && !isCastleMaster2()) {
 		index = index + 10;
 	}
 	debugC(1, kFreescapeDebugCode, "Printing message %d: \"%s\"", index, _messagesList[index].c_str());
@@ -1537,13 +1665,26 @@ void CastleEngine::loadAssets() {
 	_endArea = 1;
 	_endEntrance = 42;
 
-	_timeoutMessage = _messagesList[1];
+	// Castle Master's Amiga and Atari ST string tables begin with the ten key
+	// names, so every index into the game text that follows moves by 10. The
+	// Crypt has no such prefix and keeps the DOS numbering.
+	const int msg = ((isAmiga() || isAtariST()) && !isCastleMaster2()) ? 10 : 0;
+
+	_timeoutMessage = _messagesList[msg + 1];
 	// Shield is unused in Castle Master
-	_noEnergyMessage = _messagesList[2];
-	_crushedMessage = _messagesList[3];
-	_fallenMessage = _messagesList[4];
-	_outOfReachMessage = _messagesList[7];
-	_noEffectMessage = _messagesList[8];
+	_noEnergyMessage = _messagesList[msg + 2];
+	_crushedMessage = _messagesList[msg + 3];
+	_fallenMessage = _messagesList[msg + 4];
+	_outOfReachMessage = _messagesList[msg + 7];
+	_noEffectMessage = _messagesList[msg + 8];
+
+	// Castle Master's Amiga and Atari ST discs hold the last two riddles the
+	// other way round: 17 is the Magister ending and 18 the drawbridge hint,
+	// while the area scripts ask for them by the DOS numbering. Swap them so
+	// every platform indexes the same riddle. The demo asks for its one riddle
+	// by number instead of through a script, so it is left as it is.
+	if ((isAmiga() || isAtariST()) && !isCastleMaster2() && !isDemo() && _riddleList.size() > 18)
+		SWAP(_riddleList[17], _riddleList[18]);
 
 	if (!isAmiga() && !isAtariST() && !isCPC() && !isC64()) {
 		Graphics::Surface *tmp;
@@ -1562,7 +1703,8 @@ void CastleEngine::loadAssets() {
 
 		it._value->addStructure(_areaMap[255]);
 
-		if (isDOS() || isAmiga() || isAtariST()) {
+		// CM2 reuses these object IDs for unrelated geometry, not spirit groups
+		if ((isDOS() || isAmiga() || isAtariST()) && !isCastleMaster2()) {
 			if (it._value->objectWithID(125)) {
 				_areaMap[it._key]->addGroupFromArea(195, _areaMap[255]);
 				//group = (Group *)_areaMap[it._key]->objectWithID(195);
@@ -1596,6 +1738,23 @@ void CastleEngine::loadAssets() {
 	_areaMap[1]->addFloor();
 	_areaMap[2]->addFloor();
 
+}
+
+void CastleEngine::loadMessagesCastleMaster2(Common::SeekableReadStream *file, int offset, int number) {
+	// Game text (L6cb9_game_text) and area names (L6f49_area_names) form a single
+	// table of 16-byte entries: an indent flag, then 15 characters. A zero flag
+	// would terminate the string, so loadMessagesFixedSize() cannot be used.
+	file->seek(offset);
+	debugC(1, kFreescapeDebugParser, "String table:");
+
+	for (int i = 0; i < number; i++) {
+		file->readByte(); // skip indent flag
+		char buf[16];
+		file->read(buf, 15);
+		buf[15] = '\0';
+		_messagesList.push_back(Common::String(buf));
+		debugC(1, kFreescapeDebugParser, "%d: '%s'", i, buf);
+	}
 }
 
 void CastleEngine::loadRiddles(Common::SeekableReadStream *file, int offset, int number) {
@@ -1686,6 +1845,9 @@ void CastleEngine::drawFullscreenRiddleAndWait(uint16 riddle) {
 		case Common::kRenderZX:
 			frontColor = 7;
 			break;
+		case Common::kRenderCGA:
+			frontColor = 3;
+			break;
 		case Common::kRenderCPC:
 			frontColor = _gfx->_inkColor;
 			break;
@@ -1697,6 +1859,8 @@ void CastleEngine::drawFullscreenRiddleAndWait(uint16 riddle) {
 	uint32 front = _gfx->_texturePixelFormat.ARGBToColor(0xFF, r, g, b);
 	if (isAmiga())
 		front = _gfx->_texturePixelFormat.ARGBToColor(0xFF, 0xEE, 0xAA, 0x00);
+	else if (isC64())
+		front = _gfx->_texturePixelFormat.ARGBToColor(0xFF, 119, 83, 0);
 	uint32 transparent = _gfx->_texturePixelFormat.ARGBToColor(0x00, 0x00, 0x00, 0x00);
 
 	Graphics::Surface *surface = new Graphics::Surface();
@@ -1761,10 +1925,14 @@ void CastleEngine::drawRiddle(uint16 riddle, uint32 front, uint32 back, Graphics
 		x = 40;
 		y = 46;
 		maxWidth = 139;
+	} else if (isC64()) {
+		x = 40;
+		y = 45;
+		maxWidth = 137;
 	} else if (isSpectrum()) {
 		x = 64;
 		y = 37;
-	} else if (isAmiga()) {
+	} else if (isAmiga() || isAtariST()) {
 		x = 32;
 		y = 33;
 		maxWidth = 139;
@@ -1803,8 +1971,9 @@ void CastleEngine::drawRiddle(uint16 riddle, uint32 front, uint32 back, Graphics
 		}
 	}
 	if (_riddleBottomFrame) {
-		Common::Rect srcRect(0, 0, _riddleBottomFrame->w, _riddleBottomFrame->h - 1);
-		Common::Rect destRect(x, maxWidth, x + _riddleBottomFrame->w, maxWidth + _riddleBottomFrame->h - 1);
+		int height = _riddleBottomFrame->h - (isC64() ? 0 : 1);
+		Common::Rect srcRect(0, 0, _riddleBottomFrame->w, height);
+		Common::Rect destRect(x, maxWidth, x + _riddleBottomFrame->w, maxWidth + height);
 		destRect.clip(_viewArea);
 		srcRect = Common::Rect(destRect.left - x, destRect.top - maxWidth, destRect.right - x, destRect.bottom - maxWidth);
 		if (srcRect.isValidRect() && !srcRect.isEmpty())
@@ -1824,7 +1993,10 @@ void CastleEngine::drawRiddle(uint16 riddle, uint32 front, uint32 back, Graphics
 	} else if (isSpectrum()) {
 		x = 64;
 		y = 36;
-	} else if (isAmiga()) {
+	} else if (isAmiga() || isAtariST()) {
+		// Every release overrides the origin stored with the riddle; on the
+		// Amiga and Atari ST that field is not a coordinate pair at all, but the
+		// pointer table the original used to find each riddle.
 		x = 40;
 		y = 32;
 	}
@@ -1845,8 +2017,22 @@ void CastleEngine::drawRiddleStringInSurface(const Common::String &str, int x, i
 		_fontRiddle.drawString(surface, ustr, x, y, _screenW, fontColor);
 	} else {
 		_font.setBackground(backColor);
+		if (isC64())
+			_font.setSecondaryColor(fontColor);
 		_font.drawString(surface, ustr, x, y, _screenW, fontColor);
 	}
+}
+
+void CastleEngine::drawStrengthWeight(Graphics::Surface *surface, int frameIdx, const Common::Point &position, int width, uint32 back) {
+	Graphics::ManagedSurface *frame = _strenghtWeightsFrames[frameIdx];
+	Common::Rect src(0, 0, width, frame->h);
+
+	// A Spectrum disc is drawn opaquely, so the shaft stays hidden in the gap
+	// it leaves; the other versions key out the black around theirs
+	if (isSpectrum())
+		surface->copyRectToSurface((const Graphics::Surface)*frame, position.x, position.y, src);
+	else
+		surface->copyRectToSurfaceWithKey((const Graphics::Surface)*frame, position.x, position.y, src, back);
 }
 
 void CastleEngine::drawEnergyMeter(Graphics::Surface *surface, Common::Point origin) {
@@ -1854,10 +2040,9 @@ void CastleEngine::drawEnergyMeter(Graphics::Surface *surface, Common::Point ori
 		surface->copyRectToSurface((const Graphics::Surface)*_strenghtBackgroundFrame, origin.x, origin.y, Common::Rect(0, 0, _strenghtBackgroundFrame->w, _strenghtBackgroundFrame->h));
 
 	uint32 black = _gfx->_texturePixelFormat.ARGBToColor(0xFF, 0x00, 0x00, 0x00);
-	uint32 back = 0;
-
-	if (isDOS() || isAmiga() || isAtariST())
-		back = _gfx->_texturePixelFormat.ARGBToColor(0xFF, 0x00, 0x00, 0x00);
+	// The CPC weights are converted with transparency, the others keep the
+	// black they were loaded with and rely on it being the key colour
+	uint32 back = isCPC() ? 0 : black;
 
 	int strength = _gameStateVars[k8bitVariableShield];
 
@@ -1873,6 +2058,9 @@ void CastleEngine::drawEnergyMeter(Graphics::Surface *surface, Common::Point ori
 			barFrameOrigin += Common::Point(0, 6 + extraYOffset);
 		else if (isCPC())
 			barFrameOrigin += Common::Point(0, 6 + extraYOffset);
+		else if (isAmiga() || isAtariST())
+			// The shaft is 80 pixels wide and starts left of the discs
+			barFrameOrigin += Common::Point(-8, 6 + extraYOffset);
 
 		surface->copyRectToSurfaceWithKey((const Graphics::Surface)*_strenghtBarFrame, barFrameOrigin.x, barFrameOrigin.y, Common::Rect(0, 0, _strenghtBarFrame->w, _strenghtBarFrame->h), black);
 	}
@@ -1884,6 +2072,8 @@ void CastleEngine::drawEnergyMeter(Graphics::Surface *surface, Common::Point ori
 		return;
 
 	int weightWidth = _strenghtWeightsFrames[0]->w;
+	if (isSpectrum())
+		weightWidth = 4; // The disc only fills the half of its sprite the frame header masks in
 
 	// Weight discs overlap: step is smaller than sprite width (3 pixels in original ZX assembly).
 	// Each disc is drawn at pixel-level precision, converging from outside toward center.
@@ -1901,8 +2091,13 @@ void CastleEngine::drawEnergyMeter(Graphics::Surface *surface, Common::Point ori
 		rightWeightPos = 63;
 	} else if (isAmiga() || isAtariST()) {
 		weightStep = 3;
-		weightOffset = 10;
-		rightWeightPos = 62;
+		weightOffset = 8;
+		rightWeightPos = 64;
+	} else if (_renderMode == Common::kRenderCGA) {
+		// The CGA discs are 4 pixels wide instead of 8
+		weightStep = 3;
+		weightOffset = 9;
+		rightWeightPos = 67;
 	} else { // DOS
 		weightStep = 3;
 		weightOffset = 10;
@@ -1918,18 +2113,12 @@ void CastleEngine::drawEnergyMeter(Graphics::Surface *surface, Common::Point ori
 
 	if (frameIdx != 0) {
 		frameIdx = 4 - frameIdx;
-		if (isSpectrum())
-			surface->copyRectToSurface((const Graphics::Surface)*_strenghtWeightsFrames[frameIdx], weightPoint.x, weightPoint.y, Common::Rect(0, 0, weightWidth, _strenghtWeightsFrames[frameIdx]->h));
-		else
-			surface->copyRectToSurfaceWithKey((const Graphics::Surface)*_strenghtWeightsFrames[frameIdx], weightPoint.x, weightPoint.y, Common::Rect(0, 0, weightWidth, _strenghtWeightsFrames[frameIdx]->h), back);
+		drawStrengthWeight(surface, frameIdx, weightPoint, weightWidth, back);
 		weightPoint += Common::Point(weightStep, 0);
 	}
 
 	for (int i = 0; i < strength / 4; i++) {
-		if (isSpectrum())
-			surface->copyRectToSurface((const Graphics::Surface)*_strenghtWeightsFrames[0], weightPoint.x, weightPoint.y, Common::Rect(0, 0, weightWidth, _strenghtWeightsFrames[0]->h));
-		else
-			surface->copyRectToSurfaceWithKey((const Graphics::Surface)*_strenghtWeightsFrames[0], weightPoint.x, weightPoint.y, Common::Rect(0, 0, weightWidth, _strenghtWeightsFrames[0]->h), back);
+		drawStrengthWeight(surface, 0, weightPoint, weightWidth, back);
 		weightPoint += Common::Point(weightStep, 0);
 	}
 
@@ -1943,19 +2132,13 @@ void CastleEngine::drawEnergyMeter(Graphics::Surface *surface, Common::Point ori
 	weightPoint = Common::Point(origin.x + rightWeightPos - (totalRight - 1) * weightStep, weightY);
 
 	for (int i = 0; i < numFullRight; i++) {
-		if (isSpectrum())
-			surface->copyRectToSurface((const Graphics::Surface)*_strenghtWeightsFrames[0], weightPoint.x, weightPoint.y, Common::Rect(0, 0, weightWidth, _strenghtWeightsFrames[0]->h));
-		else
-			surface->copyRectToSurfaceWithKey((const Graphics::Surface)*_strenghtWeightsFrames[0], weightPoint.x, weightPoint.y, Common::Rect(0, 0, weightWidth, _strenghtWeightsFrames[0]->h), back);
+		drawStrengthWeight(surface, 0, weightPoint, weightWidth, back);
 		weightPoint += Common::Point(weightStep, 0);
 	}
 
 	if (hasPartial) {
 		frameIdx = 4 - (strength % 4);
-		if (isSpectrum())
-			surface->copyRectToSurface((const Graphics::Surface)*_strenghtWeightsFrames[frameIdx], weightPoint.x, weightPoint.y, Common::Rect(0, 0, weightWidth, _strenghtWeightsFrames[frameIdx]->h));
-		else
-			surface->copyRectToSurfaceWithKey((const Graphics::Surface)*_strenghtWeightsFrames[frameIdx], weightPoint.x, weightPoint.y, Common::Rect(0, 0, weightWidth, _strenghtWeightsFrames[frameIdx]->h), back);
+		drawStrengthWeight(surface, frameIdx, weightPoint, weightWidth, back);
 	}
 }
 
@@ -1967,6 +2150,12 @@ void CastleEngine::checkSensors() {
 		return;
 
 	_lastTick = _ticks;
+
+	if (isC64()) {
+		// The IRQ at $73a1 supplies the ghost tone while a live spirit is
+		// present. Ordinary effects take priority over this repeating cue.
+		updateCastleC64GhostSound(_sound, _gameStateControl == kFreescapeGameStatePlaying && !_disableSensors && ghostInArea());
+	}
 
 	if (_sensors.empty()) {
 		_gfx->_shakeOffset = Common::Point();
@@ -1989,8 +2178,9 @@ void CastleEngine::checkSensors() {
 		_mixer->playStream(Audio::Mixer::kSFXSoundType, &_soundFxGhostHandle, speaker, -1, Audio::Mixer::kMaxChannelVolume, 0, DisposeAfterUse::YES);
 	}*/
 
-	// This is the frequency to shake the screen
-	if (_ticks % 5 == 0) {
+	// C64 cycles its viewport colours before rendering in drawC64Background.
+	// The other platforms use the generic attack flash/shake path.
+	if (!isC64() && _ticks % 5 == 0) {
 		if (_underFireFrames <= 0)
 			_underFireFrames = 1;
 	}
@@ -2062,18 +2252,21 @@ void CastleEngine::updateTimeVariables() {
 void CastleEngine::borderScreen() {
 	if (isAmiga() && isDemo())
 		return; // Skip character selection
-	if (isAtariST()) {
+	// The Crypt has no intro of its own, so it drops through to the plain
+	// configuration menu as it does on DOS
+	if (isAtariST() && !isCastleMaster2()) {
 		playAtariIntro();
 		return;
 	}
-	if (isAmiga()) {
+	if (isAmiga() && !isCastleMaster2()) {
 		if (playAmigaIntro())
 			return;
 		selectCharacterScreen();
 		return;
 	}
 
-	if (isSpectrum() || isCPC() || isC64())
+	// CM2 has no character selection, so it uses the plain configuration menu
+	if (isSpectrum() || isCPC() || isC64() || isCastleMaster2())
 		FreescapeEngine::borderScreen();
 	else {
 		uint32 color = _gfx->_texturePixelFormat.ARGBToColor(0x00, 0x00, 0x00, 0x00);
@@ -2428,6 +2621,16 @@ Common::Error CastleEngine::saveGameStreamExtended(Common::WriteStream *stream, 
 }
 
 Common::Error CastleEngine::loadGameStreamExtended(Common::SeekableReadStream *stream) {
+	if (isC64()) {
+		_c64LiftingGateStartTicks = -1;
+		_droppingGateStartTicks = -1;
+		_c64SpiritAttackStartTicks = -1;
+		resetC64Lightning();
+		stopAllSounds();
+		stopAllSounds(Sound::kTypeMovement);
+		_syncSound = false;
+	}
+
 	_keysCollected.clear();
 	int numberKeys = stream->readUint32LE();
 	for (int i = 0; i < numberKeys; i++) {
@@ -2452,6 +2655,10 @@ Common::Error CastleEngine::loadGameStreamExtended(Common::SeekableReadStream *s
 
 
 void CastleEngine::drawBackground() {
+	if (isC64()) {
+		drawC64Background();
+		return;
+	}
 	clearBackground();
 	_gfx->drawBackground(_currentArea->_skyColor);
 
@@ -2484,9 +2691,13 @@ void CastleEngine::updateThunder() {
 		if (_thunderFrameDuration == 5)
 			_gfx->clear(255, 255, 255);
 
-		if (_thunderFrameDuration == 0)
-			if (isSpectrum() || isCPC() || isDOS())
+		if (_thunderFrameDuration == 0) {
+			// The Amiga and Atari ST end the strike with sound 7
+			if (isAmiga() || isAtariST())
+				playSound(7, false);
+			else if (isSpectrum() || isCPC() || isDOS())
 				playSound(8, false);
+		}
 		return;
 	}
 
@@ -2494,7 +2705,7 @@ void CastleEngine::updateThunder() {
 		//debug("Thunder ticks: %d", _thunderTicks);
 		_thunderTicks--;
 		if (_thunderTicks <= 0) {
-			if (isDOS())
+			if (isDOS() || isAmiga() || isAtariST())
 				_thunderFrameIndex = int(_rnd->getRandomNumber(_thunderTextures.size() - 1));
 			_thunderFrameDuration = 10;
 			_thunderOffset = Math::Vector3d();

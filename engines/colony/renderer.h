@@ -35,6 +35,10 @@
 
 namespace Colony {
 
+// CALCROBO.C projects both axes with (coordinate << 8) / depth.
+const float kProjectionFocalLength = 256.0f;
+const float kProjectionNearClip = 1.0f;
+
 class Renderer {
 public:
 	virtual ~Renderer() {}
@@ -70,7 +74,15 @@ public:
 	virtual void setMacColors(uint32 fg, uint32 bg) {}
 	virtual void setDepthState(bool testEnabled, bool writeEnabled) {}
 	virtual void setDepthRange(float nearVal, float farVal) {}
+	// features.c clipped each wall feature to its own wall (ClipRect(&rClip)).
+	virtual void setFeatureClipX(int left, int right) {}
+	virtual void clearFeatureClipX() {}
+	virtual void setSquarePixelViewport(bool enable) = 0;
+	virtual void setCanvasSize(int width, int height) = 0;
 	virtual void computeScreenViewport() = 0;
+
+	// Window-pixel rect the logical canvas is currently drawn into.
+	const Common::Rect &screenViewport() const { return _screenViewport; }
 
 	// Overlay a RGBA software surface onto the GL framebuffer (for Mac menu bar).
 	virtual void drawSurface(const Graphics::Surface *surf, int x, int y) {}
@@ -80,7 +92,20 @@ public:
 	// Convenience color accessors
 	uint32 white() const { return 255; }
 	uint32 black() const { return 0; }
+
+protected:
+	Common::Rect _screenViewport;
 };
+
+// Window pixels (what the event manager delivers) to logical canvas coords and
+// back, through screenViewport(). Scaling by the plain window/canvas ratio
+// instead lands every hit test half a black bar off. Points inside the bars
+// clamp to the nearest canvas edge.
+Common::Point windowToCanvas(const Common::Rect &viewport, const Common::Point &p, int canvasW, int canvasH);
+Common::Point canvasToWindow(const Common::Rect &viewport, const Common::Point &p, int canvasW, int canvasH);
+
+Common::Rect computeScreenViewport(OSystem *system, int width, int height, bool squarePixels);
+Common::Point computeMacCanvasSize(int screenWidth, int screenHeight, bool widescreen);
 
 // Factory function (follows Freescape pattern: picks best available renderer)
 Renderer *createRenderer(OSystem *system, int width, int height);

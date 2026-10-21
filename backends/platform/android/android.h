@@ -24,7 +24,6 @@
 
 #include <android/log.h>
 
-#include "backends/platform/android/portdefs.h"
 #include "common/fs.h"
 #include "common/archive.h"
 #include "common/mutex.h"
@@ -272,7 +271,7 @@ public:
 	bool isRunningInMainThread() { return pthread_self() == _main_thread; }
 #endif
 
-	virtual const char * const *buildHelpDialogData() override;
+	const char * const *buildHelpDialogData() override;
 };
 
 #endif

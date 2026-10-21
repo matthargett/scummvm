@@ -94,16 +94,16 @@ void GridMapPuzzle::readData(Common::SeekableReadStream &stream) {
 	_pickupSound.readNormal(stream);
 	_placeSound.readNormal(stream);
 
-	_winScene.readData(stream);
+	_solveScene._sceneChange.readData(stream);
 	stream.skip(2);
-	_winFlag.label = stream.readSint16LE();
-	_winFlag.flag  = stream.readByte();
-	_winSound.readNormal(stream);
+	_solveScene._flag.label = stream.readSint16LE();
+	_solveScene._flag.flag  = stream.readByte();
+	_solveSound.readNormal(stream);
 
-	_cancelScene.readData(stream);
+	_exitScene._sceneChange.readData(stream);
 	stream.skip(2);
-	_cancelFlag.label = stream.readSint16LE();
-	_cancelFlag.flag  = stream.readByte();
+	_exitScene._flag.label = stream.readSint16LE();
+	_exitScene._flag.flag  = stream.readByte();
 
 	readRect(stream, _exitHotspot);
 	stream.skip(18); // trailing cursor type + unused fields
@@ -201,6 +201,7 @@ void GridMapPuzzle::execute() {
 	case kBegin:
 		init();
 		registerGraphics();
+		_heldObject.registerGraphics();
 		_state = kRun;
 		// fall through
 
@@ -209,17 +210,16 @@ void GridMapPuzzle::execute() {
 		case kPlaying:
 			break;
 		case kPlayWinSound:
-			if (_winSound.name != "NO SOUND") {
-				g_nancy->_sound->loadSound(_winSound);
-				g_nancy->_sound->playSound(_winSound);
+			if (hasSolveSound()) {
+				playSolveSound();
 				_subState = kWaitWinSound;
 			} else {
 				_subState = kExitToWin;
 			}
 			break;
 		case kWaitWinSound:
-			if (!g_nancy->_sound->isSoundPlaying(_winSound)) {
-				g_nancy->_sound->stopSound(_winSound);
+			if (!isSolveSoundPlaying()) {
+				g_nancy->_sound->stopSound(_solveSound);
 				_subState = kExitToWin;
 			}
 			break;
@@ -231,22 +231,18 @@ void GridMapPuzzle::execute() {
 		break;
 
 	case kActionTrigger:
+		// Restore the cursor in case the player left while holding a glyph.
+		g_nancy->_cursor->showCursor(true);
 		g_nancy->_sound->stopSound(_pickupSound);
 		g_nancy->_sound->stopSound(_placeSound);
-		g_nancy->_sound->stopSound(_winSound);
+		g_nancy->_sound->stopSound(_solveSound);
 		if (_subState == kExitToWin) {
 			GridMapPuzzleData *gmd = (GridMapPuzzleData *)NancySceneState.getPuzzleData(GridMapPuzzleData::getTag());
 			if (gmd)
 				gmd->itemState.clear();
-			if (_winFlag.label != -1)
-				NancySceneState.setEventFlag(_winFlag);
-			if (_winScene.sceneID != kNoScene)
-				NancySceneState.changeScene(_winScene);
+			_solveScene.execute();
 		} else {
-			if (_cancelFlag.label != -1)
-				NancySceneState.setEventFlag(_cancelFlag);
-			if (_cancelScene.sceneID != kNoScene)
-				NancySceneState.changeScene(_cancelScene);
+			_exitScene.execute();
 		}
 		finishExecution();
 		break;
@@ -254,23 +250,48 @@ void GridMapPuzzle::execute() {
 }
 
 Common::Rect GridMapPuzzle::mapCellRect(int row, int col) const {
-	// Stride uses the raw src-rect dimensions (right - left, before readRect's
-	// inclusive→exclusive +1), to match the original's cell layout.
-	int x = (int)_mapOriginX + col * ((int)_mapSpacingX + _mapCellW - 1);
-	int y = (int)_mapOriginY + row * ((int)_mapSpacingY + _mapCellH - 1);
+	// Sprite destination. Stride uses the raw src-rect dimensions (right - left,
+	// before readRect's inclusive→exclusive +1). Blits read the rect's top-left.
+	int strideX = (int)_mapSpacingX + _mapCellW - 1;
+	int strideY = (int)_mapSpacingY + _mapCellH - 1;
+	int x = (int)_mapOriginX + col * strideX;
+	int y = (int)_mapOriginY + row * strideY;
 	return Common::Rect(x, y, x + _mapCellW, y + _mapCellH);
 }
 
 Common::Rect GridMapPuzzle::itemsCellRect(int row, int col) const {
-	int x = (int)_itemsOriginX + col * ((int)_itemsSpacingX + _itemsCellW - 1);
-	int y = (int)_itemsOriginY + row * ((int)_itemsSpacingY + _itemsCellH - 1);
+	int strideX = (int)_itemsSpacingX + _itemsCellW - 1;
+	int strideY = (int)_itemsSpacingY + _itemsCellH - 1;
+	int x = (int)_itemsOriginX + col * strideX;
+	int y = (int)_itemsOriginY + row * strideY;
 	return Common::Rect(x, y, x + _itemsCellW, y + _itemsCellH);
+}
+
+Common::Rect GridMapPuzzle::mapCellHitRect(int row, int col) const {
+	// Hit area = sprite rect grown by half the spacing on each side. Neighboring
+	// cells then meet with no gaps, so the whole grid reads as one hand-cursor
+	// region and every point maps to its nearest cell.
+	Common::Rect r = mapCellRect(row, col);
+	r.left   -= (int)_mapSpacingX / 2;
+	r.right  += (int)_mapSpacingX / 2;
+	r.top    -= (int)_mapSpacingY / 2;
+	r.bottom += (int)_mapSpacingY / 2;
+	return r;
+}
+
+Common::Rect GridMapPuzzle::itemsCellHitRect(int row, int col) const {
+	Common::Rect r = itemsCellRect(row, col);
+	r.left   -= (int)_itemsSpacingX / 2;
+	r.right  += (int)_itemsSpacingX / 2;
+	r.top    -= (int)_itemsSpacingY / 2;
+	r.bottom += (int)_itemsSpacingY / 2;
+	return r;
 }
 
 bool GridMapPuzzle::hitTestMap(const Common::Point &p, int &outRow, int &outCol) const {
 	for (int r = 0; r < (int)_mapRows; ++r) {
 		for (int c = 0; c < (int)_mapCols; ++c) {
-			if (mapCellRect(r, c).contains(p)) {
+			if (mapCellHitRect(r, c).contains(p)) {
 				outRow = r;
 				outCol = c;
 				return true;
@@ -283,7 +304,7 @@ bool GridMapPuzzle::hitTestMap(const Common::Point &p, int &outRow, int &outCol)
 bool GridMapPuzzle::hitTestItems(const Common::Point &p, int &outRow, int &outCol) const {
 	for (int r = 0; r < (int)_itemsRows; ++r) {
 		for (int c = 0; c < (int)_itemsCols; ++c) {
-			if (itemsCellRect(r, c).contains(p)) {
+			if (itemsCellHitRect(r, c).contains(p)) {
 				outRow = r;
 				outCol = c;
 				return true;
@@ -309,18 +330,6 @@ int GridMapPuzzle::findItemInItems(int row, int col) const {
 	return -1;
 }
 
-bool GridMapPuzzle::isValidMapSlot(int row, int col) const {
-	// A map cell is a real placement slot iff at least one solution places
-	// some item there. Empty map cells outside any solution reject drops.
-	for (int s = 0; s < (int)_numSolutions; ++s) {
-		for (int i = 0; i < (int)_numItems; ++i) {
-			if (_solutionRows[s][i] == (int16)row && _solutionCols[s][i] == (int16)col)
-				return true;
-		}
-	}
-	return false;
-}
-
 Common::Rect GridMapPuzzle::resultsCellRect(int row, int col) const {
 	int x = (int)_resultsOriginX + col * ((int)_resultsSpacingX + _resultsCellW - 1);
 	int y = (int)_resultsOriginY + row * ((int)_resultsSpacingY + _resultsCellH - 1);
@@ -334,11 +343,7 @@ void GridMapPuzzle::handleInput(NancyInput &input) {
 	Common::Rect vpScreen = NancySceneState.getViewport().getScreenPosition();
 	Common::Point mouseVP = input.mousePos - Common::Point(vpScreen.left, vpScreen.top);
 
-	if (_heldItem != -1 && _heldDrawPos != mouseVP) {
-		_heldDrawPos = mouseVP;
-		_skipHeldDraw = false;
-		redraw();
-	}
+	_heldObject.handleInput(input);
 
 	int row = 0, col = 0;
 	bool hitMap   = hitTestMap(mouseVP, row, col);
@@ -347,39 +352,34 @@ void GridMapPuzzle::handleInput(NancyInput &input) {
 	if (!hitMap)
 		hitItems = hitTestItems(mouseVP, iRow, iCol);
 
+	// A held glyph is drawn following the cursor, so hide the hardware cursor
+	// while carrying one — just the glyph shows, no hand. When empty-handed,
+	// both grids show the grab-hand, the exit hotspot uses the puzzle-exit
+	// cursor, and everything outside the grids (the letter strips, the gap
+	// between the grids) keeps the idle eyeglass.
+	g_nancy->_cursor->showCursor(_heldItem == -1);
+
 	if (!hitMap && !hitItems) {
-		if (!_exitHotspot.isEmpty() && _exitHotspot.contains(mouseVP)) {
-			g_nancy->_cursor->setCursorType(g_nancy->_cursor->_puzzleExitCursor);
+		if (hoverExitHotspot(input)) {
 			if (input.input & NancyInput::kLeftMouseButtonUp)
 				_subState = kExitToCancel;
 		} else {
-			g_nancy->_cursor->setCursorType(_heldItem != -1 ? CursorManager::kDragHand
-			                                                : CursorManager::kNormal);
+			g_nancy->_cursor->setCursorType(CursorManager::kNormal);
 		}
 		return;
 	}
 
-	g_nancy->_cursor->setCursorType(_heldItem != -1 ? CursorManager::kDragHand
-	                                                : CursorManager::kNormal);
+	if (_heldItem == -1)
+		g_nancy->_cursor->setCursorType(CursorManager::kDropHand);
 	if (!(input.input & NancyInput::kLeftMouseButtonUp))
 		return;
-
-	// Reset the held-draw suppression flag on every click; the swap branch
-	// below sets it back to true when appropriate.
-	_skipHeldDraw = false;
-
-	// Sync the held draw position to the click point. Mouse-move tracking
-	// only runs while something is held, so without this a pickup right
-	// after a plain drop would render the new held glyph at the previous
-	// drop's coordinates for one frame.
-	_heldDrawPos = mouseVP;
 
 	int existingItem = hitMap ? findItemInMap(row, col) : findItemInItems(iRow, iCol);
 
 	if (_heldItem == -1) {
 		if (existingItem == -1)
 			return;
-		_heldItem = existingItem;
+		holdItem(existingItem, input);
 		if (hitMap)
 			_items[_heldItem].inMap = false;
 		else
@@ -389,13 +389,10 @@ void GridMapPuzzle::handleInput(NancyInput &input) {
 			g_nancy->_sound->playSound(_pickupSound);
 		}
 	} else {
-		// Drop. Map cells only accept the held item if they are real
-		// placement slots (i.e. used by some solution); items cells always
-		// accept. An occupied cell sends its current occupant back to the
-		// cursor so the player can swap.
-		if (hitMap && !isValidMapSlot(row, col))
-			return;
-
+		// Drop. Any map or items cell accepts the held item; the wrong
+		// placement just decodes to the wrong letters in the results strip.
+		// An occupied cell sends its current occupant back to the cursor so
+		// the player can swap.
 		if (existingItem != -1) {
 			if (hitMap) {
 				_items[existingItem].inMap = false;
@@ -408,8 +405,7 @@ void GridMapPuzzle::handleInput(NancyInput &input) {
 				_items[_heldItem].itemsRow = (int16)iRow;
 				_items[_heldItem].itemsCol = (int16)iCol;
 			}
-			_heldItem = existingItem;
-			_skipHeldDraw = true;
+			holdItem(existingItem, input);
 			if (_pickupSound.name != "NO SOUND") {
 				g_nancy->_sound->loadSound(_pickupSound);
 				g_nancy->_sound->playSound(_pickupSound);
@@ -424,7 +420,7 @@ void GridMapPuzzle::handleInput(NancyInput &input) {
 				_items[_heldItem].itemsRow = (int16)iRow;
 				_items[_heldItem].itemsCol = (int16)iCol;
 			}
-			_heldItem = -1;
+			holdItem(-1, input);
 			if (_placeSound.name != "NO SOUND") {
 				g_nancy->_sound->loadSound(_placeSound);
 				g_nancy->_sound->playSound(_placeSound);
@@ -457,6 +453,24 @@ void GridMapPuzzle::checkSolved() {
 			_subState = kPlayWinSound;
 			return;
 		}
+	}
+}
+
+// Puts an item on the cursor, or takes the held one off it for an item of -1. The
+// glyph that rides the cursor is the small map sprite, not the large items-grid one.
+void GridMapPuzzle::holdItem(int item, NancyInput &input) {
+	_heldItem = item;
+
+	if (_heldItem >= 0 && _heldItem < (int)_numItems &&
+			_boardImage.getBounds().contains(_mapItemSrcRects[_heldItem])) {
+		_heldObject._drawSurface.create(_boardImage, _mapItemSrcRects[_heldItem]);
+		_heldObject.setTransparent(true);
+		_heldObject.setVisible(true);
+		_heldObject.pickUp();
+		_heldObject.handleInput(input);
+	} else {
+		_heldObject.setVisible(false);
+		_heldObject.putDown();
 	}
 }
 
@@ -509,17 +523,6 @@ void GridMapPuzzle::redraw() {
 		if (ri >= 0 && ri < kMaxResultRects && !_resultSrcRects[ri].isEmpty()) {
 			Common::Rect dst = resultsCellRect(row, col + 1);
 			_drawSurface.blitFrom(_boardImage, _resultSrcRects[ri], Common::Point(dst.left, dst.top));
-		}
-	}
-
-	if (_heldItem >= 0 && _heldItem < (int)_numItems && !_skipHeldDraw) {
-		const Common::Rect &src = _itemsItemSrcRects[_heldItem].isEmpty()
-		                          ? _mapItemSrcRects[_heldItem]
-		                          : _itemsItemSrcRects[_heldItem];
-		if (!src.isEmpty()) {
-			int x = _heldDrawPos.x - src.width()  / 2;
-			int y = _heldDrawPos.y - src.height() / 2;
-			_drawSurface.blitFrom(_cursorImage, src, Common::Point(x, y));
 		}
 	}
 

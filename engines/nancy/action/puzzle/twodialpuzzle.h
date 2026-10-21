@@ -22,16 +22,16 @@
 #ifndef NANCY_ACTION_TWODIALPUZZLE_H
 #define NANCY_ACTION_TWODIALPUZZLE_H
 
-#include "engines/nancy/action/actionrecord.h"
+#include "engines/nancy/action/puzzlerecord.h"
 
 namespace Nancy {
 namespace Action {
 
 // Puzzle with two circular dials overlaid on top of each other. Each dial has one correct
 // position, and can only be rotated in one direction.
-class TwoDialPuzzle : public RenderActionRecord {
+class TwoDialPuzzle : public PuzzleRecord {
 public:
-	TwoDialPuzzle() : RenderActionRecord(7) {}
+	TwoDialPuzzle() : PuzzleRecord(7) {}
 	virtual ~TwoDialPuzzle() {}
 
 	void init() override;
@@ -45,7 +45,8 @@ public:
 protected:
 	Common::String getRecordTypeName() const override { return "TwoDialPuzzle"; }
 
-	Common::Path _imageName;
+	void runPreNancy12();
+	void runNancy12();
 
 	bool _isClockwise[2] = { false, false };
 	uint16 _startPositions[2] = { 0, 0 };
@@ -66,20 +67,22 @@ protected:
 	};
 	Common::Array<DialSolution> _solutions;
 
+	// Nancy 12+ splits the run phase into three steps: the dials must rest on a
+	// matching solution long enough for it to count, then the solve sound plays
+	// out before the record finishes. Turning a dial also drops back into
+	// kWaitForSounds, which suspends the check until the dial stops rattling.
+	enum SolveState { kCheckSolutions, kPlaySolveSound, kWaitForSounds };
+	SolveState _solveState = kCheckSolutions;
+	int16 _lastMatchedSolution = -1;
+	// The time by which the dials must still rest on _lastMatchedSolution
+	uint32 _dwellEndTime = 0;
+
 	SoundDescription _rotateSounds[2];
-
-	SceneChangeWithFlag _solveScene;
-	uint16 _solveSoundDelay = 0;
-	SoundDescription _solveSound;
-
-	SceneChangeWithFlag _exitScene;
-	Common::Rect _exitHotspot;
-
-	Graphics::ManagedSurface _image;
 
 	int16 _currentPositions[2] = { 0, 0 };
 
 	bool _isSolved = false;
+	// The time at which the solve sound starts, once the puzzle has been solved
 	uint32 _solveSoundDelayTime = 0;
 };
 

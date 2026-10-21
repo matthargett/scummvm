@@ -60,11 +60,14 @@ protected:
 	void handleGameUpdateScreen(const byte *src, int srcPitch, int width, int height) override;
 
 private:
+	void markLogicalEndOfStream();
 	void ra1HandleGost(int32 subSize, Common::SeekableReadStream &b);
 	void ra1HandleDeltaPalette(int32 subSize, Common::SeekableReadStream &b);
 	void ra1HandleFade(int32 subSize, Common::SeekableReadStream &b);
 	SmushFont *ra1GetFont(int font);
 	void ra1HandleText(int32 subSize, Common::SeekableReadStream &b);
+	void ra1HandleTextSegaCD(int32 subSize, Common::SeekableReadStream &b);
+	void ra1LoadSegaCDFont();
 	void ra1HandleFrameAudioChunk(uint32 subType, int32 subSize, Common::SeekableReadStream &b);
 	void ra1FeedAudio(uint32 subType, uint8 *srcBuf, int groupId, int volume, int pan, int16 flags);
 	void ra1HandleGameFrameChunk(int32 subSize, Common::SeekableReadStream &b, bool fastForwarding);
@@ -74,12 +77,15 @@ private:
 		Common::SeekableReadStream &b, bool fastForwarding);
 	void ra1InitAudioTrackSizes();
 
+	byte *_segaCDFont;
+	int32 _segaCDFontSize;
+
 	// Clean frame buffer used as the next delta source.
 	byte *_ra1CleanFrame;
 	int32 _ra1CleanFrameSize;
 	bool _ra1HasCleanFrame;
 
-	// Interactive movies present a 312x192 viewport inside a black frame.
+	// Movies present a 312x192 viewport inside a black frame.
 	byte *_ra1PresentationBuffer;
 	int32 _ra1PresentationBufferSize;
 

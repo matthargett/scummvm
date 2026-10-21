@@ -31,7 +31,8 @@
 
 #include "engines/nancy/ui/textbox.h"
 #include "engines/nancy/ui/scrollbar.h"
-#include "engines/nancy/ui/scrolltextbox.h"
+#include "engines/nancy/ui/taskbar/scrolltextbox.h"
+#include "engines/nancy/ui/ndui/manager.h"
 
 namespace Nancy {
 namespace UI {
@@ -55,6 +56,9 @@ void Textbox::init() {
 	// Nancy 10, SCTB in Nancy 11). Delegate to a ScrollTextBox; the code below
 	// is the Nancy 1-9 bottom-right flat box.
 	if (g_nancy->getGameType() >= kGameTypeNancy10) {
+		// Nancy15+ rebuilds the text box whenever the player character changes,
+		// since its description comes out of that character's own data files
+		delete _scrollTextBox;
 		_scrollTextBox = new ScrollTextBox();
 		_scrollTextBox->init();
 		return;
@@ -119,9 +123,13 @@ void Textbox::updateGraphics() {
 	RenderObject::updateGraphics();
 }
 
-void Textbox::setFullMode(bool open, uint32 timeoutMs) {
-	// No-op: the Nancy 10+ overlay shows itself when it holds text, and the
-	// Nancy 1-9 box has no full mode. Kept for the FrameTextBox AR's API.
+bool Textbox::coversTaskbar() const {
+	return _scrollTextBox ? _scrollTextBox->coversTaskbar() : false;
+}
+
+void Textbox::setFullMode(bool open) {
+	if (_scrollTextBox)
+		_scrollTextBox->setFullMode(open);
 }
 
 void Textbox::handleInput(NancyInput &input) {
@@ -133,8 +141,18 @@ void Textbox::handleInput(NancyInput &input) {
 	if (!isVisible())
 		return;
 
-	if (_scrollbar)
+	if (_scrollbar) {
+		Common::Rect wheelArea = _screenPosition;
+		wheelArea.extend(_scrollbar->getTrackRect());
+
+		float scrollPos = _scrollbar->getPos();
+		if (scrollWithMouseWheel(input, wheelArea, scrollPos,
+				wheelScrollStep(_screenPosition.height(), getInnerHeight()))) {
+			_scrollbar->setPosition(scrollPos);
+		}
+
 		_scrollbar->handleInput(input);
+	}
 
 	bool hasHighlight = false;
 	for (uint i = 0; i < _hotspots.size(); ++i) {
@@ -196,6 +214,12 @@ void Textbox::drawTextbox() {
 }
 
 void Textbox::clear() {
+	// Nancy16 shows its captions in the UI instead
+	if (NDUI::Manager *ndui = NancySceneState.getNDUI()) {
+		ndui->setCaption(Common::String());
+		return;
+	}
+
 	if (_scrollTextBox) {
 		_scrollTextBox->clear();
 		return;
@@ -213,6 +237,13 @@ void Textbox::clear() {
 	}
 }
 
+bool Textbox::hasBeenDrawn() const {
+	if (_scrollTextBox)
+		return !_scrollTextBox->needsRedraw();
+
+	return Misc::HypertextParser::hasBeenDrawn();
+}
+
 void Textbox::addTextLine(const Common::String &text, uint32 autoClearTime) {
 	// WORKAROUND: Don't draw debug strings in the textbox. Refer to bug
 	// #16745 for a case in Nancy9, scene 2579 (after making a sandwich).
@@ -221,6 +252,11 @@ void Textbox::addTextLine(const Common::String &text, uint32 autoClearTime) {
 	Common::String debugString = Common::String::format("%d *** ", NancySceneState.getSceneInfo().sceneID);
 	if (text.contains(debugString))
 		return;
+
+	if (NDUI::Manager *ndui = NancySceneState.getNDUI()) {
+		ndui->setCaption(text);
+		return;
+	}
 
 	if (_scrollTextBox) {
 		_scrollTextBox->addTextLine(text, autoClearTime);

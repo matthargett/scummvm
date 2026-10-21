@@ -47,15 +47,9 @@ static const char *morseCodeTable[] = {
 };
 
 void HamRadioPuzzle::init() {
-	Common::Rect screenBounds = NancySceneState.getViewport().getBounds();
-	_drawSurface.create(screenBounds.width(), screenBounds.height(), g_nancy->_graphics->getInputPixelFormat());
-	_drawSurface.clear(g_nancy->_graphics->getTransColor());
-	setTransparent(true);
-	setVisible(true);
-	moveTo(screenBounds);
+	initViewportSurface();
 
-	g_nancy->_resource->loadImage(_imageName, _image);
-	_image.setTransparentColor(_drawSurface.getTransparentColor());
+	loadImage();
 }
 
 void HamRadioPuzzle::updateGraphics() {
@@ -174,11 +168,7 @@ void HamRadioPuzzle::CCSound::loadAndPlay() {
 	g_nancy->_sound->loadSound(sound);
 	g_nancy->_sound->playSound(sound);
 
-	if (text.size() && ConfMan.getBool("subtitles")) {
-		NancySceneState.getTextbox().clear();
-		NancySceneState.getTextbox().addTextLine(text);
-		NancySceneState.getTextbox().drawTextbox();
-	}
+	showSubtitle(text, true);
 }
 
 void HamRadioPuzzle::Frequency::readData(Common::SeekableReadStream &stream, uint16 numDigits) {
@@ -235,7 +225,7 @@ void HamRadioPuzzle::readData(Common::SeekableReadStream &stream) {
 
 	_solveScene.readData(stream);
 	_solveSoundDelay = stream.readUint16LE();
-	_solveSound.readData(stream);
+	_solveCCSound.readData(stream);
 
 	readRect(stream, _exitButtonDest);
 	readRect(stream, _exitButtonSrc);
@@ -260,6 +250,7 @@ void HamRadioPuzzle::execute() {
 	case kBegin :
 		init();
 		registerGraphics();
+		NancySceneState.setNoHeldItem();
 
 		g_nancy->_sound->loadSound(_digitRollSound);
 		setFrequency(_startFreq.frequency);
@@ -285,12 +276,7 @@ void HamRadioPuzzle::execute() {
 					_curMorseString.clear();
 					_badLetterSound.loadAndPlay();
 				} else {
-					if (ConfMan.getBool("subtitles")) {
-						NancySceneState.getTextbox().clear();
-						NancySceneState.getTextbox().addTextLine(_curMorseString);
-						NancySceneState.getTextbox().setOverrideFont(3); // Original engine pushes <f3> tag instead
-						NancySceneState.getTextbox().drawTextbox();
-					}
+					showSubtitle(_curMorseString, true, 3); // Original engine pushes <f3> tag instead
 				}
 
 				break;
@@ -364,7 +350,7 @@ void HamRadioPuzzle::execute() {
 							_solvedCodeword = true;
 							_curCharString.clear();
 
-							_solveSound.loadAndPlay(); // Sound delay is ignored
+							_solveCCSound.loadAndPlay(); // Sound delay is ignored
 						}
 					}
 				}

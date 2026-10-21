@@ -20,8 +20,12 @@
  */
 
 #include "audio/fmopl.h"
+#include "audio/mididrv.h"
+#include "common/config-manager.h"
 #include "common/file.h"
 #include "common/memstream.h"
+#include "common/textconsole.h"
+#include "mads/mads.h"
 #include "mads/core/sound_manager.h"
 
 namespace Audio {
@@ -30,37 +34,93 @@ class Mixer;
 
 namespace MADS {
 
-SoundManager::SoundManager(Audio::Mixer *mixer, bool &soundFlag) : _mixer(mixer), _soundFlag(soundFlag) {
-	_opl = OPL::Config::create();
-	_opl->init();
+const uint32 SoundManager::UPDATE_DELTA = 1000000 / 60;
+
+SoundManager::SoundManager(Audio::Mixer *mixer, bool &soundFlag,
+		bool supportsGeneralMidi) : _mixer(mixer), _soundFlag(soundFlag) {
+	_updateDeltaRemainder = 0;
+	_driverCallbackDelta = 0;
+	_midiDriver = nullptr;
+
+	MidiDriver::DeviceHandle dev = MidiDriver::detectDevice(MDT_PCSPK | MDT_ADLIB | MDT_MIDI | MDT_PREFER_MT32);
+	MusicType musicType = MidiDriver::getMusicType(dev);
+	if ((musicType == MT_GM || musicType == MT_GS) && ConfMan.getBool("native_mt32"))
+		musicType = MT_MT32;
+	switch (musicType) {
+	case MT_MT32:
+		_driverType = SOUND_MT32;
+		break;
+	case MT_GM:
+	case MT_GS:
+		_driverType = supportsGeneralMidi ? SOUND_GM : SOUND_ADLIB;
+		break;
+	case MT_PCSPK:
+		_driverType = SOUND_PCSPEAKER;
+		break;
+	default:
+		_driverType = SOUND_ADLIB;
+		break;
+	}
 }
 
 SoundManager::~SoundManager() {
-	if (_driver) {
+	if (_driver != nullptr) {
 		_driver->stop();
-		delete _driver;
+	}
+	if (_midiDriver != nullptr) {
+		_midiDriver->setTimerCallback(nullptr, nullptr);
+		_midiDriver->close();
 	}
 
-	delete _opl;
+	if (_driver != nullptr) {
+		delete _driver;
+		_driver = nullptr;
+	}
+	if (_midiDriver != nullptr) {
+		delete _midiDriver;
+		_midiDriver = nullptr;
+	}
 }
 
 void SoundManager::init(int sectionNumber) {
 	assert(sectionNumber > 0 && sectionNumber < 10);
 
-	if (_driver != nullptr)
-		delete _driver;
-
 	// Load the correct driver for the section
+	removeDriver();
 	loadDriver(sectionNumber);
+	if (!_driver) {
+		warning("No MADS sound driver is available for section %d",
+			sectionNumber);
+		return;
+	}
 
-	// Set volume for newly loaded driver
-	_driver->setVolume(_masterVolume);
+	// Wait for driver to be ready to start playback
+	// (i.e. wait for MT-32 SysExes)
+	while (!isReady()) {
+		g_engine->flushKeys();
+
+		if (g_engine->shouldQuit()) {
+			if (_midiDriver != nullptr)
+				_midiDriver->clearSysExQueue();
+			return;
+		}
+	}
+}
+
+bool SoundManager::isReady() {
+	if (_midiDriver == nullptr)
+		return true;
+
+	return _midiDriver->isReady();
+}
+
+bool SoundManager::isDriverActive() {
+	return _driver && _soundFlag && _driver->command(8, 0) != 0;
 }
 
 void SoundManager::closeDriver() {
 	if (_driver) {
 		command(0);
-		setEnabled(false);
 		stop();
 
 		removeDriver();
@@ -72,11 +132,6 @@ void SoundManager::removeDriver() {
 	_driver = nullptr;
 }
 
-void SoundManager::setEnabled(bool flag) {
-	_pollSoundEnabled = flag;
-	_soundPollFlag = false;
-}
-
 void SoundManager::pauseNewCommands() {
 	_newSoundsPaused = true;
 }
@@ -85,28 +140,28 @@ void SoundManager::startQueuedCommands() {
 	_newSoundsPaused = false;
 
 	while (!_queuedCommands.empty()) {
-		int commandId = _queuedCommands.pop();
-		command(commandId);
+		const QueuedCommand queuedCommand = _queuedCommands.pop();
+		command(queuedCommand._commandId, queuedCommand._param);
 	}
 }
 
-void SoundManager::setVolume(int volume) {
-	_masterVolume = volume;
-
-	if (_driver)
-		_driver->setVolume(volume);
+void SoundManager::syncSoundSettings() {
+	if (_midiDriver != nullptr)
+		_midiDriver->syncSoundSettings();
 }
 
 int SoundManager::command(int commandId, int param) {
 	if (_newSoundsPaused) {
-		if (_queuedCommands.size() < 8)
-			_queuedCommands.push(commandId);
+		if (_queuedCommands.size() < 8) {
+			QueuedCommand queuedCommand = { commandId, param };
+			_queuedCommands.push(queuedCommand);
+		}
 		return _queuedCommands.size() - 1;
 	} else if (_driver) {
 		// Note: I don't know any way to identify music commands versus sfx
 		// commands, so if sfx is mute, then so is music
 		if (_soundFlag)
-			_driver->command(commandId, param);
+			return _driver->command(commandId, param);
 	}
 
 	return 0;
@@ -117,15 +172,46 @@ void SoundManager::stop() {
 		_driver->stop();
 }
 
+void SoundManager::pause(bool pause) {
+	if (_driver != nullptr)
+		_driver->pause(pause);
+}
+
 void SoundManager::noise() {
 	if (_driver)
 		_driver->noise();
 }
 
+void SoundManager::onTimer() {
+	// The frequency of the callbacks is dependent on the underlying driver
+	// implementation and might not be 60Hz. Adjust to make sure poll() is called
+	// with the correct frequency.
+	/*
+	_updateDeltaRemainder += _driverCallbackDelta;
+	while (_updateDeltaRemainder >= UPDATE_DELTA) {
+		if (_driver)
+			_driver->poll();
+		_updateDeltaRemainder -= UPDATE_DELTA;
+	}
+	*/
+
+	uint32 serviceTicks = _hostTimer.advance(_driverCallbackDelta, 1000000);
+	while (serviceTicks--) {
+		// RSOUND export 4 is a return stub in every audited overlay.
+		if (_driver && _hostTimer.pollDue())
+			_driver->poll();
+	}
+}
+
+void SoundManager::timerCallback(void *data) {
+	SoundManager *soundManager = (SoundManager *)data;
+	soundManager->onTimer();
+}
+
 //====================================================================
 
-SoundDriver::SoundDriver(Audio::Mixer *mixer, OPL::OPL *opl, const Common::Path &filename,
-		int dataOffset, int dataSize) : _mixer(mixer), _opl(opl) {
+SoundDriver::SoundDriver(Audio::Mixer *mixer, const Common::Path &filename,
+		int dataOffset, int dataSize) : _mixer(mixer), _paused(false) {
 	// Open up the appropriate sound file
 	Common::File soundFile;
 	if (!soundFile.open(filename))
@@ -136,8 +222,14 @@ SoundDriver::SoundDriver(Audio::Mixer *mixer, OPL::OPL *opl, const Common::Path 
 	soundFile.read(&_soundData[0], dataSize);
 }
 
-SoundDriver::~SoundDriver() {
-	_opl->stop();
+void SoundDriver::pause(bool paused) {
+	if (_paused == paused)
+		return;
+
+	_paused = paused;
+
+	if (_paused)
+		stopAllNotes();
 }
 
 } // namespace MADS

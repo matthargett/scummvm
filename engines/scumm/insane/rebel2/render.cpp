@@ -44,11 +44,11 @@ int getRebel2IndicatorScale(int width, int height) {
 	return (width >= 640 || height >= 400) ? 2 : 1;
 }
 
-static bool isValidEmbeddedFrame(const InsaneRebel2::EmbeddedSanFrame &frame) {
+bool isValidEmbeddedFrame(const InsaneRebel2::EmbeddedSanFrame &frame) {
 	return frame.valid && frame.pixels && frame.width > 0 && frame.height > 0;
 }
 
-static int countEmbeddedFramePixels(const InsaneRebel2::EmbeddedSanFrame &frame) {
+int countEmbeddedFramePixels(const InsaneRebel2::EmbeddedSanFrame &frame) {
 	if (!isValidEmbeddedFrame(frame))
 		return 0;
 
@@ -72,7 +72,7 @@ bool parseRebel2TextOverlayFormat(const char *&str, NutRenderer *&curFont, int &
 	return fontId == -2;
 }
 
-static Common::String getRebel2VisibleTextPrefix(const char *text, int visibleChars) {
+Common::String getRebel2VisibleTextPrefix(const char *text, int visibleChars) {
 	Common::String out;
 	if (!text || visibleChars <= 0)
 		return out;
@@ -102,7 +102,7 @@ static Common::String getRebel2VisibleTextPrefix(const char *text, int visibleCh
 	return out;
 }
 
-static const char *getRebel2LevelEndFallbackString(int id) {
+const char *getRebel2LevelEndFallbackString(int id) {
 	switch (id) {
 	case 190:
 		return "^f02^c244Chapter Complete\n^f01^c244Password: %s";
@@ -172,7 +172,7 @@ void drawHandler8PovOverlayText(const Rebel2FontSet &fontSet, byte *renderBitmap
 	drawRebel2String(fontSet, str, strlen(str), renderBitmap, clipRect, x, y, pitch, color, flags);
 }
 
-static void blitEmbeddedFrameRegion(byte *renderBitmap, int pitch, int clipWidth, int clipHeight,
+void blitEmbeddedFrameRegion(byte *renderBitmap, int pitch, int clipWidth, int clipHeight,
 		const InsaneRebel2::EmbeddedSanFrame &frame, int destX, int destY,
 		int srcX, int srcY, int drawWidth, int drawHeight) {
 	if (!renderBitmap || !isValidEmbeddedFrame(frame) || drawWidth <= 0 || drawHeight <= 0)
@@ -204,7 +204,7 @@ static void blitEmbeddedFrameRegion(byte *renderBitmap, int pitch, int clipWidth
 	}
 }
 
-static bool readEmbeddedSanChunkHeader(Common::SeekableReadStream &stream, int64 containerEnd, const char *context,
+bool readEmbeddedSanChunkHeader(Common::SeekableReadStream &stream, int64 containerEnd, const char *context,
 		uint32 &tag, uint32 &chunkSize, int64 &dataEnd, int64 &nextChunkPos) {
 	const int64 headerPos = stream.pos();
 	if (headerPos < 0 || headerPos + 8 > containerEnd)
@@ -374,6 +374,17 @@ void InsaneRebel2::loadEmbeddedSan(int userId, byte *animData, int32 size, byte 
 					}
 
 					EmbeddedSanFrame &frame = _rebelEmbeddedHud[userId];
+					// Transparent background patches update the existing scene in place.
+					if (_rebelHandler == 25 && userId == 4 && codec == SMUSH_CODEC_RLE &&
+							isValidEmbeddedFrame(frame) && left >= 0 && top >= 0 &&
+							width > 0 && height > 0 && left + width <= frame.width &&
+							top + height <= frame.height && stream.pos() < subDataEnd) {
+						smushDecodeRLE(frame.pixels, animData + stream.pos(), left, top,
+							width, height, frame.width);
+						renderEmbeddedFrame(renderBitmap, frame, userId);
+						return;
+					}
+
 					frame.valid = false;
 
 					if (width > 0 && height > 0 && width <= 800 && height <= 480) {
@@ -1939,7 +1950,7 @@ void renderNutSpriteClipped(byte *dst, int pitch, int dstH,
 	}
 }
 
-static void renderNutSpriteScaledClipped(byte *dst, int pitch, int width, int height,
+void renderNutSpriteScaledClipped(byte *dst, int pitch, int width, int height,
 		int clipLeft, int clipTop, int clipRight, int clipBottom,
 		int x, int y, NutRenderer *nut, int spriteIdx, bool mirror, int scale, bool transparent231) {
 	if (!nut || spriteIdx < 0 || spriteIdx >= nut->getNumChars() || !dst)
@@ -2345,7 +2356,8 @@ void InsaneRebel2::updateGameplayTimedTick(int32 curFrame) {
 
 	if (_rebelHandler != 25 && _playerDamage > 0) {
 		_playerDamage--;
-		_playerShield = 255 - _playerDamage;
+		// Damage is uncapped, so an overshoot must not read back as shield.
+		_playerShield = (_playerDamage < 255) ? (int16)(255 - _playerDamage) : 0;
 	}
 }
 
@@ -2475,7 +2487,7 @@ void InsaneRebel2::procPostRendering(byte *renderBitmap, int32 codecparam, int32
 	// End the looping attack-run segment once the shield/reactor is destroyed.
 	if (_rebelShieldGateActive) {
 		// Level 13: the finale (continuation segment, flag 0x40) ends when the last armed
-		// group (the reactor) is depleted; the approach segment plays fully.
+		// group (the reactor) is depleted.
 		if (_rebelReactorMode && _rebelGaugeArmed && _rebelLastArmedSlot >= 0 &&
 		    (_player->_curVideoFlags & 0x40) != 0) {
 			const int slot = _rebelLastArmedSlot;
@@ -2485,6 +2497,15 @@ void InsaneRebel2::procPostRendering(byte *renderBitmap, int32 codecparam, int32
 		}
 		if (_rebelShieldDestroyed)
 			_vm->_smushVideoShouldFinish = true;
+
+		// The original level 13 switches at frame count - 10. The remaining
+		// nine frames overlap the cached LOAD bridge that precedes 13PLAY_B.
+		if (_rebelReactorMode && maxFrame >= 9 && curFrame == maxFrame - 9 &&
+				!static_cast<SmushPlayerRebel2 *>(_player)->isPlayingLoadBuffer() &&
+				!_vm->_smushVideoShouldFinish) {
+			// Use normal EOF handling so queued audio survives the handoff.
+			_player->_endOfFile = true;
+		}
 	}
 
 	const int hudScale = isHiRes() ? 2 : getRebel2IndicatorScale(width, height);
@@ -2536,7 +2557,7 @@ void InsaneRebel2::initDamageFlash() {
 		_damageRestorePaletteValid = true;
 	}
 
-	if (_damageFlashCounter == 0) {
+	if (_damageFlashCounter == 0 && _player) {
 		memcpy(_damageSavedPalette, _player->_pal, 0x300);
 	}
 	_damageFlashCounter = 5;
@@ -2686,7 +2707,8 @@ void InsaneRebel2::renderLevelEndStatsOverlay(byte *renderBitmap, int pitch, int
 	if (!titleFmt || !titleFmt[0])
 		titleFmt = getRebel2LevelEndFallbackString(190);
 
-	Common::String password = getChapterPassword(_levelEndStats.levelId, _difficulty);
+	const int passwordChapter = _release.getCompletionPasswordChapter(_levelEndStats.levelId);
+	Common::String password = getChapterPassword(passwordChapter, _difficulty);
 	Common::String titleText = Common::String::format(titleFmt, password.c_str());
 	int visibleChars = curFrame + 10 - titleStart;
 	if (visibleChars > 0xbe)
@@ -2795,6 +2817,7 @@ void InsaneRebel2::renderTextOverlay(byte *renderBitmap, int pitch, int width, i
 	}
 
 	const int textScale = isHiRes() ? 2 : 1;
+	const bool useCJK = _vm->_language == Common::JA_JPN;
 	int drawY = _textOverlayY * textScale;
 	int visCount = 0;
 
@@ -2813,11 +2836,13 @@ void InsaneRebel2::renderTextOverlay(byte *renderBitmap, int pitch, int width, i
 				if (parseRebel2TextOverlayFormat(s, mFont, mColor, fonts, ARRAYSIZE(fonts), defaultFont))
 					continue;
 				lineFont = mFont;
-				byte c = (byte)*s++;
+				uint charLen;
+				uint16 c = decodeRebel2Char(s, lineEnd - s, charLen, useCJK);
+				s += charLen;
 				if (c >= 'a' && c <= 'z')
 					c = c - 'a' + 'A';
-				if (mFont && c < mFont->getNumChars())
-					lineWidth += mFont->getCharWidth(c);
+				if (mFont && (c > 0xff || c < mFont->getNumChars()))
+					lineWidth += mFont->getCharWidth((byte)c);
 				lineVisCount++;
 			}
 		}
@@ -2831,14 +2856,16 @@ void InsaneRebel2::renderTextOverlay(byte *renderBitmap, int pitch, int width, i
 			while (s < lineEnd && (visCount + lineCharsDrawn) < displayLen) {
 				if (parseRebel2TextOverlayFormat(s, curFont, curColor, fonts, ARRAYSIZE(fonts), defaultFont))
 					continue;
-				byte c = (byte)*s++;
+				uint charLen;
+				uint16 c = decodeRebel2Char(s, lineEnd - s, charLen, useCJK);
+				s += charLen;
 				if (c >= 'a' && c <= 'z')
 					c = c - 'a' + 'A';
-				if (!curFont || c >= curFont->getNumChars()) {
+				if (!curFont || (c <= 0xff && c >= curFont->getNumChars())) {
 					lineCharsDrawn++;
 					continue;
 				}
-				int charW = curFont->getCharWidth(c);
+				int charW = curFont->getCharWidth((byte)c);
 				if (drawX >= 0 && drawY >= 0 && charW > 0) {
 					drawRebel2Char(curFont, renderBitmap, clipRect, drawX, drawY, pitch, curColor, c);
 				}
@@ -3040,10 +3067,7 @@ void InsaneRebel2::renderStatusBarSprites(byte *renderBitmap, int pitch, int wid
 			_viewX, statusBarY + _viewY, _smush_cockpitNut, 1);
 	}
 
-	int difficulty = _difficulty;
-	if (difficulty > 3)
-		difficulty = 3;
-	int difficultySprite = difficulty + 2;
+	int difficultySprite = MIN((int)_difficulty, 4) + 1;
 	if (numSprites > difficultySprite) {
 		renderNutSprite(renderBitmap, pitch, width, height,
 			_viewX, statusBarY + _viewY, _smush_cockpitNut, difficultySprite);
@@ -3194,7 +3218,7 @@ void InsaneRebel2::renderHandler7FlySprite(byte *renderBitmap, int pitch, int wi
 	}
 }
 
-static Common::Point getHandler7SpriteDrawPoint(const Common::Point &base, NutRenderer *nut, int spriteIndex) {
+Common::Point getHandler7SpriteDrawPoint(const Common::Point &base, NutRenderer *nut, int spriteIndex) {
 	Common::Point point = base;
 	if (nut && spriteIndex >= 0 && spriteIndex < nut->getNumChars()) {
 		point.x += nut->getCharXOffset(spriteIndex);
@@ -3492,9 +3516,12 @@ void InsaneRebel2::renderHandler25ShipPre(byte *renderBitmap, int pitch, int wid
 			int overlayDrawX = renderHiRes ? (nativeOverlayX - nativeViewX) * renderScale : nativeOverlayX;
 			int overlayDrawY = renderHiRes ? (nativeOverlayY - nativeViewY) * renderScale : nativeOverlayY;
 
-			renderNutSpriteScaledClipped(renderBitmap, pitch, width, renderHeight,
-				0, 0, width, renderHeight,
-				overlayDrawX, overlayDrawY, _grd005Sprite, overlayIdx, false, renderScale, false);
+			if (!drawRebel2Codec45Sprite(_grd005Sprite, renderBitmap, pitch, width, height,
+					Common::Rect(0, 0, width, renderHeight), overlayDrawX, overlayDrawY, overlayIdx, renderScale)) {
+				renderNutSpriteScaledClipped(renderBitmap, pitch, width, renderHeight,
+					0, 0, width, renderHeight,
+					overlayDrawX, overlayDrawY, _grd005Sprite, overlayIdx, false, renderScale, false);
+			}
 
 			debugC(DEBUG_INSANE, "Handler25 PRE: GRD005 at (%d,%d) nutOff(%d,%d) viewOff(%d,%d) size(%d,%d) mode=%d scale=%d",
 				overlayDrawX, overlayDrawY, overlayXOffset, overlayYOffset,
@@ -4171,7 +4198,7 @@ void InsaneRebel2::renderHandler8PovOverlay(byte *renderBitmap, int pitch, int w
 	if (_rebelHandler != 8 || !renderBitmap || !_smush_talkfontNut || !_smush_povfontNut)
 		return;
 
-	Rebel2FontSet fontSet;
+	Rebel2FontSet fontSet(_vm->_language == Common::JA_JPN);
 	fontSet.numFonts = 4;
 	fontSet.defaultFont = 0;
 	fontSet.fonts[0] = _smush_talkfontNut;
@@ -4260,7 +4287,7 @@ void InsaneRebel2::renderCrosshair(byte *renderBitmap, int pitch, int width, int
 	bool targetLocked = false;
 
 	for (Common::List<enemy>::iterator it = _enemies.begin(); it != _enemies.end(); ++it) {
-		if (it->active && !it->destroyed && it->rect.contains(worldMousePos)) {
+		if (it->active && !it->destroyed && isTargetUnderAim(*it, worldMousePos)) {
 			targetLocked = true;
 			break;
 		}
@@ -4304,6 +4331,9 @@ void InsaneRebel2::renderCrosshair(byte *renderBitmap, int pitch, int width, int
 		int cw = _smush_iconsNut->getCharWidth(reticleIndex);
 		int ch = _smush_iconsNut->getCharHeight(reticleIndex);
 
+		// Enlarge the tiny third-person/cover reticles; the turret crosshair is already large.
+		const int spriteScale = (_rebelHandler == 0x26) ? 1 : 2;
+
 		const int reticleScale = isHiRes() ? 2 : getRebel2IndicatorScale(width, height);
 		int crosshairX = aimPos.x * reticleScale;
 		int crosshairY = aimPos.y * reticleScale;
@@ -4317,12 +4347,14 @@ void InsaneRebel2::renderCrosshair(byte *renderBitmap, int pitch, int width, int
 			crosshairY += _rebelViewOffsetY * reticleScale;
 		}
 
-		crosshairX += _smush_iconsNut->getCharXOffset(reticleIndex) - cw / 2;
-		crosshairY += _smush_iconsNut->getCharYOffset(reticleIndex) - ch / 2;
+		crosshairX += (_smush_iconsNut->getCharXOffset(reticleIndex) - cw / 2) * spriteScale;
+		crosshairY += (_smush_iconsNut->getCharYOffset(reticleIndex) - ch / 2) * spriteScale;
 
-		renderNutSprite(renderBitmap, pitch, width, height,
+		// reticle glyphs key only on color 0, so transparent231 is false.
+		renderNutSpriteScaledClipped(renderBitmap, pitch, width, height,
+			0, 0, width, height,
 			crosshairX, crosshairY,
-			_smush_iconsNut, reticleIndex);
+			_smush_iconsNut, reticleIndex, false, spriteScale, false);
 	}
 }
 

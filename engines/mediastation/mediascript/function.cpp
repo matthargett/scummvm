@@ -25,6 +25,9 @@
 #include "mediastation/mediascript/function.h"
 #include "mediastation/debugchannels.h"
 #include "mediastation/mediastation.h"
+#include "mediastation/minigames/dalmatiansmaze.h"
+#include "mediastation/minigames/barbiemaze.h"
+#include "mediastation/minigames/checkers.h"
 
 namespace MediaStation {
 
@@ -97,6 +100,9 @@ FunctionManager::~FunctionManager() {
 		delete it->_value;
 	}
 	_functions.clear();
+
+	delete _maze;
+	delete _checkers;
 }
 
 bool FunctionManager::attemptToReadFromStream(Chunk &chunk, uint sectionType) {
@@ -145,7 +151,7 @@ ScriptValue FunctionManager::call(uint functionId, Common::Array<ScriptValue> &a
 
 	case kEffectTransitionFunction:
 	case kLegacy_EffectTransitionFunction:
-		g_engine->getDisplayManager()->effectTransition(args);
+		script_EffectTransition(args, returnValue);
 		break;
 
 	case kEffectTransitionOnSyncFunction:
@@ -213,6 +219,7 @@ ScriptValue FunctionManager::call(uint functionId, Common::Array<ScriptValue> &a
 		break;
 
 	case kSetRegistryFunction:
+		FUNCARGCHECK(3);
 		script_SetRegistry(args, returnValue);
 		break;
 
@@ -226,14 +233,17 @@ ScriptValue FunctionManager::call(uint functionId, Common::Array<ScriptValue> &a
 		break;
 
 	case kMazeGenerateFunction:
+		// Barbie only.
 		script_MazeGenerate(args, returnValue);
 		break;
 
 	case kMazeApplyMoveMaskFunction:
+		// Barbie only.
 		script_MazeApplyMoveMask(args, returnValue);
 		break;
 
 	case kMazeSolveFunction:
+		// Barbie and Dalmatians.
 		script_MazeSolve(args, returnValue);
 		break;
 
@@ -250,7 +260,13 @@ ScriptValue FunctionManager::call(uint functionId, Common::Array<ScriptValue> &a
 		break;
 
 	case kCheckersFunction:
+		FUNCARGMIN(1);
 		script_Checkers(args, returnValue);
+		break;
+
+	case kMoveSophieFunction:
+		FUNCARGCHECK(14);
+		script_MoveSophie(args, returnValue);
 		break;
 
 	case kLegacy_DebugPrintFunction:
@@ -281,7 +297,7 @@ void FunctionManager::script_GetPlatform(Common::Array<ScriptValue> &args, Scrip
 		break;
 
 	case Common::Platform::kPlatformMacintosh:
-		returnValue.setToParamToken(kPlatformParamTokenWindows);
+		returnValue.setToParamToken(kPlatformParamTokenMacintosh);
 		break;
 
 	default:
@@ -366,11 +382,27 @@ void FunctionManager::script_Random(Common::Array<ScriptValue> &args, ScriptValu
 }
 
 void FunctionManager::script_TimeOfDay(Common::Array<ScriptValue> &args, ScriptValue &returnValue) {
-	TimeDate timeDate;
 	// Calculate seconds since midnight.
-	g_system->getTimeAndDate(timeDate);
-	uint32 secondsSinceMidnight = (timeDate.tm_hour * 60 + timeDate.tm_min) * 60 + timeDate.tm_sec;
+	uint secondsSinceMidnight = g_engine->currentTimeInSeconds();
 	returnValue.setToTime(static_cast<double>(secondsSinceMidnight));
+}
+
+void FunctionManager::script_EffectTransition(Common::Array<ScriptValue> &args, ScriptValue &returnValue) {
+	// Puzzle Castle has this weird code path where it checks for this magic value.
+	// If so, it doesn't actually do the transition. Otherwise, we just do a normal
+	// transition. Scripts rely on this behavior, so we must reimplement it.
+	bool triggerPuzzleCastleIterationUpdate = (args.size() == 2) && (args[0].getType() == kScriptValueTypeFloat && args[0].asFloat() == 9999);
+	if (triggerPuzzleCastleIterationUpdate) {
+		uint iterations = static_cast<uint>(args[1].asFloat());
+		uint start = g_engine->currentTimeInSeconds();
+		for (unsigned i = 0; i < iterations; ++i) {
+			g_engine->getDisplayUpdateManager()->performUpdateAll();
+		}
+
+		returnValue.setToFloat(g_engine->currentTimeInSeconds() - start);
+	} else {
+		g_engine->getDisplayManager()->effectTransition(args);
+	}
 }
 
 void FunctionManager::script_SquareRoot(Common::Array<ScriptValue> &args, ScriptValue &returnValue) {
@@ -562,16 +594,28 @@ void FunctionManager::script_SystemLanguagePreference(Common::Array<ScriptValue>
 }
 
 void FunctionManager::script_SetRegistry(Common::Array<ScriptValue> &args, ScriptValue &returnValue) {
-	warning("STUB: %s", __func__);
+	Common::String registryName = args[0].asString();
+	Common::String registryKey = args[1].asString();
+	ScriptValue registryValue = args[2];
+
+	// TODO: Allow serializing these values to disk instead of just keeping them in memory.
+	if (!_registry.contains(registryName)) {
+		_registry[registryName] = Common::HashMap<Common::String, ScriptValue>();
+	}
+
+	_registry[registryName][registryKey] = registryValue;
 }
 
 void FunctionManager::script_GetRegistry(Common::Array<ScriptValue> &args, ScriptValue &returnValue) {
-	// Even though this is basically still stubbed out, we need to set a return value or we will get errors.
-	returnValue = args[2];
 	Common::String registryName = args[0].asString();
-	if (registryName.size() != 0) {
-		// TODO: Get the registry (saved game content) with this name.
-		warning("STUB: %s: %s", __func__, registryName.c_str());
+	Common::String registryKey = args[1].asString();
+	ScriptValue defaultValue = args[2];
+
+	// TODO: Allow reading these values from disk.
+	if (_registry.contains(registryName) && _registry[registryName].contains(registryKey)) {
+		returnValue = _registry[registryName][registryKey];
+	} else {
+		returnValue = defaultValue;
 	}
 }
 
@@ -595,32 +639,52 @@ void FunctionManager::script_DebugPrint(Common::Array<ScriptValue> &args, Script
 	debug("%s", output.c_str());
 }
 
-void FunctionManager::script_MazeGenerate(Common::Array<ScriptValue> &args, ScriptValue &returnValue) {
-	warning("STUB: %s", __func__);
-}
-
-void FunctionManager::script_MazeApplyMoveMask(Common::Array<ScriptValue> &args, ScriptValue &returnValue) {
-	warning("STUB: %s", __func__);
-}
-
-void FunctionManager::script_MazeSolve(Common::Array<ScriptValue> &args, ScriptValue &returnValue) {
-	warning("STUB: %s", __func__);
-}
-
 void FunctionManager::script_BeginTimedInterval(Common::Array<ScriptValue> &args, ScriptValue &returnValue) {
-	warning("STUB: %s", __func__);
+	_timedIntervalStartInMs = g_engine->getTotalPlayTime();
 }
 
 void FunctionManager::script_EndTimedInterval(Common::Array<ScriptValue> &args, ScriptValue &returnValue) {
-	warning("STUB: %s", __func__);
-}
+	uint32 now = g_engine->getTotalPlayTime();
+	if (now < _timedIntervalStartInMs) {
+		warning("%s: Timed interval ended before it started", __func__);
+		return;
+	}
 
-void FunctionManager::script_Checkers(Common::Array<ScriptValue> &args, ScriptValue &returnValue) {
-	warning("STUB: %s", __func__);
+	const uint32 millisecondsElapsed = now - _timedIntervalStartInMs;
+	const double secondsElapsed = millisecondsElapsed / 1000.0;
+	returnValue.setToFloat(secondsElapsed);
 }
 
 void FunctionManager::script_Drawing(Common::Array<ScriptValue> &args, ScriptValue &returnValue) {
 	warning("STUB: %s", __func__);
+}
+
+void FunctionManager::script_MazeSolve(Common::Array<ScriptValue> &args, ScriptValue &returnValue) {
+	if (args.size() == 0) {
+		// newMaze_clear (Dalmatians only).
+		delete _maze;
+		_maze = nullptr;
+
+	} else if (args.size() == 2) {
+		// newMaze_init (Dalmatians only).
+		delete _maze;
+		_maze = new MazeMinigame::Maze(args);
+
+	} else if (args.size() == 4) {
+		// newMaze_solve (Dalmatians only).
+		if (_maze != nullptr) {
+			_maze->solve(args, returnValue);
+		} else {
+			error("%s: Maze has not been initialized", __func__);
+		}
+
+	} else if (args.size() == 5) {
+		// Barbie only.
+		BarbieMazeMinigame::solve(args, returnValue);
+
+	} else {
+		error("%s: Got invalid number of args", __func__);
+	}
 }
 
 void FunctionManager::deleteFunctionsForContext(uint contextId) {

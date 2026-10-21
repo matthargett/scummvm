@@ -94,6 +94,10 @@ public:
 	void setVolume(const SoundDescription &description, uint16 volume);
 	void setVolume(const Common::String &chunkName, uint16 volume);
 
+	// The volume a channel was last given, by the sound loaded into it or by
+	// setVolume(), from 0 to 100. Nancy20 scripts read it back.
+	uint16 getRequestedVolume(uint16 channelID) const;
+
 	// Nancy 11+ Update3DSound (AR 156). Adjusts a playing fixed-position
 	// 3D sound's position and/or its min/max audible distance.
 	void update3DSoundPosition(uint16 channelID, int32 x, int32 y, int32 z);
@@ -122,6 +126,8 @@ public:
 	Audio::Timestamp getLength(const SoundDescription &description);
 	Audio::Timestamp getLength(const Common::String &chunkName);
 
+	bool isCommonSound(const Common::String &soundName) const { return _commonSounds.contains(soundName); }
+
 	void soundEffectMaintenance();
 	void recalculateSoundEffects();
 
@@ -142,6 +148,7 @@ protected:
 		uint16 playCommands = 1;
 		uint16 numLoops = 0;
 		uint volume = 0;
+		uint16 requestedVolume = 0;
 		uint16 panAnchorFrame = 0;
 		bool isPanning = false;
 		Audio::SeekableAudioStream *stream = nullptr;
@@ -159,6 +166,13 @@ protected:
 	};
 
 	void soundEffectMaintenance(uint16 channelID, bool force = false);
+
+	// Nancy 13 introduced the MMIX ("music mix") boot chunk, a table mapping a
+	// short location code (e.g. "CAM", "BRI") to a set of interchangeable music /
+	// ambience tracks. When a sound is loaded by such a code, the engine picks one
+	// of the mapped tracks at random and plays that instead. Returns the resolved
+	// filename, or the input name unchanged when it doesn't match any mix record.
+	Common::String resolveMusicMix(const Common::String &name) const;
 
 	// Returns the listener position override if one is active, otherwise
 	// the scene summary's listener position

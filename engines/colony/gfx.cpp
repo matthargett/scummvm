@@ -28,6 +28,7 @@
 #include "common/config-manager.h"
 #include "common/system.h"
 #include "common/textconsole.h"
+#include "common/util.h"
 #include "engines/util.h"
 #include "graphics/renderer.h"
 
@@ -39,6 +40,66 @@ namespace Colony {
 // Forward declaration for the fixed-function OpenGL renderer factory.
 Renderer *createOpenGLRenderer(OSystem *system, int width, int height);
 
+Common::Point windowToCanvas(const Common::Rect &viewport, const Common::Point &p, int canvasW, int canvasH) {
+	if (viewport.isEmpty() || canvasW <= 0 || canvasH <= 0)
+		return p;
+
+	const int x = CLIP<int>(p.x, viewport.left, viewport.right - 1) - viewport.left;
+	const int y = CLIP<int>(p.y, viewport.top, viewport.bottom - 1) - viewport.top;
+	return Common::Point((int)((int64)x * canvasW / viewport.width()),
+		(int)((int64)y * canvasH / viewport.height()));
+}
+
+Common::Point canvasToWindow(const Common::Rect &viewport, const Common::Point &p, int canvasW, int canvasH) {
+	if (viewport.isEmpty() || canvasW <= 0 || canvasH <= 0)
+		return p;
+
+	return Common::Point(viewport.left + (int)((int64)p.x * viewport.width() / canvasW),
+		viewport.top + (int)((int64)p.y * viewport.height() / canvasH));
+}
+
+Common::Rect computeScreenViewport(OSystem *system, int width, int height, bool squarePixels) {
+	const int screenWidth = system->getWidth();
+	const int screenHeight = system->getHeight();
+	int viewportWidth = screenWidth;
+	int viewportHeight = screenHeight;
+
+	// Fractional enlargement makes bitmap fonts and dithering uneven.
+	if (squarePixels) {
+		const int scale = MIN(screenWidth / width, screenHeight / height);
+		if (scale >= 1) {
+			viewportWidth = width * scale;
+			viewportHeight = height * scale;
+		} else {
+			// Fit smaller windows without cropping the UI.
+			viewportWidth = MIN(screenWidth, (screenHeight * width + height / 2) / height);
+			viewportHeight = MIN(screenHeight, (screenWidth * height + width / 2) / width);
+		}
+	} else if (ConfMan.getBool("widescreen_mod")) {
+		viewportWidth = MIN(screenWidth, (screenHeight * 16 + 4) / 9);
+		viewportHeight = MIN(screenHeight, (screenWidth * 9 + 8) / 16);
+	} else if (system->getFeatureState(OSystem::kFeatureAspectRatioCorrection)) {
+		viewportWidth = MIN(screenWidth, screenHeight * 4 / 3);
+		viewportHeight = MIN(screenHeight, screenWidth * 3 / 4);
+	}
+
+	Common::Rect viewport(viewportWidth, viewportHeight);
+	viewport.translate((screenWidth - viewportWidth) / 2, (screenHeight - viewportHeight) / 2);
+	return viewport;
+}
+
+Common::Point computeMacCanvasSize(int screenWidth, int screenHeight, bool widescreen) {
+	if (!widescreen) {
+		const int width = MIN(screenWidth, screenHeight * 4 / 3);
+		screenHeight = MIN(screenHeight, screenWidth * 3 / 4);
+		screenWidth = width;
+	}
+
+	// Grow the layout to fill the window while keeping bitmap pixels uniform.
+	const int scale = MAX(1, MIN(screenWidth / 640, screenHeight / 480));
+	return Common::Point(MAX(640, screenWidth / scale), MAX(480, screenHeight / scale));
+}
+
 // Pick the renderer type. Honors --renderer=<code> on the command line /
 // ConfMan key, restricted to what was compiled in.
 //
@@ -47,7 +108,7 @@ Renderer *createOpenGLRenderer(OSystem *system, int width, int height);
 // primitive coverage up to parity. Note that the generic preference order
 // in graphics/renderer.cpp:122 picks shaders for the Default case, so we
 // must override it here.
-static Graphics::RendererType pickRendererType() {
+Graphics::RendererType pickRendererType() {
 	const Common::String configured = ConfMan.get("renderer");
 	const Graphics::RendererType desired = Graphics::Renderer::parseTypeCode(configured);
 
@@ -80,7 +141,11 @@ static Graphics::RendererType pickRendererType() {
 
 Renderer *createRenderer(OSystem *system, int width, int height) {
 	const Graphics::RendererType type = pickRendererType();
-	initGraphics3d(width, height);
+	// The DOS widescreen canvas keeps its original 350-line EGA coordinate
+	// system, but its display aspect is still 16:9 after pixel-aspect
+	// correction. Request a 16:9 window instead of the raw 853:350 canvas.
+	const int displayHeight = ConfMan.getBool("widescreen_mod") ? (width * 9 + 8) / 16 : height;
+	initGraphics3d(width, displayHeight);
 
 #if defined(USE_OPENGL_SHADERS)
 	if (type == Graphics::kRendererTypeOpenGLShaders) {

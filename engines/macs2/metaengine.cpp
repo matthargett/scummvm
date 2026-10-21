@@ -23,6 +23,7 @@
 #include "backends/keymapper/action.h"
 #include "backends/keymapper/keymapper.h"
 #include "backends/keymapper/standard-actions.h"
+#include "common/events.h"
 #include "common/savefile.h"
 #include "common/translation.h"
 #include "engines/enhancements.h"
@@ -87,6 +88,11 @@ Common::KeymapArray Macs2MetaEngine::initKeymaps(const char *target) const {
 	act->addDefaultInputMapping("F1");
 	engineKeyMap->addAction(act);
 
+	act = new Action(kStandardActionToggleHotspots, _("Show hotspots"));
+	act->setEvent(Common::EVENT_HOTSPOTS_SHOW);
+	act->addDefaultInputMapping("h");
+	engineKeyMap->addAction(act);
+
 	return Keymap::arrayOf(engineKeyMap);
 }
 
@@ -107,6 +113,7 @@ GUI::OptionsContainerWidget *Macs2MetaEngine::buildEngineOptionsWidget(GUI::GuiO
 void Macs2MetaEngine::registerDefaultSettings(const Common::String &target) const {
 	ConfMan.registerDefault("original_menus", false);
 	ConfMan.registerDefault("enhancements", kEnhGameBreakingBugFixes | kEnhGrp1);
+	ConfMan.registerDefault("macs2_game_speed_mode", 0);
 #ifdef USE_TTS
 	ConfMan.registerDefault("tts_enabled", false);
 #endif
@@ -129,27 +136,28 @@ SaveStateList Macs2MetaEngine::listSaves(const char *target) const {
 		if (f) {
 			// Validate magic
 			char magic[12];
-			f->read(magic, 12);
-			if (memcmp(magic, "AHFFMSGM0100", 12) == 0) {
+			f->read(magic, sizeof(magic));
+			if (memcmp(magic, "AHFFMSGM0100", sizeof(magic)) == 0) {
 				// Read slot name (Pascal string: 1 byte length + up to 20 chars)
 				byte nameLen = f->readByte();
-				if (nameLen > 20)
+				if (nameLen > 20) {
 					nameLen = 20;
+				}
 				char name[21];
 				f->read(name, nameLen);
 				name[nameLen] = '\0';
 				// Use slots 100+ for original saves to avoid conflicts
-				int scummSlot = 100 + slot;
+				const int scummSlot = 100 + slot;
 				// Check if this slot is already in the list
 				bool found = false;
-				for (const auto &s : saves) {
+				for (const SaveStateDescriptor &s : saves) {
 					if (s.getSaveSlot() == scummSlot) {
 						found = true;
 						break;
 					}
 				}
 				if (!found) {
-					Common::String desc = Common::String::format("[DOS] %s", name);
+					const Common::String &desc = Common::String::format("[DOS] %s", name);
 					saves.push_back(SaveStateDescriptor(this, scummSlot, desc));
 				}
 			}

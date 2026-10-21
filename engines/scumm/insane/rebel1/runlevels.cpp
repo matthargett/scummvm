@@ -28,7 +28,7 @@
 #include "scumm/file.h"
 #include "scumm/scumm_v7.h"
 #include "scumm/smush/rebel/anim_ra1.h"
-#include "scumm/smush/smush_player.h"
+#include "scumm/smush/rebel/smush_player_ra1.h"
 #include "scumm/insane/rebel1/rebel.h"
 
 namespace Scumm {
@@ -72,64 +72,11 @@ int32 findAnimFrameChunkOffset(ScummEngine_v7 *vm, const char *filename, int32 t
 	return result;
 }
 
-int32 findAnimFrameChunkOffsetByGameCounter(ScummEngine_v7 *vm, const char *filename, int32 targetCounter, int32 &localFrame) {
-	localFrame = 0;
-	if (targetCounter <= 0)
-		return 0;
-
-	ScummFile *file = vm->instantiateScummFile();
-	if (!vm->openFile(*file, Common::Path(filename))) {
-		delete file;
-		return -1;
-	}
-
-	int32 result = -1;
-	if (file->size() >= 8) {
-		file->readUint32BE();
-		const uint32 animSize = file->readUint32BE();
-		const int64 animEnd = MIN<int64>((int64)file->pos() + animSize, file->size());
-
-		int32 frameIndex = 0;
-		RA1AnimStreamChunkIterator chunks(*file, animEnd);
-		RA1AnimChunk chunk;
-		while (chunks.next(chunk)) {
-			if (chunk.tag == MKTAG('F', 'R', 'M', 'E')) {
-				RA1AnimStreamChunkIterator subChunks(*file, chunk.endOffset);
-				RA1AnimChunk subChunk;
-				while (subChunks.next(subChunk)) {
-					if (subChunk.tag == MKTAG('G', 'A', 'M', 'E') && subChunk.size >= 8) {
-						const uint32 opcode = file->readUint32BE();
-						const int32 counter = (int32)file->readUint32BE();
-						if (opcode == 0x0B && counter >= targetCounter) {
-							localFrame = frameIndex;
-							result = (int32)chunk.offset;
-							break;
-						}
-					}
-
-					subChunks.skip(subChunk);
-				}
-
-				if (result >= 0)
-					break;
-
-				frameIndex++;
-			}
-
-			chunks.skip(chunk);
-		}
-	}
-
-	file->close();
-	delete file;
-	return result;
-}
-
-static void formatTargetAccuracy(char *dst, size_t dstSize, int kills, int targetCount, bool perfectText) {
+void InsaneRebel1::formatTargetAccuracy(char *dst, size_t dstSize, int kills, int targetCount, bool perfectText) const {
 	if (perfectText && kills >= targetCount)
-		Common::sprintf_s(dst, dstSize, "Target Accuracy: Perfect");
+		Common::sprintf_s(dst, dstSize, "%s", uiStr(kR1StrAccuracyPerfect));
 	else
-		Common::sprintf_s(dst, dstSize, "Target Accuracy: %d percent", (kills * 100) / targetCount);
+		Common::sprintf_s(dst, dstSize, uiStr(kR1StrAccuracyFmt), (kills * 100) / targetCount);
 }
 
 static int calculateThresholdBonus(int kills, int perfectThreshold, int perKillThreshold, int perKillBonus) {
@@ -158,6 +105,8 @@ void InsaneRebel1::playCinematic(const char *filename, int32 startFrame) {
 	splayer->setCurVideoFlags(0x420);
 	splayer->setFastForwardFromFrame(0);
 	splayer->setFastForwardToFrame(startFrame > 0 ? startFrame : 0);
+	// A missing movie must not retain the previous movie's completion status.
+	splayer->_endOfFile = false;
 	splayer->play(filename, 15);
 
 	_introTextActive = false;
@@ -168,6 +117,13 @@ void InsaneRebel1::playChapterCompleteCinematic(const char *filename, int16 unlo
 		const char *bonusLabel1, const char *detailText1, int bonusValue1,
 		const char *bonusLabel2, const char *detailText2, int bonusValue2,
 		int passwordIndex) {
+	if (!_release.passcodes)
+		passwordIndex = 0;
+	if (!(_release.chapterBonusMask & (1u << (unlockedChapter - 1)))) {
+		bonusLabel1 = bonusLabel2 = nullptr;
+		detailText1 = detailText2 = nullptr;
+		bonusValue1 = bonusValue2 = 0;
+	}
 	beginChapterSummaryOverlay(revealOffsetFromEnd, stopOffsetFromEnd,
 		bonusLabel1, detailText1, bonusValue1,
 		bonusLabel2, detailText2, bonusValue2,
@@ -258,6 +214,9 @@ void InsaneRebel1::resetLevelAttemptState(int16 flyControlMode, int16 gameplayPh
 }
 
 void InsaneRebel1::playLevelTransitionCutscene(int level) {
+	if (!_release.chapterTransitions)
+		return;
+
 	switch (level) {
 	case 4:
 		// FALCON/BIGGS/WEDGE passcode group.
@@ -303,11 +262,18 @@ void InsaneRebel1::clearVideoBuffer() {
 }
 
 void InsaneRebel1::playIntroSequence() {
-	playCinematic("OPEN/O1LOGO.ANM");
+	if (_release.logo)
+		playCinematic(_release.logo);
 	if (shouldAbortGameFlow())
 		return;
 
-	playCinematic("OPEN/O1OPEN.ANM");
+	if (_release.introNotice)
+		playCinematic(_release.introNotice);
+	if (shouldAbortGameFlow())
+		return;
+
+	if (_release.intro)
+		playCinematic(_release.intro);
 }
 
 bool InsaneRebel1::runLevel1() {
@@ -340,10 +306,10 @@ bool InsaneRebel1::runLevel1() {
 		if (shouldAbortGameFlow())
 			return false;
 
-		if (_rightPathSelected && _health >= 0) {
+		if (_rightPathSelected && !_interactiveVideoCheatSkipped && _health >= 0) {
 			_pathBranchEnabled = false;
 			_flyControlMode = 1;
-			playInteractiveVideo("LVL1/L1PLAY1R.ANM", 0x187);
+			playInteractiveVideo("LVL1/L1PLAY1R.ANM", 1);
 			if (shouldAbortGameFlow())
 				return false;
 		}
@@ -376,14 +342,14 @@ bool InsaneRebel1::runLevel1() {
 					break;
 
 				if (_killCount > 4 || _interactiveVideoCheatSkipped) {
-					const char *pathText = _rightPathSelected ? "Path Taken: Hard" : "Path Taken: Easy";
+					const char *pathText = uiStr(_rightPathSelected ? kR1StrPathHard : kR1StrPathEasy);
 					const int pathBonus = _rightPathSelected ? _tuning.bonus * 3 : 0;
 					char accuracyText[80];
 					formatTargetAccuracy(accuracyText, sizeof(accuracyText), _killCount, 0x0E, true);
 					const int targetBonus = calculateThresholdBonus(_killCount, 0x0D, 5, _tuning.bonus);
 					playChapterCompleteCinematic("LVL1/L1END.ANM", 1, 0x78, 5,
-						"Part I", pathText, pathBonus,
-						"Part II", accuracyText, targetBonus);
+						uiStr(kR1StrPartI), pathText, pathBonus,
+						uiStr(kR1StrPartII), accuracyText, targetBonus);
 					return !shouldAbortGameFlow();
 				}
 
@@ -552,7 +518,7 @@ bool InsaneRebel1::runLevel4() {
 		if (_health >= 0 && shieldGeneratorsDestroyed) {
 			const bool torpedoHit = (_killCount != 0);
 			playChapterCompleteCinematic(torpedoHit ? "LVL4/L4END1.ANM" : "LVL4/L4END2.ANM",
-				4, 0x69, 5, " ", torpedoHit ? "Torpedo Hit" : "Torpedo Missed",
+				4, 0x69, 5, " ", uiStr(torpedoHit ? kR1StrTorpedoHit : kR1StrTorpedoMissed),
 				torpedoHit ? _tuning.bonus : 0);
 			return !shouldAbortGameFlow();
 		}
@@ -671,8 +637,10 @@ bool InsaneRebel1::runLevel6() {
 
 		if (_health >= 0) {
 			char accuracyText[80];
-			formatTargetAccuracy(accuracyText, sizeof(accuracyText), _killCount, 0x27, true);
-			const int bonus = calculateThresholdBonus(_killCount, 0x26, 0x0C, _tuning.bonus);
+			const bool tieredBonus = _release.tieredAsteroidChaseBonus;
+			formatTargetAccuracy(accuracyText, sizeof(accuracyText), _killCount, 0x27, !tieredBonus);
+			const int bonus = tieredBonus ? (_killCount >= 30 ? 3 : _killCount >= 20 ? 1 : 0) * _tuning.bonus :
+				calculateThresholdBonus(_killCount, 0x26, 0x0C, _tuning.bonus);
 			playChapterCompleteCinematic("LVL6/L6END.ANM", 6, 0x4B, 5,
 				" ", accuracyText, bonus, nullptr, nullptr, 0, _difficulty + 4);
 			return !shouldAbortGameFlow();
@@ -816,7 +784,7 @@ bool InsaneRebel1::runLevel8() {
 			if (_walkerHealth <= 0)
 				break;
 
-			if (_pendingRouteIndex >= 0 && _pendingRouteIndex != route) {
+			if (_pendingRouteIndex >= 0) {
 				// Branch to the next walker route while preserving active state.
 				routeStartFrame = _pendingRouteStartFrame;
 				route = _pendingRouteIndex;
@@ -865,7 +833,13 @@ bool InsaneRebel1::runLevel9() {
 	const int randPath1 = getOriginalRouteBit();
 	const int randPath2 = getOriginalRouteBit();
 	const int randPath3 = getOriginalRouteBit();
-	auto playLevel9PathSelector = [&](const char *filename) {
+	auto playLevel9PathSelector = [&](const char *filename, bool hasExitAnimation) {
+		// L9PLAY6 stores both exit animations after its idle loop. Frame 1
+		// restores the STOR background without repeating frame 0's GAME reset.
+		const int32 loopOffset = hasExitAnimation ? findAnimFrameChunkOffset(_vm, filename, 1) : -1;
+		if (hasExitAnimation && loopOffset < 0)
+			error("Unable to find the path selector loop in %s", filename);
+
 		while (!shouldAbortGameFlow()) {
 			_onFootCharX = 0;
 			_onFootCharY = 0;
@@ -875,10 +849,15 @@ bool InsaneRebel1::runLevel9() {
 			_posAccumY = 0;
 			_killCount = 0;
 			_lastHitTarget = 0;
+			_level9SelectedPath = -1;
+			_level9PathLoopOffset = loopOffset;
 
 			playInteractiveVideo(filename);
+			_level9PathLoopOffset = -1;
 			if (shouldAbortGameFlow() || _health < 0)
 				return -1;
+			if (_level9SelectedPath >= 0)
+				return (int)_level9SelectedPath;
 			if (_interactiveVideoCheatSkipped)
 				return (_shipPosX < kRA1CenterX) ? 0 : 1;
 			if (_killCount > 0)
@@ -920,7 +899,7 @@ bool InsaneRebel1::runLevel9() {
 				return false;
 
 			loadTuningForLevel(0x0C);
-			const int side1 = playLevel9PathSelector("LVL9/L9PLAY2.ANM");
+			const int side1 = playLevel9PathSelector("LVL9/L9PLAY2.ANM", false);
 			if (shouldAbortGameFlow())
 				return false;
 			if (_health < 0)
@@ -964,7 +943,7 @@ bool InsaneRebel1::runLevel9() {
 				return false;
 
 			loadTuningForLevel(0x0C);
-			const int side2 = playLevel9PathSelector("LVL9/L9PLAY4.ANM");
+			const int side2 = playLevel9PathSelector("LVL9/L9PLAY4.ANM", false);
 			if (shouldAbortGameFlow())
 				return false;
 			if (_health < 0)
@@ -994,7 +973,9 @@ bool InsaneRebel1::runLevel9() {
 					return false;
 
 				loadTuningForLevel(0x0C);
-				const int side3 = playLevel9PathSelector("LVL9/L9PLAY6.ANM");
+				// Sega CD keeps the exit animations in separate L9PLAY6A/B clips.
+				const int side3 = playLevel9PathSelector("LVL9/L9PLAY6.ANM",
+					_vm->_game.platform != Common::kPlatformSegaCD);
 				if (shouldAbortGameFlow())
 					return false;
 				if (_health < 0)
@@ -1379,7 +1360,7 @@ bool InsaneRebel1::runLevel15() {
 			formatTargetAccuracy(accuracyText, sizeof(accuracyText), _killCount, 0x58, false);
 			playChapterCompleteCinematic("LVL15/L15END1.ANM", 15, 0x122, 0xA5,
 				"Part I", accuracyText, targetBonus,
-				"Part II", "Torpedo on mark", 10000, _difficulty + 13);
+				uiStr(kR1StrPartII), uiStr(kR1StrTorpedoOnMark), 10000, _difficulty + 13);
 			return !shouldAbortGameFlow();
 		}
 
@@ -1393,6 +1374,14 @@ bool InsaneRebel1::runLevel15() {
 }
 
 void InsaneRebel1::runGame() {
+	if (!hasPlayableLevels()) {
+		playIntroSequence();
+		// Only restart after natural completion; skipping the preview exits.
+		while (_release.intro && !shouldAbortGameFlow() && _vm->_splayer->_endOfFile)
+			playCinematic(_release.intro);
+		return;
+	}
+
 	typedef bool (InsaneRebel1::*RunLevelMethod)();
 	const RunLevelMethod kLevelRunners[] = {
 		&InsaneRebel1::runLevel1,
@@ -1411,9 +1400,12 @@ void InsaneRebel1::runGame() {
 		&InsaneRebel1::runLevel14,
 		&InsaneRebel1::runLevel15
 	};
-	const int numLevels = (int)(sizeof(kLevelRunners) / sizeof(kLevelRunners[0]));
+	const int numLevels = ARRAYSIZE(kLevelRunners);
+	const int availableLevels = _release.getLevelCount();
 	auto runLevelsFrom = [&](int startLevel, bool resetRunState) {
-		int firstLevel = CLIP<int>(startLevel, 1, numLevels);
+		int firstLevelIndex = _release.findLevel(startLevel);
+		if (firstLevelIndex < 0)
+			return;
 
 		while (!_vm->shouldQuit()) {
 			_loadRequested = false;
@@ -1428,32 +1420,40 @@ void InsaneRebel1::runGame() {
 			}
 			resetRunState = false;
 
-			for (int level = firstLevel;
-				 level <= numLevels && completed && !shouldAbortGameFlow();
-				 ++level) {
+			for (int levelIndex = firstLevelIndex;
+				 levelIndex < availableLevels && completed && !shouldAbortGameFlow();
+				 ++levelIndex) {
+				const int level = _release.levels[levelIndex];
 				_resumeLevel = level;
 				playLevelTransitionCutscene(level);
 				if (shouldAbortGameFlow())
 					break;
 
+				// The Sega CD release omits level 7 but retains its chapter transition.
+				if (_vm->_game.platform == Common::kPlatformSegaCD && level == 7)
+					continue;
+
 				completed = (this->*kLevelRunners[level - 1])();
 				if (completed) {
 					lastCompletedLevel = level;
-					if (level < numLevels) {
-						_startLevel = level + 1;
+					if (levelIndex + 1 < availableLevels) {
+						_startLevel = _release.levels[levelIndex + 1];
 						_resumeLevel = _startLevel;
 						autosaveProgress();
+					} else if (!_release.ending) {
+						_startLevel = _release.levels[0];
 					}
 				}
 			}
 
 			if (_loadRequested) {
-				firstLevel = getCurrentSaveLevel();
+				firstLevelIndex = _release.findLevel(getCurrentSaveLevel());
 				continue;
 			}
 
-			if (!shouldAbortGameFlow() && completed && lastCompletedLevel == numLevels)
-				playCinematic("FIN/FNFINAL.ANM");
+			if (!shouldAbortGameFlow() && completed &&
+					lastCompletedLevel == _release.levels[availableLevels - 1] && _release.ending)
+				playCinematic(_release.ending);
 			if (!shouldAbortGameFlow())
 				runHighScoreNameEntry();
 			_currentLevel = 0;
@@ -1497,12 +1497,12 @@ void InsaneRebel1::runGame() {
 			const int passcodeLevel = runPasscodeEntryDialog();
 			if (passcodeLevel >= 1 && passcodeLevel <= numLevels)
 				runLevelsFrom(passcodeLevel, true);
-			else if (passcodeLevel == numLevels + 1) {
+			else if (passcodeLevel == numLevels + 1 && _release.ending) {
 				_health = kMaxHealth;
 				_lives = 3;
 				_score = 0;
 				_prevScore = 0;
-				playCinematic("FIN/FNFINAL.ANM");
+				playCinematic(_release.ending);
 				if (!shouldAbortGameFlow())
 					runHighScoreNameEntry();
 				_currentLevel = 0;
@@ -1517,8 +1517,8 @@ void InsaneRebel1::runGame() {
 		}
 		case 5:
 			showHighScores();
-			if (!shouldAbortGameFlow())
-				playCinematic("OPEN/O1OPEN.ANM");
+			if (!shouldAbortGameFlow() && _release.intro)
+				playCinematic(_release.intro);
 			break;
 		case 6:
 			return;
@@ -1536,45 +1536,20 @@ void InsaneRebel1::resetInteractiveVideoAudio() {
 
 void InsaneRebel1::preserveInteractiveVideoAudioState() {
 	SmushPlayer *splayer = _vm->_splayer;
-
-	_restoreInteractiveVideoAudioState = false;
-	_savedInteractiveVideoTrackCount = 0;
-	if (!splayer)
-		return;
-
-	_savedInteractiveVideoTrackCount = MIN<int>(splayer->_smushNumTracks, SMUSH_MAX_TRACKS);
-	for (int i = 0; i < _savedInteractiveVideoTrackCount; i++) {
-		_savedInteractiveVideoTrackState[i] = splayer->_smushTracks[i].state;
-		_savedInteractiveVideoTrackGroupId[i] = splayer->_smushTracks[i].groupId;
-	}
-
-	_restoreInteractiveVideoAudioState = true;
-}
-
-void InsaneRebel1::restoreInteractiveVideoAudioState() {
-	if (!_restoreInteractiveVideoAudioState)
-		return;
-
-	_restoreInteractiveVideoAudioState = false;
-	if (_vm->shouldQuit() || _vm->_saveLoadFlag)
-		return;
-
-	SmushPlayer *splayer = _vm->_splayer;
-	if (!splayer)
-		return;
-
-	const int trackCount = MIN<int>(_savedInteractiveVideoTrackCount, splayer->_smushNumTracks);
-	for (int i = 0; i < trackCount; i++) {
-		splayer->_smushTracks[i].state = _savedInteractiveVideoTrackState[i];
-		splayer->_smushTracks[i].groupId = _savedInteractiveVideoTrackGroupId[i];
-	}
+	// RA1's internal route changes are logical stream ends. Taking the existing
+	// EOF exit avoids the shared SMUSH forced-stop reset without changing it.
+	if (splayer)
+		static_cast<SmushPlayerRebel1 *>(splayer)->markLogicalEndOfStream();
 }
 
 void InsaneRebel1::setupInteractiveVideoState(int32 startFrame) {
 	const bool level7RouteSplice = (_currentLevel == 6 && _levelRouteIndex > 0);
+	const bool walkerRouteReplay = (_currentLevel == 7 && _walkerRoundReplay);
 	const bool resumingRoute = startFrame > 0;
-	const bool preserveRuntimeState = _preserveInteractiveRuntimeState || resumingRoute || level7RouteSplice;
-	const bool preserveVideoState = !_preserveInteractiveRuntimeState && resumingRoute && !level7RouteSplice;
+	const bool preserveRuntimeState = _preserveInteractiveRuntimeState || resumingRoute ||
+		level7RouteSplice || walkerRouteReplay;
+	const bool preserveVideoState = walkerRouteReplay ||
+		(!_preserveInteractiveRuntimeState && resumingRoute && !level7RouteSplice);
 
 	SmushPlayer *splayer = _vm->_splayer;
 	_player = splayer;
@@ -1588,6 +1563,8 @@ void InsaneRebel1::setupInteractiveVideoState(int32 startFrame) {
 		resetFrameObjectState();
 		resetGamepadReticleAim();
 	}
+	if (_level9PathLoopOffset >= 0)
+		_frameObjectState[0] |= 0x03; // Hide L9PLAY6's mutually exclusive exit objects 7 and 8.
 	_vm->_smushVideoShouldFinish = false;
 	splayer->setPreserveVideoStateOnNextPlay(preserveVideoState);
 	splayer->setCurVideoFlags(0x28);
@@ -1617,22 +1594,20 @@ void InsaneRebel1::resolveSeek(const char *filename, int32 startFrame, int32 &vi
 				_levelRouteIndex, (int)_pendingRouteStartFrame,
 				(int)videoStartFrame, (unsigned)videoOffset);
 		}
-	} else if (_currentLevel == 7 && resumingRoute) {
-		videoOffset = findAnimFrameChunkOffsetByGameCounter(_vm, filename, startFrame, videoStartFrame);
+	} else if ((_currentLevel == 0 || _currentLevel == 7) && resumingRoute) {
+		// Route continuations use destination-local frames. In L1 this skips
+		// both the overlapping frame and the GAME reset at the start of the
+		// right-hand clip. L8 can also branch back to the same ANM.
+		videoStartFrame = startFrame;
+		videoOffset = findAnimFrameChunkOffset(_vm, filename, videoStartFrame);
 		if (videoOffset < 0) {
-			debugC(DEBUG_INSANE, "L8 resume: route=%d timelineFrame=%d GAME counter lookup failed",
-				_levelRouteIndex, (int)startFrame);
-			videoStartFrame = startFrame;
-			videoOffset = findAnimFrameChunkOffset(_vm, filename, videoStartFrame);
-		}
-		if (videoOffset < 0) {
-			debugC(DEBUG_INSANE, "L8 resume: route=%d timelineFrame=%d localFrame=%d offset lookup failed",
-				_levelRouteIndex, (int)startFrame, (int)videoStartFrame);
+			debugC(DEBUG_INSANE, "L%d resume: localFrame=%d offset lookup failed",
+				_currentLevel + 1, (int)videoStartFrame);
 			videoStartFrame = 0;
 			videoOffset = 0;
 		} else {
-			debugC(DEBUG_INSANE, "L8 resume: route=%d timelineFrame=%d -> localFrame=%d offset=0x%x",
-				_levelRouteIndex, (int)startFrame, (int)videoStartFrame, (unsigned)videoOffset);
+			debugC(DEBUG_INSANE, "L%d resume: localFrame=%d offset=0x%x",
+				_currentLevel + 1, (int)videoStartFrame, (unsigned)videoOffset);
 		}
 	} else if (_currentLevel == 13 && resumingRoute) {
 		// L14PLY2B is already the continuation clip. Preserve state, but do not seek.
@@ -1641,10 +1616,7 @@ void InsaneRebel1::resolveSeek(const char *filename, int32 startFrame, int32 &vi
 	}
 }
 
-void InsaneRebel1::captureInteractiveVideoInput() {
-	const bool level7RouteSplice = (_currentLevel == 6 && _levelRouteIndex > 0);
-	const bool preserveInputState = _preserveInteractiveRuntimeState || level7RouteSplice;
-
+void InsaneRebel1::captureInteractiveVideoInput(bool preserveInputState) {
 	enableIOSGamepadController();
 
 	// Center mouse, hide system cursor, and lock mouse to window.
@@ -1677,7 +1649,6 @@ void InsaneRebel1::releaseInteractiveVideoInput() {
 void InsaneRebel1::playInteractiveVideoFile(const char *filename, int32 videoOffset, int32 videoStartFrame) {
 	_vm->_splayer->play(filename, 15, videoOffset, videoStartFrame);
 	restoreScreenFlashPalette();
-	restoreInteractiveVideoAudioState();
 	_interactiveVideoActive = false;
 }
 
@@ -1692,14 +1663,16 @@ void InsaneRebel1::playInteractiveVideo(const char *filename, int32 startFrame) 
 	_interactiveVideoCheatSkipped = false;
 	int32 videoStartFrame = 0;
 	int32 videoOffset = 0;
+	const bool walkerRouteReplay = (_currentLevel == 7 && _walkerRoundReplay);
 	const bool preserveRuntimeState = _preserveInteractiveRuntimeState ||
-		(startFrame > 0) || (_currentLevel == 6 && _levelRouteIndex > 0);
+		(startFrame > 0) || (_currentLevel == 6 && _levelRouteIndex > 0) ||
+		walkerRouteReplay;
 
 	if (!preserveRuntimeState)
 		resetInteractiveVideoAudio();
 	setupInteractiveVideoState(startFrame);
 	resolveSeek(filename, startFrame, videoOffset, videoStartFrame);
-	captureInteractiveVideoInput();
+	captureInteractiveVideoInput(preserveRuntimeState);
 	playInteractiveVideoFile(filename, videoOffset, videoStartFrame);
 	releaseInteractiveVideoInput();
 	_preserveInteractiveRuntimeState = false;

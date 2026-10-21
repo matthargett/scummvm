@@ -360,6 +360,8 @@ Chamber
 .. list-table::
    :widths: 35 65
 
+   * - Ion Andrei Cristian
+     -
    * - Retro-Junk;
      -
    * - Eugene Sandulenko
@@ -395,6 +397,15 @@ Cine
    * - Kari Salminen
      -
    * - Eugene Sandulenko
+     -
+
+Colony
+^^^^^^
+
+.. list-table::
+   :widths: 35 65
+
+   * - Gustavo Grieco
      -
 
 Composer
@@ -564,6 +575,15 @@ DreamWeb
    * - Willem Jan Palenstijn
      -
 
+EEM
+^^^
+
+.. list-table::
+   :widths: 35 65
+
+   * - Gustavo Grieco
+     -
+
 Efh
 ^^^
 
@@ -571,6 +591,15 @@ Efh
    :widths: 35 65
 
    * - Arnaud Boutonné
+     -
+
+Fool
+^^^^
+
+.. list-table::
+   :widths: 35 65
+
+   * - Scott Percival
      -
 
 Freescape
@@ -713,6 +742,15 @@ Hades Challenge
    :widths: 35 65
 
    * - Vladimir Serbinenko/Google
+     -
+
+Harvester
+^^^^^^^^^
+
+.. list-table::
+   :widths: 35 65
+
+   * - Alex Bevilacqua
      -
 
 HDB
@@ -890,12 +928,25 @@ M4
    * - Arnaud Boutonné
      -
 
+Macs2
+^^^^^
+
+.. list-table::
+   :widths: 35 65
+
+   * - Martin Gerhardy
+     -
+   * - Florian Mehm
+     -
+
 MacVenture
 ^^^^^^^^^^
 
 .. list-table::
    :widths: 35 65
 
+   * - Ion Andrei Cristian
+     - GSoC student
    * - Borja Lorente
      - GSoC student
 
@@ -1091,6 +1142,8 @@ PhoenixVR
      -
    * - Hermann Noll
      - Help with 3D VR projections
+   * - Scorp
+     - Dracula 1/2 and Messenger support, Engine improvements
 
 Pink
 ^^^^
@@ -1229,6 +1282,8 @@ SCUMM
      - (retired)
    * - Jonathan Gray
      - (retired)
+   * - Gustavo Grieco
+     - Rebel Assault I & II
    * - Vincent Hamm
      - (retired)
    * - Max Horn
@@ -2664,6 +2719,8 @@ CGE
      - Soltys Spanish translation
    * - Alejandro Gómez de la Muñoza
      - Soltys Spanish translation
+   * - Alexander Klaus
+     - Soltys German translation
 
 CGE2
 ^^^^
@@ -2679,6 +2736,8 @@ CGE2
      - Sfinx English translation editor
    * - Ryan Clark
      - Sfinx English translation editor
+   * - Alexander Klaus
+     - Sfinx German translation
 
 Drascula
 ^^^^^^^^
@@ -3169,4 +3228,6 @@ Benjamin Haisch, for emimeshviewer, which our EMI code borrows heavily from.
 Fabrizio Lagorio from Trecision S.p.A., for finding and providing the source code of many of their games.
 
 Ron Davis for releasing the sources and generously giving away the three chapters of God of Thunder.
+
+David A. Smith for releasing the source code of The Colony, which our engine is based on.
 

@@ -34,15 +34,9 @@ namespace Nancy {
 namespace Action {
 
 void MazeChasePuzzle::init() {
-	Common::Rect screenBounds = NancySceneState.getViewport().getBounds();
-	_drawSurface.create(screenBounds.width(), screenBounds.height(), g_nancy->_graphics->getInputPixelFormat());
-	_drawSurface.clear(g_nancy->_graphics->getTransColor());
-	setTransparent(true);
-	setVisible(true);
-	moveTo(screenBounds);
+	initViewportSurface();
 
-	g_nancy->_resource->loadImage(_imageName, _image);
-	_image.setTransparentColor(_drawSurface.getTransparentColor());
+	loadImage();
 
 	for (uint i = 0; i < _startLocations.size(); ++i) {
 		_pieces.push_back(Piece(_z + i + 1));
@@ -67,7 +61,7 @@ void MazeChasePuzzle::registerGraphics() {
 	for (uint i = 0; i < _pieces.size(); ++i) {
 		_pieces[i].registerGraphics();
 	}
-	RenderActionRecord::registerGraphics();
+	PuzzleRecord::registerGraphics();
 }
 
 void MazeChasePuzzle::updateGraphics() {
@@ -156,7 +150,15 @@ void MazeChasePuzzle::readData(Common::SeekableReadStream &stream) {
 	_exitPos.y = stream.readUint16LE();
 
 	if (isNancy10) {
-		stream.skip(1); // TODO: unknown byte before the grid.
+		byte exitBehavior = stream.readByte();
+		if (exitBehavior <= kExitSlideRight) {
+			_exitBehavior = (ExitBehavior)exitBehavior;
+		} else {
+			// nancy14 keeps the piece in place for any other value
+			_exitBehavior = g_nancy->getGameType() >= kGameTypeNancy14 ? kExitStay : kExitSlideRight;
+		}
+	} else {
+		_exitBehavior = _exitPos.x == 0 ? kExitSlideLeft : kExitSlideRight;
 	}
 
 	_grid.resize(height, Common::Array<uint16>(width));
@@ -223,6 +225,7 @@ void MazeChasePuzzle::execute() {
 	switch (_state) {
 	case kBegin :
 		init();
+		NancySceneState.setNoHeldItem();
 		g_nancy->_sound->loadSound(_moveSound);
 		g_nancy->_sound->loadSound(_failSound);
 		_state = kRun;
@@ -233,11 +236,26 @@ void MazeChasePuzzle::execute() {
 		}
 
 		if (_pieces[0]._gridPos == _exitPos) {
-			_pieces[0]._gridPos = _exitPos + Common::Point(_exitPos.x == 0 ? -1 : 1, 0);
-			++_currentAnimFrame;
-			g_nancy->_sound->loadSound(_solveSound);
-			g_nancy->_sound->playSound(_solveSound);
+			switch (_exitBehavior) {
+			case kExitDisappear:
+				_pieces[0].setVisible(false);
+				break;
+			case kExitSlideLeft:
+			case kExitSlideRight:
+				_pieces[0]._gridPos = _exitPos + Common::Point(_exitBehavior == kExitSlideLeft ? -1 : 1, 0);
+				++_currentAnimFrame;
+				break;
+			case kExitStay:
+				break;
+			}
+
+			playSolveSound();
 			_solved = true;
+
+			if (g_nancy->getGameType() >= kGameTypeNancy14) {
+				// The delay runs alongside the solve sound, in 3-second steps
+				_solveSoundPlayTime = g_nancy->getTotalPlayTime() + _solveSoundDelay * 3000;
+			}
 			_state = kActionTrigger;
 		} else {
 			for (uint i = 1; i < _pieces.size(); ++i) {
@@ -252,7 +270,7 @@ void MazeChasePuzzle::execute() {
 		return;
 	case kActionTrigger :
 		if (_solved) {
-			if (g_nancy->_sound->isSoundPlaying(_solveSound)) {
+			if (isSolveSoundPlaying()) {
 				return;
 			}
 
@@ -281,9 +299,7 @@ void MazeChasePuzzle::handleInput(NancyInput &input) {
 		return;
 	}
 
-	if (NancySceneState.getViewport().convertViewportToScreen(_exitHotspot).contains(input.mousePos)) {
-		g_nancy->_cursor->setCursorType(g_nancy->_cursor->_puzzleExitCursor);
-
+	if (hoverExitHotspot(input)) {
 		if (input.input & NancyInput::kLeftMouseButtonUp) {
 			_state = kActionTrigger;
 		}

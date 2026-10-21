@@ -22,16 +22,16 @@
 #ifndef NANCY_ACTION_SAFEDIALPUZZLE_H
 #define NANCY_ACTION_SAFEDIALPUZZLE_H
 
-#include "engines/nancy/action/actionrecord.h"
+#include "engines/nancy/action/puzzlerecord.h"
 
 namespace Nancy {
 namespace Action {
 
 // Handles the nancy3 safe puzzle with Chinese characters on the dial,
 // as well as nancy4's sextant puzzle
-class SafeDialPuzzle : public RenderActionRecord {
+class SafeDialPuzzle : public PuzzleRecord {
 public:
-	SafeDialPuzzle() : RenderActionRecord(7) {}
+	SafeDialPuzzle() : PuzzleRecord(7) {}
 	virtual ~SafeDialPuzzle() {}
 
 	void init() override;
@@ -49,6 +49,9 @@ protected:
 
 	void drawDialFrame(uint frame);
 	void pushSequence(uint id);
+	uint numDialPositions() const { return _dialSrcs.size() / (1 + _numInbetweens); }
+	bool canTurnDial(bool forwards) const;
+	void turnDial(bool forwards);
 
 	Common::Path _imageName1;
 	Common::Path _imageName2;
@@ -75,17 +78,11 @@ protected:
 	Common::Rect _cwHotspot;
 
 	bool _useMoveArrows = false;
+	bool _ccwTurnsForwards = false;
 
 	SoundDescription _spinSound;
 	SoundDescription _selectSound;
 	SoundDescription _resetSound;
-
-	SceneChangeWithFlag _solveScene;
-	uint _solveSoundDelay = 0;
-	SoundDescription _solveSound;
-
-	SceneChangeWithFlag _exitScene;
-	Common::Rect _exitHotspot;
 
 	Graphics::ManagedSurface _image1, _image2, _resetImage;
 

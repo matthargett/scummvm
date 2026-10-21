@@ -28,8 +28,6 @@
 
 namespace Freescape {
 
-extern FCLInstructionVector *duplicateCondition(FCLInstructionVector *condition);
-
 int GeometricObject::numberOfColoursForObjectOfType(ObjectType type) {
 	switch (type) {
 	default:
@@ -178,13 +176,27 @@ GeometricObject::GeometricObject(
 			_ordinates->push_back(_origin.y() + _size.y());
 			_ordinates->push_back(_origin.z() + _size.z());
 		}
-	} else if (isPyramid(_type))
-		assert(_size.x() > 0 && _size.y() > 0 && _size.z() > 0);
+	} else if (isPyramid(_type)) {
+		// A pyramid flat along one axis has its base and apex faces in the same
+		// plane, and is drawn flat (Castle Master 2 object 191). Two flat axes
+		// would leave nothing to draw, and means a misparsed object.
+		int flatAxes = 0;
+		for (int i = 0; i < 3; i++) {
+			if (_size.getValue(i) == 0)
+				flatAxes++;
+		}
+		assert(flatAxes <= 1);
+	}
 
+	// Preserve header bounds for sorting, separately from geometry bounds.
+	_occlusionBox.expand(_origin);
+	_occlusionBox.expand(_origin + _size);
 	computeBoundingBox();
 }
 
 void GeometricObject::setOrigin(Math::Vector3d origin_) {
+	const Math::Vector3d offset = origin_ - _origin;
+	_occlusionBox = Math::AABB(_occlusionBox.getMin() + offset, _occlusionBox.getMax() + offset);
 	_origin = origin_;
 	computeBoundingBox();
 }
@@ -214,6 +226,8 @@ void GeometricObject::offsetOrigin(Math::Vector3d origin_) {
 }
 
 void GeometricObject::scale(int factor) {
+	// Scale endpoints directly to avoid rounding overlaps between touching objects.
+	_occlusionBox = Math::AABB(_occlusionBox.getMin() / factor, _occlusionBox.getMax() / factor);
 	_origin = _origin / factor;
 	_size = _size / factor;
 	if (_ordinates) {
@@ -269,16 +283,12 @@ Object *GeometricObject::duplicate() {
 
 	copy->_cyclingColors = _cyclingColors;
 	copy->_loadIndex = _loadIndex;
+	copy->_occlusionBox = _occlusionBox;
 	return copy;
 }
 
 void GeometricObject::computeBoundingBox() {
 	_boundingBox = Math::AABB();
-	_occlusionBox = Math::AABB();
-
-	// These are used for the rendered, they should NOT be refined or it will break the sorting algorithm
-	_occlusionBox.expand(_origin);
-	_occlusionBox.expand(_origin + _size);
 
 	Math::Vector3d v;
 	switch (_type) {

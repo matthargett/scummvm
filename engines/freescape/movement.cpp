@@ -31,6 +31,7 @@ namespace Freescape {
 
 void FreescapeEngine::initKeymaps(Common::Keymap *engineKeyMap, Common::Keymap *infoScreenKeyMap, const char *target) {
 	Common::Action *act;
+	const bool isKit = Common::String(_gameDescription->gameId) == "3dkit";
 
 	act = new Common::Action(Common::kStandardActionMoveUp, _("Up"));
 	act->setCustomEngineActionEvent(kActionMoveUp);
@@ -93,9 +94,18 @@ void FreescapeEngine::initKeymaps(Common::Keymap *engineKeyMap, Common::Keymap *
 	act = new Common::Action("SKIP", _("Skip"));
 	act->setCustomEngineActionEvent(kActionSkip);
 	act->addDefaultInputMapping("SPACE");
-	act->addDefaultInputMapping("RETURN");
+	if (!isKit)
+		act->addDefaultInputMapping("RETURN");
 	act->addDefaultInputMapping("JOY_X");
 	engineKeyMap->addAction(act);
+
+	if (isKit) {
+		act = new Common::Action("RETURN", _("Return"));
+		act->setKeyEvent(Common::KeyState(Common::KEYCODE_RETURN, 13));
+		act->addDefaultInputMapping("RETURN");
+		act->addDefaultInputMapping("KP_ENTER");
+		engineKeyMap->addAction(act);
+	}
 
 	// I18N: Toggles between cursor lock modes, switching between free cursor movement and camera/head movement.
 	act = new Common::Action("SWITCH", _("Change mode"));
@@ -317,8 +327,8 @@ void FreescapeEngine::shoot() {
 	float ndcY = 1.0f - (2.0f * (_crossairPosition.y - _viewArea.top) / _viewArea.height());
 
 	// Calculate angular offsets using perspective projection
-	float fovHorizontalRad = (float)(75.0f * M_PI / 180.0f);
-	float aspectRatio = isCastle() ? 1.6 : 2.18;
+	float fovHorizontalRad = Math::deg2rad(_fieldOfView);
+	float aspectRatio = _viewAspectRatio;
 	float fovVerticalRad = 2.0f * atan(tan(fovHorizontalRad / 2.0f) / aspectRatio);
 
 	// Convert NDC to angle offset
@@ -474,6 +484,18 @@ void FreescapeEngine::checkIfStillInArea() {
 	}
 	if (_position.y() >= 2016)
 		_position.y() = _lastPosition.y();
+
+	// Workaround for Castle Master 2: the first area (the crypt) is indoors, but it shares
+	// its area ID with the Castle Master courtyard, so it also gets the unbounded synthetic
+	// floor added by Area::addFloor(). The player can then walk past the room walls and keep
+	// going, ending up far outside the room. Keep them within the room instead, which is the
+	// area covered by the crypt floor: 127 units, as in the original bound (MAX_COORDINATE is
+	// 127 * 64 in La5d9_move_player, expressed in 1/64th of a unit).
+	if (isCastleMaster2() && _currentArea->getAreaID() == _startArea) {
+		float roomSize = 127.0f * 32.0f / _currentArea->getScale();
+		_position.x() = CLIP(_position.x(), 0.0f, roomSize);
+		_position.z() = CLIP(_position.z(), 0.0f, roomSize);
+	}
 }
 
 void FreescapeEngine::updatePlayerMovement(float deltaTime) {
@@ -585,12 +607,13 @@ void FreescapeEngine::updatePlayerMovementSmooth(float deltaTime) {
 		clearGameBit(31);
 }
 
-void FreescapeEngine::resolveCollisions(Math::Vector3d const position) {
+void FreescapeEngine::resolveCollisions(Math::Vector3d position) {
 	if (_noClipMode) {
 		_position = position;
 		return;
 	}
 
+	position = clipPosition(position);
 	Math::Vector3d newPosition = position;
 	Math::Vector3d lastPosition = _lastPosition;
 
@@ -641,6 +664,7 @@ void FreescapeEngine::resolveCollisions(Math::Vector3d const position) {
 	Math::Vector3d fallStart = newPosition;   // current standing point
 	Math::Vector3d fallEnd   = fallStart;     // copy for downward probe
 	fallEnd.y() = -8192;                      // probe way down below
+	fallEnd = clipPosition(fallEnd);
 	newPosition = _currentArea->resolveCollisions(fallStart, fallEnd, _playerHeight);
 	int fallen = _lastPosition.y() - newPosition.y();
 

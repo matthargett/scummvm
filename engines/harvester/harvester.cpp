@@ -26,10 +26,10 @@
 #include "harvester/console.h"
 #include "harvester/detection.h"
 #include "harvester/fst_player.h"
-#include "harvester/media_manager.h"
+#include "harvester/media/media_manager.h"
 #include "harvester/resources.h"
-#include "harvester/flow.h"
-#include "harvester/script.h"
+#include "harvester/flow/flow.h"
+#include "harvester/script/script.h"
 
 namespace Harvester {
 
@@ -60,8 +60,16 @@ Common::String HarvesterEngine::getGameId() const {
 	return _gameDescription->gameId;
 }
 
+Common::Language HarvesterEngine::getLanguage() const {
+	return _gameDescription->language;
+}
+
 bool HarvesterEngine::isDemo() const {
 	return (_gameDescription->flags & ADGF_DEMO) != 0;
+}
+
+bool HarvesterEngine::isEuropeanRelease() const {
+	return _gameDescription->extra && Common::String(_gameDescription->extra) == "European Release";
 }
 
 bool HarvesterEngine::canLoadGameStateCurrently(Common::U32String *) {
@@ -324,7 +332,6 @@ Common::Error HarvesterEngine::run() {
 	// The intro FST files play on the narrower startup movie surface.
 	setDisplayMode(320, 200);
 
-	// Set the engine's debugger console
 	setDebugger(new Console());
 
 	if (shouldSkipIntroMoviesForDebug()) {
@@ -347,7 +354,11 @@ Common::Error HarvesterEngine::run() {
 	if (!_media->loadText())
 		return Common::kReadingFailed;
 
-	if (!_media->loadQuickTipsResources())
+	Flow flow(*this);
+	if (!flow.load())
+		return Common::kReadingFailed;
+
+	if (!_media->loadQuickTipsResources(flow.getMenuTextConfig().hasQuickTipsHeader()))
 		return Common::kReadingFailed;
 
 	// If a savegame was selected from the launcher, load it
@@ -355,13 +366,7 @@ Common::Error HarvesterEngine::run() {
 	if (saveSlot != -1)
 		(void)loadGameState(saveSlot);
 
-	Flow flow(*this);
 	_activeFlow = &flow;
-	if (!flow.load()) {
-		_activeFlow = nullptr;
-		return Common::kReadingFailed;
-	}
-
 	const Common::Error error = flow.run();
 	_activeFlow = nullptr;
 	return error;

@@ -23,14 +23,12 @@
 #define MACS2_MUSIC_H
 
 #include "audio/mididrv.h"
+#include "audio/midiplayer.h"
 #include "common/array.h"
+#include "common/path.h"
 #include "common/scummsys.h"
 
 class MidiParser;
-
-namespace Common {
-class MemoryReadStream;
-}
 
 namespace OPL {
 class OPL;
@@ -39,11 +37,26 @@ class OPL;
 namespace Macs2 {
 
 /**
- * Music player for the macs2 engine.
+ * Standard MIDI File player (MUSICGS / MUSICOPL .MID) via host MIDI/AdLib driver
+ * Used by dialect-v2 playSong / stopSong
+ */
+class SmfMidiPlayer : public Audio::MidiPlayer {
+public:
+	SmfMidiPlayer();
+	~SmfMidiPlayer() override = default;
+
+	void playFile(const Common::Path &path, bool loop = false);
+};
+
+/**
+ * Music facade for the macs2 engine.
  *
- * Uses MidiParser_Macs2 for event parsing and drives OPL hardware directly,
- * preserving the original game's register-write behavior for authentic sound.
- * Implements MidiDriver_BASE to receive events from the MidiParser.
+ * Callers always use these methods; backend selection belongs here so additional
+ * drivers can be wired later without scattering checks across the engine.
+ *
+ * Backends:
+ * - MidiParser_Macs2 + direct OPL register writes (DOS music slots)
+ * - SmfMidiPlayer for SMF files (dialect-v2 / Windows MUSICGS|MUSICOPL)
  */
 class Music : public MidiDriver_BASE {
 public:
@@ -53,12 +66,29 @@ public:
 	void init();
 	void deinit();
 
-	void playSongData(const Common::Array<uint8> &data);
+	/** Start DOS AdLib song data. Returns false if unavailable or load failed. */
+	bool playSongData(const Common::Array<uint8> &data);
+	/** Start an SMF .MID from path (lazy-inits SmfMidiPlayer). Stops AdLib playback. */
+	bool playMidiFile(const Common::Path &path, bool loop = false);
+	/** Stop AdLib and SMF playback. */
 	void stopMusic();
+	/** OPL attenuation volume (0 = loud, 0x3F = silent). */
 	void setVolume(uint16 volume);
+	/**
+	 * Apply game music attenuation to the SMF player (0 = loud, 0x3F = silent),
+	 * scaled by ConfMan music_volume. No-op if SMF backend is not open.
+	 */
+	void setSmfVolumeFromAttenuation(uint16 gameAttenuation);
+	/** Re-read ConfMan music_volume into the SMF player (unless ducked). */
+	void syncSmfVolume();
+	/**
+	 * Duck/restore SMF volume while speech plays (TalkVol / ReduceVol path).
+	 * talkVolPercent: 0..100 speech loudness; higher values duck music more.
+	 */
+	void setSmfDucked(bool ducked, uint16 talkVolPercent = 50);
 	bool isPlaybackReady() const { return _adlibPlaybackReady; }
-
-	void readDataFromExecutable(Common::MemoryReadStream *fileStream);
+	bool isMidiFilePlaying() const;
+	bool hasAdlibBackend() const { return _opl != nullptr; }
 
 	// MidiDriver_BASE interface
 	void send(uint32 b) override;
@@ -66,6 +96,7 @@ public:
 
 	// Debug state for ImGui visualization
 	static constexpr int kDebugRingSize = 512;
+	static constexpr int kChannels = 9;
 	struct VoiceDebugState {
 		uint8 note = 0xFF;
 		uint8 channel = 0xFF;
@@ -73,13 +104,13 @@ public:
 		bool active = false;
 	};
 	struct DebugState {
-		VoiceDebugState voices[9];
+		VoiceDebugState voices[kChannels];
 		uint8 masterVolume = 0;
 		uint16 activeMusicSlot = 0;
 		uint8 statusFlags = 0;
 		uint32 nextEventTimer = 0;
 		uint16 numOplChannels = 0;
-		float regHistory[9][kDebugRingSize] = {};
+		float regHistory[kChannels][kDebugRingSize] = {};
 		int ringPos = 0;
 	};
 	DebugState _debug;
@@ -110,10 +141,10 @@ private:
 	uint8 _numOplChannels;
 
 	// Voice allocation (age-based, matching original)
-	uint8 _voiceAge[9];
-	uint8 _voiceMidiChannel[9];
-	uint8 _voiceInstrument[9];
-	uint8 _voiceNote[9];
+	uint8 _voiceAge[kChannels];
+	uint8 _voiceMidiChannel[kChannels];
+	uint8 _voiceInstrument[kChannels];
+	uint8 _voiceNote[kChannels];
 
 	// Channel state
 	uint8 _channelPrograms[16];
@@ -126,17 +157,13 @@ private:
 	Common::Array<uint8> _instrumentData;
 	uint16 _instrumentDataOffset;
 
-	// Lookup tables from EXE
-	Common::Array<uint8> _opSlotTable;
-	Common::Array<uint8> _opMap1;
-	Common::Array<uint8> _opMap2;
-	Common::Array<uint8> _freqTableLo;
-	Common::Array<uint8> _freqTableHi;
-	Common::Array<uint8> _percVolTable;
-	Common::Array<uint8> _percOpMap;
-	Common::Array<uint8> _percFreqChannel;
+	SmfMidiPlayer *_smf;
+	bool _smfDucked;
+	int _smfVolumeBeforeDuck;
 
-	void loadData(Common::MemoryReadStream *stream, int64 pos, uint16 size, void *target);
+	void stopAdlibPlayback();
+	void stopSmfPlayback();
+	bool ensureSmfPlayer();
 };
 
 } // End of namespace Macs2

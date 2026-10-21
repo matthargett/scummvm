@@ -22,7 +22,8 @@
 #ifndef NANCY_ACTION_SORTPUZZLE_H
 #define NANCY_ACTION_SORTPUZZLE_H
 
-#include "engines/nancy/action/actionrecord.h"
+#include "engines/nancy/action/puzzlerecord.h"
+#include "engines/nancy/action/mousefollow.h"
 #include "engines/nancy/commontypes.h"
 
 namespace Nancy {
@@ -33,12 +34,13 @@ namespace Action {
 // (pre-shuffle) layout. Tiles are sorted per type, color and size, which is
 // visible in the back of each gem when picked up.
 // Called from scene 2036 in Nancy10.
-class SortPuzzle : public RenderActionRecord {
+class SortPuzzle : public PuzzleRecord {
 public:
-	SortPuzzle() : RenderActionRecord(7) {}
+	SortPuzzle() : PuzzleRecord(7) {}
 	virtual ~SortPuzzle() {}
 
 	void init() override;
+	void registerGraphics() override;
 
 	void readData(Common::SeekableReadStream &stream) override;
 	void readDataNancy12(Common::SeekableReadStream &stream);
@@ -63,8 +65,18 @@ protected:
 	static const int kMaxSourceRows = 8;
 	static const int kMaxSourceCols = 5;
 	static const int kNumCursors    = 10;
-	static const int kNumValueRects = 114; // Nancy 12: per-kind/size source sprites (19 kinds x 6 sizes)
-	static const int kSizesPerKind  = 6;   // Nancy 12: stride between kinds in _valueSrcRects
+
+	// Nancy 12 source sprite table: one sprite per (row, group, value) triple,
+	// followed by kSizesPerKind sprites used for the piece held at the cursor.
+	static const int kSizesPerKind   = 6;
+	static const int kGroupsPerRow   = 3;
+	static const int kSpriteRows     = 6;
+	static const int kNumBoardRects  = kSpriteRows * kGroupsPerRow * kSizesPerKind;
+	static const int kNumValueRects  = kNumBoardRects + kSizesPerKind;
+
+	// Nancy 12 preset board: a fixed-stride grid of values, -1 marking an empty cell
+	static const int kPresetStride = 10;
+	static const int16 kEmptyCell  = -1;
 
 	// File data
 
@@ -77,6 +89,16 @@ protected:
 	uint16 _groupDivisor = 1;
 	uint16 _valueRange   = 1;
 
+	// Which of a cell's three identifying fields the win check compares, and
+	// whether two neighboring cells may be sorted the other way around
+	bool _matchRow          = true;
+	bool _matchGroup        = true;
+	bool _matchValue        = true;
+	bool _allowSwappedPairs = false;
+
+	bool  _usePresetBoard = false;
+	int16 _presetBoard[kPresetStride * kPresetStride] = {};
+
 	Common::Rect _cellSrcRects[kMaxSourceRows][kMaxSourceCols];
 	Common::Rect _cursorSrcRects[kNumCursors];
 	Common::Array<Common::Rect> _valueSrcRects; // Nancy 12: indexed by gem value
@@ -87,17 +109,11 @@ protected:
 	uint16 _spacingY = 0;
 	int16  _cellWidth  = 0;
 	int16  _cellHeight = 0;
+	int16  _hotspotInsetX = 0;
+	int16  _hotspotInsetY = 0;
 
 	SoundDescription _pickupSound;
 	SoundDescription _dropSound;
-
-	SceneChangeDescription _winScene;
-	FlagDescription        _winFlag;
-	SoundDescription       _winSound;
-	SceneChangeDescription _cancelScene;
-	FlagDescription        _cancelFlag;
-
-	Common::Rect _exitHotspot;
 
 	// Runtime state
 
@@ -116,9 +132,11 @@ protected:
 
 	Cell _held;
 	bool _hasHeld   = false;
+	int  _heldFromRow = -1; // The slot the held piece was picked up from, empty while it is carried
+	int  _heldFromCol = -1;
 	bool _isSolved  = false;
 
-	Common::Point _heldDrawPos;
+	MouseFollowObject _heldObject;
 
 	Graphics::ManagedSurface _boardImage;
 	Graphics::ManagedSurface _cursorImage;
@@ -126,9 +144,13 @@ protected:
 	void initState();
 	void persistState();
 	void redraw();
+	void holdCell(const Cell &cell, bool hasHeld, NancyInput &input);
 	void checkSolved();
+	bool cellsMatch(const Cell &cur, const Cell &sol) const;
 	Common::Rect cellRect(int row, int col) const;
+	Common::Rect cellHotspot(int row, int col) const;
 	Common::Rect cellSprite(const Cell &cell) const;
+	Common::Rect heldSprite(const Cell &cell) const;
 	bool hitTestCell(const Common::Point &p, int &outRow, int &outCol) const;
 };
 

@@ -25,7 +25,7 @@
 namespace Macs2 {
 
 const PlainGameDescriptor macs2Games[] = {
-	{"sis", "Schatz im Silbersee"},
+	{"sis", "Der Schatz im Silbersee"},
 	{0, 0}};
 
 const ADGameDescription gameDescriptions[] = {
@@ -35,16 +35,8 @@ const ADGameDescription gameDescriptions[] = {
 	 AD_ENTRY1s("RESOURCE.MCS", "b8646d5cc2e45442a414220b1a65ba73", 8621636),
 	 Common::DE_DEU,
 	 Common::kPlatformDOS,
-	 ADGF_UNSTABLE,
-	 GUIO3(GAMEOPTION_ORIGINAL_SAVELOAD, GAMEOPTION_TTS, GAMEOPTION_ENHANCEMENTS)},
-	{"sis",
-	 nullptr,
-	 // Adjusted file
-	 AD_ENTRY1s("RESOURCE.MCS", "5a6cdeecdabae42872ab9278ab895bad", 8621636),
-	 Common::DE_DEU,
-	 Common::kPlatformDOS,
-	 ADGF_UNSTABLE,
-	 GUIO3(GAMEOPTION_ORIGINAL_SAVELOAD, GAMEOPTION_TTS, GAMEOPTION_ENHANCEMENTS)},
+	 ADGF_TESTING,
+	 GUIO4(GAMEOPTION_ORIGINAL_SAVELOAD, GAMEOPTION_TTS, GAMEOPTION_ENHANCEMENTS, GAMEOPTION_TRANSLATION)},
 
 	// GMACS II Interpreter V1.00 - Written & Copyright (C) 1993 by Arndt Hasch - Copyright by LINEL
 	{"sis",
@@ -52,35 +44,17 @@ const ADGameDescription gameDescriptions[] = {
 	 AD_ENTRY1s("RESOURCE.MCS", "779c5f7d11ac61b7b941ec0f1778d837", 2376278),
 	 Common::DE_DEU,
 	 Common::kPlatformDOS,
+	 ADGF_DEMO | ADGF_TESTING,
+	 GUIO4(GAMEOPTION_ORIGINAL_SAVELOAD, GAMEOPTION_TTS, GAMEOPTION_ENHANCEMENTS, GAMEOPTION_TRANSLATION)},
+
+	// Amiga demo - DataA (MXMF) + Mdir (MXDR). GMACS II / LINEL.
+	{"sis",
+	 "Demo",
+	 AD_ENTRY2s("DataA", "30ce5b1b30f7ef60f412c0475a25b0cb", 736670,
+	            "Mdir", "269f4c31a50395e3ec6ae69b86e426bd", 598),
+	 Common::DE_DEU,
+	 Common::kPlatformAmiga,
 	 ADGF_DEMO | ADGF_UNSTABLE,
-	 GUIO3(GAMEOPTION_ORIGINAL_SAVELOAD, GAMEOPTION_TTS, GAMEOPTION_ENHANCEMENTS)},
-
-	// English fan translation (original + macs2_translation.dat)
-	{"sis",
-	 "w/translation",
-	 AD_ENTRY2s("RESOURCE.MCS", "b8646d5cc2e45442a414220b1a65ba73", 8621636,
-	            "macs2_translation.dat", nullptr, AD_NO_SIZE),
-	 Common::EN_ANY,
-	 Common::kPlatformDOS,
-	 GF_TRANSLATED | ADGF_UNSTABLE,
-	 GUIO3(GAMEOPTION_ORIGINAL_SAVELOAD, GAMEOPTION_TTS, GAMEOPTION_ENHANCEMENTS)},
-	{"sis",
-	 "w/translation",
-	 AD_ENTRY2s("RESOURCE.MCS", "5a6cdeecdabae42872ab9278ab895bad", 8621636,
-	            "macs2_translation.dat", nullptr, AD_NO_SIZE),
-	 Common::EN_ANY,
-	 Common::kPlatformDOS,
-	 GF_TRANSLATED | ADGF_UNSTABLE,
-	 GUIO3(GAMEOPTION_ORIGINAL_SAVELOAD, GAMEOPTION_TTS, GAMEOPTION_ENHANCEMENTS)},
-
-	// Demo - English fan translation
-	{"sis",
-	 "Demo/w/translation",
-	 AD_ENTRY2s("RESOURCE.MCS", "779c5f7d11ac61b7b941ec0f1778d837", 2376278,
-	            "macs2_translation.dat", nullptr, AD_NO_SIZE),
-	 Common::EN_ANY,
-	 Common::kPlatformDOS,
-	 GF_TRANSLATED | ADGF_DEMO | ADGF_UNSTABLE,
 	 GUIO3(GAMEOPTION_ORIGINAL_SAVELOAD, GAMEOPTION_TTS, GAMEOPTION_ENHANCEMENTS)},
 
 	AD_TABLE_END_MARKER};

@@ -23,6 +23,7 @@ package org.scummvm.scummvm;
 
 import android.content.res.AssetManager;
 import android.graphics.PixelFormat;
+import android.media.midi.MidiDevice;
 import android.util.Log;
 import android.view.SurfaceHolder;
 
@@ -68,6 +69,7 @@ public abstract class ScummVM implements SurfaceHolder.Callback,
 	                           boolean assetsUpdated);
 	private native void destroy();
 	private native void setSurface(int width, int height, int bpp);
+	@SuppressWarnings("ConfusingMainMethod")
 	private native int main(String[] args);
 
 	// pause the engine and all native threads
@@ -126,6 +128,14 @@ public abstract class ScummVM implements SurfaceHolder.Callback,
 	/** @noinspection unused */ @Keep
 	abstract protected void setCurrentGame(String target);
 	/** @noinspection unused */ @Keep
+	abstract protected void notifyHTTPService(int localPort, boolean minimal);
+	/** @noinspection unused */ @Keep
+	abstract protected TextToSpeechManager getTTSManager();
+	/** @noinspection unused */ @Keep
+	abstract protected String[] getMIDIDevices();
+	/** @noinspection unused */ @Keep
+	abstract protected MidiDevice openMIDIDevice(int device, int[] portId);
+	/** @noinspection unused */ @Keep
 	abstract protected String[] getSysArchives();
 	/** @noinspection unused */ @Keep
 	abstract protected String[] getAllStorageLocations();
@@ -140,6 +150,7 @@ public abstract class ScummVM implements SurfaceHolder.Callback,
 	/** @noinspection unused */ @Keep
 	abstract protected int importBackup(String prompt, String path);
 
+	@SuppressWarnings("ClassEscapesDefinedScope")
 	public ScummVM(AssetManager asset_manager, SurfaceHolder holder, final MyScummVMDestroyedCallback scummVMDestroyedCallback) {
 		_asset_manager = asset_manager;
 		_sem_surface = new Object();
@@ -152,14 +163,14 @@ public abstract class ScummVM implements SurfaceHolder.Callback,
 	}
 
 	// SurfaceHolder callback
-	final public void surfaceCreated(SurfaceHolder holder) {
+	final public void surfaceCreated(@NonNull SurfaceHolder holder) {
 		Log.d(LOG_TAG, "surfaceCreated");
 
 		// no need to do anything, surfaceChanged() will be called in any case
 	}
 
 	// SurfaceHolder callback
-	final public void surfaceChanged(SurfaceHolder holder, int format,
+	final public void surfaceChanged(@NonNull SurfaceHolder holder, int format,
 										int width, int height) {
 
 		PixelFormat pixelFormat = new PixelFormat();
@@ -181,7 +192,7 @@ public abstract class ScummVM implements SurfaceHolder.Callback,
 	}
 
 	// SurfaceHolder callback
-	final public void surfaceDestroyed(SurfaceHolder holder) {
+	final public void surfaceDestroyed(@NonNull SurfaceHolder holder) {
 		Log.d(LOG_TAG, "surfaceDestroyed");
 
 		synchronized(_sem_surface) {
@@ -540,7 +551,7 @@ public abstract class ScummVM implements SurfaceHolder.Callback,
 
 				int score = attr.weight();
 
-				Log.d(LOG_TAG, String.format(Locale.ROOT, "%s (%d, %s)", attr.toString(), score, good ? "OK" : "NOK"));
+				Log.d(LOG_TAG, String.format(Locale.ROOT, "%s (%d, %s)", attr, score, good ? "OK" : "NOK"));
 
 				if (!good) {
 					continue;
@@ -558,7 +569,7 @@ public abstract class ScummVM implements SurfaceHolder.Callback,
 					"Unable to find an acceptable EGL config, expect badness.");
 
 		Log.d(LOG_TAG, String.format(Locale.ROOT, "Chosen EGL config: %s",
-										new EglAttribs(res).toString()));
+										new EglAttribs(res)));
 
 		return res;
 	}

@@ -22,18 +22,55 @@
 #ifndef MACS2_CONSTANTS_H
 #define MACS2_CONSTANTS_H
 
+#include "common/scummsys.h"
+
 namespace Macs2 {
 
-// Original game viewport dimensions (all scene maps and buffers use these).
+// V1 (AHFFMACS0100) viewport - default engine dimensions.
 static constexpr int kScreenWidth     = 320;
 static constexpr int kScreenWidthLast = kScreenWidth - 1;
 static constexpr int kGameHeight      = 200;
 static constexpr int kGameHeightLast  = kGameHeight - 1;
 
+// V2 dimensions.
+static constexpr int kWinScreenWidth     = 640;
+static constexpr int kWinScreenWidthLast = kWinScreenWidth - 1;
+static constexpr int kWinGameHeight      = 400;
+static constexpr int kWinGameHeightLast  = kWinGameHeight - 1;
+
 // SCUMM-style verb/inventory strip (kEnhUIUX enhancement only).
-static constexpr int kUIHeight       = 64;
-static constexpr int kScreenHeight   = kGameHeight + kUIHeight;
+static constexpr int kUIHeight         = 64;
+static constexpr int kScreenHeight     = kGameHeight + kUIHeight;
 static constexpr int kScreenHeightLast = kScreenHeight - 1;
+static constexpr int kWinScreenHeight  = kWinGameHeight + kUIHeight;
+
+/**
+ * MCS file layout.
+ * Magic is 12 ASCII bytes "AHFFMACS0100" (v1) or "AHFFMACS0200" (v2).
+ */
+static constexpr uint kMcsMagicSize = 12;
+static constexpr const char *kMcsMagicV1 = "AHFFMACS0100";
+static constexpr const char *kMcsMagicV2 = "AHFFMACS0200";
+
+/** MCS v1 absolute file offsets (after validating AHFFMACS0100). */
+static constexpr uint32 kMcsV1ActorIndexOffset = 0x0C;
+static constexpr uint32 kMcsV1DirectoryOffset = 0x10;
+static constexpr uint32 kMcsV1DirectorySize = 0x3000; // 512 entries * 12 bytes
+/** Object DATA file-offset dword, relative to directory base (entry i at +rel + i*12). */
+static constexpr uint32 kMcsV1ObjectDataPtrRel = 0x17F4;
+/** Object SCRIPT/resource-table file-offset dword, relative to directory base. */
+static constexpr uint32 kMcsV1ObjectScriptPtrRel = 0x17F8;
+static constexpr uint32 kMcsV1VanillaPaletteOffset = kMcsV1DirectoryOffset + kMcsV1DirectorySize; // 0x3010
+static constexpr uint32 kMcsV1VanillaPaletteSize = 0x300;
+static constexpr uint32 kMcsV1ShadingTableOffset = kMcsV1VanillaPaletteOffset + kMcsV1VanillaPaletteSize; // 0x3310
+static constexpr uint32 kMcsV1ShadingTableSize = 0x800;
+static constexpr uint kMcsV1CursorImageCount = 0x21;
+static constexpr uint kMcsV1MapSceneOffsetCount = 256;
+static constexpr uint32 kMcsV1MapSceneOffsetsSize = kMcsV1MapSceneOffsetCount * 4; // 0x400
+static constexpr uint kPathNodeSlots = 16;
+
+static constexpr uint32 kMcsV2ActorIndexOffset = 0x20E;
+static constexpr uint32 kMcsV2DirectoryOffset = 0x212;
 
 } // namespace Macs2
 

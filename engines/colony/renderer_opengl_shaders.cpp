@@ -26,7 +26,7 @@
  */
 
 #include "common/scummsys.h"
-#include "common/config-manager.h"
+#include "common/array.h"
 #include "common/debug.h"
 #include "common/system.h"
 #include "common/textconsole.h"
@@ -80,6 +80,11 @@ public:
 	void setMacColors(uint32 fg, uint32 bg) override;
 	void setDepthState(bool testEnabled, bool writeEnabled) override;
 	void setDepthRange(float nearVal, float farVal) override;
+	void setFeatureClipX(int left, int right) override;
+	void clearFeatureClipX() override;
+	void applyScissorRect(const Common::Rect &logical);
+	void setSquarePixelViewport(bool enable) override;
+	void setCanvasSize(int width, int height) override;
 	void computeScreenViewport() override;
 
 	void drawSurface(const Graphics::Surface *surf, int x, int y) override;
@@ -98,9 +103,7 @@ private:
 	void uploadSolid(const float *positions, int vertCount);
 	void drawSolid(GLenum mode, const float *positions, int vertCount, const float rgba[4]);
 	void drawTexturedQuad(int x, int y, int w, int h);
-	// Set glLineWidth to scale with the window size (Freescape pattern,
-	// gfx_opengl_shaders.cpp:692). No-op when mode isn't a line primitive.
-	// Cached to avoid redundant state changes across same-width draws.
+	// Scale line widths with the canvas, excluding letterboxing.
 	void applyLineWidth(GLenum mode);
 
 	void uploadSolid3D(const float *positions, int vertCount);
@@ -116,10 +119,11 @@ private:
 	void drawWireframeable3D(const float *positions, int vertCount, uint32 color);
 
 	OSystem *_system = nullptr;
+	Common::Rect _active3DViewport;
 	int _width = 0;
 	int _height = 0;
+	bool _squarePixelViewport = false;
 	byte _palette[256 * 3] = {};
-	Common::Rect _screenViewport;
 
 	OpenGL::Shader *_solidShader = nullptr;
 	OpenGL::Shader *_bitmapShader = nullptr;
@@ -170,9 +174,7 @@ private:
 	bool _stipplePatternDirty = false;
 	bool _stippleColorsDirty = true;
 
-	// Solid VBO holds vec2 position only. Sized for the worst-case 2D
-	// primitive — the dither overlay can stream up to width*height/2 dots,
-	// so leave room for typical screens (≈170k floats for an 800×600 split).
+	// Initial 2D buffer size; uploadSolid reallocates it for each draw.
 	enum { kSolidVertexCapacity = 320 * 1024 };
 	// 3D VBO holds vec3 positions. Corridor polygons are typically <16
 	// vertices but a few features (sprite billboards, stairs) push higher.
@@ -189,14 +191,14 @@ OpenGLShaderRenderer::OpenGLShaderRenderer(OSystem *system, int width, int heigh
 	for (int i = 0; i < 256 * 3; i++)
 		_palette[i] = 255;
 
-	static const char *solidAttribs[] = { "position", nullptr };
+	const char *const solidAttribs[] = { "position", nullptr };
 	_solidShader = OpenGL::Shader::fromFiles("colony_solid", solidAttribs);
 	_solidVBO = OpenGL::Shader::createBuffer(GL_ARRAY_BUFFER,
 		sizeof(float) * 2 * kSolidVertexCapacity, nullptr, GL_DYNAMIC_DRAW);
 	_solidShader->enableVertexAttribute("position", _solidVBO, 2, GL_FLOAT, GL_FALSE,
 		2 * sizeof(float), 0);
 
-	static const char *bitmapAttribs[] = { "position", "texcoord", nullptr };
+	const char *const bitmapAttribs[] = { "position", "texcoord", nullptr };
 	_bitmapShader = OpenGL::Shader::fromFiles("colony_bitmap", bitmapAttribs);
 	// Per-draw vec2 position + vec2 texcoord, 4 vertices for a quad.
 	_bitmapVBO = OpenGL::Shader::createBuffer(GL_ARRAY_BUFFER,
@@ -209,7 +211,7 @@ OpenGLShaderRenderer::OpenGLShaderRenderer(OSystem *system, int width, int heigh
 	// 3D solid: vec3 vertex consuming mvpMatrix; the fragment shader has
 	// its own stipple-emulation branch (Freescape pattern, GLES2 safe),
 	// so we use a dedicated colony_solid_3d.{vertex,fragment} pair.
-	static const char *solid3dAttribs[] = { "position", nullptr };
+	const char *const solid3dAttribs[] = { "position", nullptr };
 	_solid3dShader = OpenGL::Shader::fromFiles("colony_solid_3d", solid3dAttribs);
 	_solid3dVBO = OpenGL::Shader::createBuffer(GL_ARRAY_BUFFER,
 		sizeof(float) * 3 * kSolid3DVertexCapacity, nullptr, GL_DYNAMIC_DRAW);
@@ -328,15 +330,7 @@ void OpenGLShaderRenderer::uploadSolid(const float *positions, int vertCount) {
 void OpenGLShaderRenderer::applyLineWidth(GLenum mode) {
 	if (mode != GL_LINES && mode != GL_LINE_STRIP && mode != GL_LINE_LOOP)
 		return;
-	// Scale by window pixel width versus engine logical width — mirrors
-	// Freescape (gfx_opengl_shaders.cpp:692), MAX(1, ...) for safety.
-	// With kSupportsArbitraryResolutions, _system->getWidth() returns the
-	// overlay (window) pixel width; without it, getWidth() == _width and
-	// the ratio is 1.
-	const int sysW = _system ? _system->getWidth() : 0;
-	float w = 1.0f;
-	if (sysW > _width)
-		w = MAX(1.0f, (float)sysW / (float)_width);
+	const float w = MAX(1.0f, (float)_screenViewport.width() / _width);
 	if (w != _lineWidth) {
 		glLineWidth(w);
 		_lineWidth = w;
@@ -494,24 +488,26 @@ void OpenGLShaderRenderer::fillDitherRect(const Common::Rect &rect, uint32 c1, u
 	if (w <= 0 || h <= 0)
 		return;
 
-	// 50% checkerboard: place a dot on every other pixel, alternating per row.
-	// Capacity guard — fall back to solid c2 if the rect is larger than our
-	// streaming buffer (very rare: only the dashboard background hits this
-	// path, and it is much smaller than kSolidVertexCapacity).
-	const int maxDots = kSolidVertexCapacity;
-	int dots = 0;
-	float *verts = new float[maxDots * 2];
-	for (int yi = 0; yi < h && dots < maxDots; yi++) {
-		const int yy = rect.top + yi;
-		for (int xi = (yi & 1); xi < w && dots < maxDots; xi += 2) {
-			verts[dots * 2 + 0] = (float)(rect.left + xi);
-			verts[dots * 2 + 1] = (float)yy;
-			dots++;
+	// GL_POINTS stay one framebuffer pixel wide. Use logical pixel cells
+	// so the checkerboard retains its 50% coverage at every scale.
+	Common::Array<float> verts;
+	verts.reserve(((w + 1) / 2) * h * 12);
+	for (int y = rect.top; y < rect.bottom; y++) {
+		for (int x = rect.left + (y & 1); x < rect.right; x += 2) {
+			const float cell[] = {
+				(float)x,       (float)y,
+				(float)(x + 1), (float)y,
+				(float)x,       (float)(y + 1),
+				(float)(x + 1), (float)y,
+				(float)(x + 1), (float)(y + 1),
+				(float)x,       (float)(y + 1)
+			};
+			for (uint i = 0; i < ARRAYSIZE(cell); i++)
+				verts.push_back(cell[i]);
 		}
 	}
-	if (dots > 0)
-		drawSolid(GL_POINTS, verts, dots, rgba);
-	delete[] verts;
+	if (!verts.empty())
+		drawSolid(GL_TRIANGLES, &verts[0], verts.size() / 2, rgba);
 }
 
 // ---------------------------------------------------------------------------
@@ -627,21 +623,17 @@ void OpenGLShaderRenderer::setPalette(const byte *palette, uint start, uint coun
 	memcpy(_palette + start * 3, palette, count * 3);
 }
 
-void OpenGLShaderRenderer::computeScreenViewport() {
-	const int32 screenWidth = _system->getWidth();
-	const int32 screenHeight = _system->getHeight();
-	const bool widescreen = ConfMan.getBool("widescreen_mod");
+void OpenGLShaderRenderer::setSquarePixelViewport(bool enable) {
+	if (_squarePixelViewport == enable)
+		return;
 
-	if (widescreen) {
-		_screenViewport = Common::Rect(screenWidth, screenHeight);
-	} else if (_system->getFeatureState(OSystem::kFeatureAspectRatioCorrection)) {
-		const int32 vpW = MIN<int32>(screenWidth, screenHeight * 4 / 3);
-		const int32 vpH = MIN<int32>(screenHeight, screenWidth * 3 / 4);
-		_screenViewport = Common::Rect(vpW, vpH);
-		_screenViewport.translate((screenWidth - vpW) / 2, (screenHeight - vpH) / 2);
-	} else {
-		_screenViewport = Common::Rect(screenWidth, screenHeight);
-	}
+	_squarePixelViewport = enable;
+	computeScreenViewport();
+}
+
+void OpenGLShaderRenderer::computeScreenViewport() {
+	const int screenHeight = _system->getHeight();
+	_screenViewport = Colony::computeScreenViewport(_system, _width, _height, _squarePixelViewport);
 
 	glViewport(_screenViewport.left, screenHeight - _screenViewport.bottom,
 		_screenViewport.width(), _screenViewport.height());
@@ -652,6 +644,14 @@ void OpenGLShaderRenderer::computeScreenViewport() {
 void OpenGLShaderRenderer::copyToScreen() {
 	glFlush();
 	_system->updateScreen();
+}
+
+void OpenGLShaderRenderer::setCanvasSize(int width, int height) {
+	_width = width;
+	_height = height;
+	computeScreenViewport();
+	rebuildProjection();
+	uploadProjectionUniform();
 }
 
 Graphics::Surface *OpenGLShaderRenderer::getScreenshot() {
@@ -723,6 +723,32 @@ void OpenGLShaderRenderer::setDepthRange(float nearVal, float farVal) {
 	setGLDepthRange(nearVal, farVal);
 }
 
+void OpenGLShaderRenderer::applyScissorRect(const Common::Rect &logical) {
+	const float scaleX = (float)_screenViewport.width() / (float)_width;
+	const float scaleY = (float)_screenViewport.height() / (float)_height;
+	const int sysH = _system->getHeight();
+	const int vpX = _screenViewport.left + (int)(logical.left * scaleX);
+	const int vpY = sysH - (_screenViewport.top + (int)(logical.bottom * scaleY));
+	const int vpW = (int)(logical.width() * scaleX);
+	const int vpH = (int)(logical.height() * scaleY);
+	glScissor(vpX, vpY, vpW > 0 ? vpW : 0, vpH > 0 ? vpH : 0);
+}
+
+void OpenGLShaderRenderer::setFeatureClipX(int left, int right) {
+	Common::Rect clipped = _active3DViewport;
+	if (left > clipped.left)
+		clipped.left = left;
+	if (right < clipped.right)
+		clipped.right = right;
+	if (clipped.left >= clipped.right)
+		clipped.right = clipped.left;
+	applyScissorRect(clipped);
+}
+
+void OpenGLShaderRenderer::clearFeatureClipX() {
+	applyScissorRect(_active3DViewport);
+}
+
 void OpenGLShaderRenderer::begin3D(int camX, int camY, int camZ, int angle, int angleY,
 		const Common::Rect &viewport) {
 	glEnable(GL_DEPTH_TEST);
@@ -739,18 +765,17 @@ void OpenGLShaderRenderer::begin3D(int camX, int camY, int camZ, int angle, int 
 	const int vpH = (int)(viewport.height() * scaleY);
 	glViewport(vpX, vpY, vpW, vpH);
 	glScissor(vpX, vpY, vpW, vpH);
+	_active3DViewport = viewport;
 	glEnable(GL_SCISSOR_TEST);
 	glDepthFunc(GL_LEQUAL);
 	glDepthMask(GL_TRUE);
 
-	// Perspective: 75° vertical FOV, near=1, far=10000 — matches the
-	// fixed-function path so geometry lands at the same screen positions.
-	const float aspectRatio = (float)viewport.width() / (float)viewport.height();
-	const float fov = 75.0f;
-	const float nearClip = 1.0f;
+	// Match CALCROBO.C's center + (coordinate << 8) / depth projection and
+	// the fixed-function path by using a 256-logical-pixel focal length.
+	const float nearClip = kProjectionNearClip;
 	const float farClip = 10000.0f;
-	const float ymax = nearClip * tanf(fov * (float)M_PI / 360.0f);
-	const float xmax = ymax * aspectRatio;
+	const float xmax = nearClip * viewport.width() * 0.5f / kProjectionFocalLength;
+	const float ymax = nearClip * viewport.height() * 0.5f / kProjectionFocalLength;
 
 	// Build perspective frustum directly. Math::makeFrustumMatrix exists in
 	// math/glmath.h, but its sign convention requires a final transpose to

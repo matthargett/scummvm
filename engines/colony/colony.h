@@ -38,6 +38,7 @@
 #include "graphics/surface.h"
 
 namespace Common {
+struct Event;
 class MacResManager;
 class SeekableReadStreamEndian;
 }
@@ -47,6 +48,7 @@ class Cursor;
 class Font;
 class FrameLimiter;
 class MacMenu;
+struct MacMenuItem;
 class MacWindowManager;
 class ManagedSurface;
 }
@@ -60,9 +62,8 @@ class Sound;
 // with the high byte == 0xFF as direct ARGB (R=bits 16-23, G=8-15, B=0-7) and
 // values with high byte 0 as palette indices. The PixelFormat below matches
 // that direct-ARGB layout exactly so we can build colors via ARGBToColor.
-inline const Graphics::PixelFormat &renderColorFormat() {
-	static const Graphics::PixelFormat fmt(4, 8, 8, 8, 8, 16, 8, 0, 24);
-	return fmt;
+inline Graphics::PixelFormat renderColorFormat() {
+	return Graphics::PixelFormat(4, 8, 8, 8, 8, 16, 8, 0, 24);
 }
 
 inline uint32 packRGB(byte r, byte g, byte b) {
@@ -91,7 +92,9 @@ enum ColonyAction {
 	kActionToggleWireframe,
 	kActionToggleFullscreen,
 	kActionEscape,
-	kActionFire
+	kActionFire,
+	kActionAutomapZoomIn,
+	kActionAutomapZoomOut
 };
 
 enum GameMode {
@@ -152,7 +155,7 @@ enum RobotType {
 // Capped at 112 so the robot keeps at least 32 units of movement freedom
 // within a 256-unit cell (256 - 2*112 = 32).
 inline int robotWallPad(int robotType) {
-	static const int kMaxPad = 112;
+	const int kMaxPad = 112;
 	switch (robotType) {
 	case kRobEye:      return 66;
 	case kRobPyramid:
@@ -200,8 +203,21 @@ enum ObjectType {
 enum ObjColor {
 	kColorClear = 0,
 	kColorBlack = 1,
+	kColorBlue = 2,
+	kColorGreen = 3,
+	kColorCyan = 4,
+	kColorRed = 5,
+	kColorMagenta = 6,
+	kColorBrown = 7,
+	kColorWhite = 8,
 	kColorDkGray = 9,
+	kColorLtBlue = 10,
 	kColorLtGreen = 11,
+	kColorLtCyan = 12,
+	kColorLtRed = 13,
+	kColorLtMagenta = 14,
+	kColorYellow = 15,
+	kColorIntWhite = 16,
 	kColorBath = 17,
 	kColorWater = 18,
 	kColorSilver = 19,
@@ -261,6 +277,8 @@ enum ObjColor {
 	kColorBottomSnoop = 60,
 	kColorUPyramid = 68,
 	kColorShadow = 74,
+	kColorLtGray = 75,
+	kColorGray = 76,
 	// Animated reactor/power suit colors (Mac: c_hcore1..c_hcore4, c_ccore, c_color0..c_color3)
 	kColorHCore1 = 100,
 	kColorHCore2 = 101,
@@ -276,7 +294,10 @@ enum ObjColor {
 	kColorSoldierEye = 110,
 	kColorQueenBody = 111,
 	kColorQueenEye = 112,
-	kColorQueenWingRed = 113
+	kColorQueenWingRed = 113,
+	// The monolith is cBLACK in the DOS table but has its own Mac entry
+	// (c_monolith), so it cannot share the generic kColorBlack mapping.
+	kColorMonolith = 114
 };
 
 enum {
@@ -303,8 +324,22 @@ enum MenuAction {
 	kMenuActionCursorShoot
 };
 
-static const int kBaseObject = 20;
-static const int kMeNum = 101;
+// Menu bar order, matching inits.c:43-48 (myMenus[0..3]).
+enum MenuIndex {
+	kMenuApple = 0,
+	kMenuFile,
+	kMenuEdit,
+	kMenuOptions
+};
+
+// Object and robot angles keep the original's convention, where the sine table's
+// own 45-degree phase supplied the last 32 steps; player angles are already
+// world-absolute. Convert whenever one is used as the other.
+uint8 objWorldAng(uint8 objectAng);
+uint8 objAngFromPlayer(uint8 playerAng);
+
+const int kBaseObject = 20;
+const int kMeNum = 101;
 
 struct Locate {
 	uint8 ang = 0;
@@ -355,7 +390,7 @@ struct PassPatch {
 	uint8 ang;
 };
 
-// Per-level persistence: wall state changes (airlock locks) and visit flags.
+// Per-level persistence: door and airlock states, and visit flags.
 struct LevelData {
 	uint8 visit;
 	uint8 queen;
@@ -364,6 +399,7 @@ struct LevelData {
 	uint8 size;            // number of saved wall changes (max 10)
 	uint8 location[10][3]; // [x, y, direction] of each changed wall
 	uint8 data[10][5];     // saved wall feature bytes (5 per location)
+	uint8 openDoors[31][31]; // direction bits for open ordinary doors
 };
 
 struct MacColor {
@@ -448,6 +484,7 @@ public:
 	Common::Error saveGameStream(Common::WriteStream *stream, bool isAutosave = false) override;
 	Common::Error loadGameStream(Common::SeekableReadStream *stream) override;
 	void pauseEngineIntern(bool pause) override;
+	void applyGameSettings() override;
 	Common::Platform getPlatform() const { return _gameDescription->platform; }
 	bool isSoundEnabled() const { return _soundOn; }
 	const Graphics::Surface *getSavedScreen() const { return _savedScreen; }
@@ -469,19 +506,26 @@ public:
 	void clearPlayerCellMarker();
 	void setPlayerCellMarker();
 	bool playerIntersectsObjectFootprint(const Thing &obj, int xloc, int yloc) const;
+	bool playerStartsInsideObject(int rnum) const;
 	void cCommand(int xnew, int ynew, bool allowInteraction);
 	bool scrollInfo(const Graphics::Font *macFont = nullptr);
 	bool checkSkipRequested();
+	bool checkClickRequested();
 	bool waitForInput();
+	bool waitForMessageInput();
 	void checkCenter();
 	void fallThroughHole();
 	void playTunnelEffect(bool falling);
+	int rideTunnel(const uint8 *map, Locate *pobject);
+	void doDnStairs();
 
 	void doText(int entry, int center);
 	void inform(const char *text, bool hold);
 	void printMessage(const char *text[], bool hold);
 	void makeMessageRect(Common::Rect &r);
 	int runMacEndgameDialog(const Common::String &message);
+	int runMacSaveQuery();
+	void runMacAbout();
 
 private:
 	const ADGameDescription *_gameDescription;
@@ -493,6 +537,7 @@ private:
 	uint8 _dirXY[32][32];
 	bool _visited[8][32][32];  // per-level fog-of-war: _visited[level-1][x][y]
 	bool _showAutomap;
+	float _automapZoom;        // automap scale factor, 1.0 = default cell size
 
 	Locate _me;
 	Common::Array<Thing> _objects;
@@ -505,6 +550,8 @@ private:
 	Graphics::FrameLimiter *_frameLimiter = nullptr;
 	Common::RenderMode _renderMode;
 	Graphics::Surface *_savedScreen = nullptr;
+	Graphics::Surface *_flIconSurf[5] = {};
+	bool _flIconsLoaded = false;
 
 
 	int _tsin = 0, _tcos = 0;
@@ -514,6 +561,7 @@ private:
 	int _width, _height;
 	float _mouseSensitivity;
 	bool _mouseLocked;
+	bool _invertY;
 	bool _soundOn = true;
 	bool _showDashBoard;
 	bool _crosshair;
@@ -565,6 +613,7 @@ private:
 	uint32 _lastAnimUpdate = 0;
 	uint32 _lastWarningChimeTime = 0;
 	uint32 _lastCollisionSoundTime = 0;
+	int _bumpedObject = 0;
 	int _action0 = 0, _action1 = 0;
 	int _creature = 0;
 	bool _allGrow = false;
@@ -581,6 +630,7 @@ private:
 	int _mountains[256];          // mountain height profile
 	int _battledx = 0;            // mountain parallax divisor (Width/59)
 	int _battleRound = 0;         // AI round-robin counter
+	bool _battleSendFarX = false; // alternate robot respawn axis
 	Locate *_battlePwh[100] = {};  // visible object pointers (for hit detection)
 	int _battleMaxP = 0;          // count of visible objects
 	Locate _pyramids[4][4][15];   // pyramid obstacles: 4x4 quadrants, 15 each
@@ -603,10 +653,18 @@ private:
 	Graphics::MacMenu *_macMenu = nullptr;
 	Graphics::ManagedSurface *_menuSurface = nullptr;
 	int _menuBarHeight = 0;
+	int _pendingMenuAction = 0;
+	int _pendingLoadSlot = -1;
 	void initMacMenus();
+	void drawMacMenuBar();
+	bool processMacMenuEvent(const Common::Event &event);
+	void processPendingMenuAction();
 	void loadMacCursorResources();
 	void handleMenuAction(int action);
 	static void menuCommandsCallback(int action, Common::String &text, void *data);
+	// getSubMenuItem() indexes a submenu; our ids are actions. Look up by action.
+	Graphics::MacMenuItem *macMenuItemForAction(int menuIndex, int action);
+	bool showSaveDialog();
 
 	int _frntxWall = 0, _frntyWall = 0;
 	int _sidexWall = 0, _sideyWall = 0;
@@ -614,6 +672,13 @@ private:
 	int _sidex = 0, _sidey = 0;
 	int _front = 0, _side = 0;
 	int _direction = 0;
+
+	float _eyeDepthPull = 0.0f; // world units the eye parts are pulled at the camera
+	Common::Point _renderCamera;
+	// think.c: the snoop's snout bobs while it hunts (sniff/csniff).
+	int _snoopSnoutZ = 0;
+	int _snoopSniff = 5;
+	int _snoopSniffCount = 0;
 
 	Common::Rect _clip;
 	Common::Rect _screenR;
@@ -628,9 +693,9 @@ private:
 	int _powerWidth = 0;     // width of each of the 3 power bar columns
 	int _powerHeight = 0;    // pixel height per power bar unit (max 5)
 
-	// Cached decoded PICT surfaces for dashboard panels (Mac color mode)
+	// Cached Mac dashboard surfaces
 	Graphics::Surface *_pictPower = nullptr;      // PICT -32755 (normal) or -32760 (trouble)
-	Graphics::Surface *_pictPowerNoArmor = nullptr; // PICT -32761 (no armor, color)
+	Graphics::Surface *_pictPowerNoArmor = nullptr; // B&W panel from DrawInfo()
 	Graphics::Surface *_pictCompass = nullptr;     // PICT -32757
 	int _pictPowerID = 0;   // Track which PICT is cached
 	Graphics::Surface *loadPictSurface(int resID);
@@ -654,10 +719,16 @@ private:
 	void draw3DPrism(Thing &obj, const PrismPartDef &def, bool useLook, int colorOverride = -1, bool accumulateBounds = false, bool forceVisible = false);
 	void draw3DLeaf(const Thing &obj, const PrismPartDef &def);
 	void draw3DSphere(Thing &obj, int pt0x, int pt0y, int pt0z,
-		int pt1x, int pt1y, int pt1z, uint32 fillColor, uint32 outlineColor, bool accumulateBounds = false);
-	void drawPrismOval3D(Thing &thing, const PrismPartDef &def, bool useLook, int colorOverride, bool forceVisible = false);
+		int pt1x, int pt1y, int pt1z, uint32 fillColor, uint32 outlineColor,
+		bool accumulateBounds = false, bool dosFill = true);
+	void drawPrismOval3D(Thing &thing, const PrismPartDef &def, bool useLook, int colorOverride,
+		bool forceVisible = false, bool dosFill = true);
 	void drawEyeOverlays3D(Thing &thing, const PrismPartDef &irisDef, int irisColorOverride,
-		const PrismPartDef &pupilDef, int pupilColorOverride, bool useLook);
+		const PrismPartDef &pupilDef, int pupilColorOverride, bool useLook, bool dosFill = true);
+	void drawDOSEyeSlit3D(Thing &thing, const PrismPartDef &irisDef, bool useLook);
+	void drawBodyEye3D(Thing &obj, int eyeballColor, int pupilColor, float pull);
+	void drawEnemyEye3D(Thing &obj, Thing &eye, int eyeballColor, int irisColor, int pupilColor);
+	void pullTowardCamera(float *px, float *py, float *pz, int count) const;
 	float growRenderTickFraction() const;
 	bool drawInterpolatedGrowRobot(Thing &obj, int eyeballColor, int pupilColor);
 	void drawInterpolatedGrowPrism(Thing &obj, const PrismPartDef &fromDef, const PrismPartDef &toDef, float progress);
@@ -665,28 +736,34 @@ private:
 	bool drawStaticObjectPrisms3D(Thing &obj);
 	void initRobots();
 	void renderCorridor3D();
+	void computeRenderCamera();
+	void separateRenderCameraFromWall(int x, int y, uint8 bit, int separation, bool featuresVisible);
 	void drawWallFeatures3D();
+	bool isWallFeatureFacingCamera(int cellX, int cellY, int direction) const;
 	void drawWallFeature3D(int cellX, int cellY, int direction);
 	void drawCellFeature3D(int cellX, int cellY);
 	void getWallFace3D(int cellX, int cellY, int direction, float corners[4][3]);
+	bool isVisibleRecessFeature(int x, int y, int direction) const;
+	bool wallSegmentIsOpenWell(int x, int y, uint8 bit) const;
+	bool wallSegmentIsRendered(int x, int y, uint8 bit) const;
+	void getWallRecess3D(const float corners[4][3], float farC[4][3]) const;
+	void recessPoint(const float nearC[4][3], const float farC[4][3], float u, float v, float depth, float out[3]) const;
+	void recessLine(const float nearC[4][3], const float farC[4][3], float u1, float v1, float d1,
+		float u2, float v2, float d2, uint32 color);
+	void recessQuad(const float nearC[4][3], const float farC[4][3], const float *u, const float *v,
+		const float *d, int count, uint32 color);
+	void clipToWallFace(const float corners[4][3]);
+	void macFillRecess(const float nearC[4][3], const float farC[4][3], const float *u, const float *v,
+		const float *d, int count, int macIdx, bool macColors);
 	void getCellFace3D(int cellX, int cellY, bool ceiling, float corners[4][3]);
 
 	int occupiedObjectAt(int xnew, int ynew, int x, int y, const Locate *pobject);
 	void interactWithObject(int objNum);
 
-	// Convert a mouse coord delivered by the event manager into engine
-	// logical coords. With kSupportsArbitraryResolutions declared, the
-	// framework rewrites _currentState.gameWidth to the overlay (window)
-	// pixel size in recalculateDisplayAreas() — so g_system->getWidth()
-	// no longer matches our _width, and mouse events arrive in window
-	// pixels. The engine's hit-test math (whichSprite, _screenR) is in
-	// logical coords, so we have to scale back. Same pattern Freescape
-	// uses in mousePosToCrossairPos (freescape.cpp:593-597).
+	// Mouse events (and warpMouse) speak window pixels, because we declare
+	// kSupportsArbitraryResolutions; the hit-test math (whichSprite, _screenR)
+	// is in logical coords. Convert both ways.
 	Common::Point eventMouseToLogical(const Common::Point &p) const;
-	// Inverse of eventMouseToLogical: warp the mouse to a position
-	// expressed in engine-logical coords. _system->warpMouse expects
-	// virtual-screen coords, which with kSupportsArbitraryResolutions
-	// is window pixels.
 	void warpMouseLogical(int x, int y);
 
 	// shoot.c: shooting and power management
@@ -697,6 +774,8 @@ private:
 	int findAimedObject(const Common::Point &aim, bool *isBlocker = nullptr, int *targetDist = nullptr) const;
 	bool hasAimedRobotTarget() const;
 	void destroyRobot(int num);
+	void explodeFlash(int silentFlips);
+	void invertViewport();
 	void doShootCircles(int cx, int cy);
 	void doBurnHole(int cx, int cy, int radius);
 	void meGetShot();
@@ -720,6 +799,7 @@ private:
 	void resetObjectSlot(int slot, int type, int xloc, int yloc, uint8 ang);
 	bool createObject(int type, int xloc, int yloc, uint8 ang);
 	void saveLevelState();
+	void saveOpenDoors();
 	void doPatch();
 	void saveWall(int x, int y, int direction);
 	void getWall();
@@ -728,6 +808,9 @@ private:
 	bool patchMapFrom(const PassPatch &from, uint8 *mapdata);
 	void exitForklift();
 	void dropCarriedObject();
+	bool stepOutOfCell(uint8 angle, bool backwards = false);
+	bool exitTeleport();
+	void teleportPlayer();
 	bool setDoorState(int x, int y, int direction, int state);
 	int openAdjacentDoors(int x, int y);
 	int goToDestination(const uint8 *map, Locate *pobject);
@@ -737,22 +820,33 @@ private:
 	void updateMouseCapture(bool recenter = true);
 	Common::Point getAimPoint() const;
 	void updateViewportLayout();
+	bool updateScreenSize();
 	void drawDashboardStep1();
 	void drawDashboardMac();
+	void drawMacNoArmorPanel();
 	void drawDOSBarGraph(int x, int y, int height);
 	void updateDOSPowerBars();
-	static int qlog(int32 x);
 	void drawMiniMapMarker(int x, int y, int halfSize, uint32 color, bool isMac, const Common::Rect *clip = nullptr);
 	bool hasRobotAt(int x, int y) const;
 	bool hasFoodAt(int x, int y) const;
 	void drawMiniMap(uint32 lineColor);
 	void drawAutomap();
+	void changeAutomapZoom(bool zoomIn);
+	void drawAutomapCryoMarker(int x, int y, int halfSize, uint32 color, const Common::Rect &clip);
+	void drawAutomapTeleportMarker(int x, int y, int halfSize, uint32 color, const Common::Rect &clip);
+	void drawAutomapForkliftMarker(int x, int y, int halfSize, uint32 color, const Common::Rect &clip);
+	void drawAutomapQueenMarker(int x, int y, int halfSize, uint32 color, const Common::Rect &clip);
+	void drawAutomapSnoopMarker(int x, int y, int halfSize, int dirX, int dirY, uint32 color, const Common::Rect &clip);
+	void drawAutomapDroneMarker(int x, int y, int halfSize, uint32 color, const Common::Rect &clip);
+	void drawAutomapRobotMarker(int x, int y, int halfSize, uint32 color, const Common::Rect &clip);
+	void drawAutomapObjectMarker(int x, int y, int halfSize, uint32 color, const Common::Rect &clip);
 	void markVisited();
 	void automapCellCorner(int dx, int dy, int xloc, int yloc, int lExt, int tsin, int tcos, int ccx, int ccy, int &sx, int &sy);
 	void automapDrawWall(const Common::Rect &vp, int x1, int y1, int x2, int y2, uint32 color);
 	int automapWallFeature(int fx, int fy, int dir);
 	void automapDrawWallWithFeature(const Common::Rect &vp, int wx1, int wy1, int wx2, int wy2, int feat, int lExt, uint32 color);
 	void drawForkliftOverlay();
+	void loadForkliftIcons();
 	void drawCrosshair();
 	bool clipLineToRect(int &x1, int &y1, int &x2, int &y2, const Common::Rect &clip) const;
 	void wallLine(const float corners[4][3], float u1, float v1, float u2, float v2, uint32 color);
@@ -799,6 +893,21 @@ private:
 	Common::Array<int16> _animBMColors;
 	bool _animationRunning;
 	int _animationResult;
+	bool _animExitPressed = false;
+	bool _animExitInside = false;
+	Common::Rect _animExitStrip;
+	Common::Rect _animExitButton;
+	Common::Rect _messageSourceRect;
+	int _coderPick[4] = {};
+	int _coderCursor = 0;
+	int _coderPressed = -1;
+	bool _coderPressInside = false;
+	Image *_coderTiles[4] = {};
+	Image *_coderBtnUp = nullptr;
+	Image *_coderBtnDown = nullptr;
+	bool _coderTilesLoaded = false;
+	Common::Rect _coderWin;
+	Common::Rect _coderIconRects[4];
 	bool _doorOpen;
 	int _liftObject = 0;  // sprite index for the carried object in lift animation
 	bool _liftUp = false;     // current lift state: true=raised, false=lowered
@@ -807,21 +916,34 @@ private:
 	int _airlockY = -1;
 	int _airlockDirection = -1;
 	bool _airlockTerminate = false;
+	int _teleportX = -1;
+	int _teleportY = -1;
+	bool _teleportInside = false;
+	bool _teleportDone = false;
 
 	void playIntro();
 	bool makeStars(const Common::Rect &r, int btn);
 	bool makeBlackHole();
 	bool makePlanet();
-	bool timeSquare(const Common::String &str, const Graphics::Font *macFont = nullptr);
+	bool leavePlanet();
+	bool explodePlanet();
+	bool timeSquare(const Common::String &str, const Graphics::Font *macFont = nullptr, bool gameOver = false);
 	bool drawPict(int resID);
 	bool loadAnimation(const Common::String &name);
+	bool loadLiftAnimation(int objectType);
 	void deleteAnimation();
 	void takeOff();
+	void fullOfStars();
 	void gameOver(bool kill);
+	void gameOver(bool kill, int savedCryos);
 	int countSavedCryos() const;
 	void playAnimation();
 	void updateAnimation();
 	void drawAnimation();
+	void drawAnimationExitButton(int ox, int oy);
+	void drawColonyCoder(int animOx, int animOy);
+	void loadCoderTiles();
+	bool handleColonyCoderClick(const Common::Point &pt);
 	void drawComplexSprite(int index, int ox, int oy);
 	void drawAnimationImage(Image *img, Image *mask, int x, int y, uint32 fillColor,
 			Graphics::Surface *&bakedCache, uint64 &bakedCacheKey);
@@ -841,6 +963,8 @@ private:
 	void handleDoorClick(int item);
 	void handleAirlockClick(int item);
 	void handleElevatorClick(int item);
+	void handleTeleportClick(int item);
+	void flashTeleportBooth();
 	void handleControlsClick(int item);
 	void dolSprite(int index);
 	void moveObject(int index);

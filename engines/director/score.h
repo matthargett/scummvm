@@ -208,6 +208,7 @@ public:
 	Common::MemoryReadStreamEndian *_framesStream;
 
 	byte _currentFrameRate;
+	int _currentDigitalVideoTimeScale;
 	byte _puppetTempo;
 
 	bool _puppetPalette;
@@ -248,6 +249,13 @@ private:
 	uint16 _nextFrame;
 	int _currentLabel;
 	DirectorSound *_soundManager;
+
+	// score frame number at the last film loop advance
+	uint32 _filmLoopsLastFrame = 0;
+
+	// true when the current frame is held by an explicit jump (e.g. go the
+	// frame) rather than natural playback; in D4 this freezes film loops.
+	bool _frameHeldByJump = false;
 
 	int _previousBuildBotBuild = -1;
 	bool _firstRun = true;

@@ -22,17 +22,15 @@
 #ifndef MADS_CORE_SOUND_MANAGER_H
 #define MADS_CORE_SOUND_MANAGER_H
 
+#include "audio/mt32gm.h"
 #include "common/array.h"
 #include "common/memstream.h"
 #include "common/mutex.h"
 #include "common/queue.h"
+#include "native_sound_timer.h"
 
 namespace Audio {
 class Mixer;
-}
-
-namespace OPL {
-class OPL;
 }
 
 namespace MADS {
@@ -42,9 +40,9 @@ namespace MADS {
 class SoundDriver {
 protected:
 	Audio::Mixer *_mixer;
-	OPL::OPL *_opl;
 	Common::Array<byte> _soundData;
 	Common::Mutex _driverMutex;
+	bool _paused;
 
 	/**
 	 * Gets a stream starting at a given offset in the loaded sound data
@@ -53,10 +51,19 @@ protected:
 		return Common::MemoryReadStream(&_soundData[offset], _soundData.size() - offset);
 	}
 
+	explicit SoundDriver(Audio::Mixer *mixer) : _mixer(mixer), _paused(false) {}
+
 public:
-	SoundDriver(Audio::Mixer *mixer, OPL::OPL *opl, const Common::Path &filename,
+	/**
+	 * Loads a driver data block from an absolute file offset.
+	 *
+	 * For DOS MZ overlays, dataOffset includes the executable header. Offsets
+	 * passed to getDataStream() and stored in sequence data are relative to
+	 * the loaded block instead.
+	 */
+	SoundDriver(Audio::Mixer *mixer, const Common::Path &filename,
 		int dataOffset, int dataSize);
-	virtual ~SoundDriver();
+	virtual ~SoundDriver() {}
 
 	/**
 	 * Execute a player command. Most commands represent sounds to play, but some
@@ -72,6 +79,11 @@ public:
 	virtual int stop() = 0;
 
 	/**
+	 * Pause or unpause sound playback
+	 */
+	virtual void pause(bool paused);
+
+	/**
 	 * Main poll method to allow sounds to progress
 	 */
 	virtual int poll() = 0;
@@ -81,23 +93,38 @@ public:
 	 */
 	virtual void noise() = 0;
 
+	// TODO Remove
+	virtual void setVolume(int volume) { };
+
 	/**
-	 * Set the volume
+	 * Stop all active notes
 	 */
-	virtual void setVolume(int volume) = 0;
+	virtual void stopAllNotes() { }
 };
 
 class SoundManager {
 protected:
+	struct QueuedCommand {
+		int _commandId;
+		int _param;
+	};
+
+	// Number of microseconds between driver updates (60 Hz frequency)
+	static const uint32 UPDATE_DELTA;
+
+	enum DriverType { SOUND_ADLIB, SOUND_MT32, SOUND_GM, SOUND_PCSPEAKER, SOUND_PAS };
 	Audio::Mixer *_mixer;
+	DriverType _driverType;
+	MidiDriver_MT32GM *_midiDriver;
+	uint32 _driverCallbackDelta;
+	uint32 _updateDeltaRemainder;
+
 	bool &_soundFlag;
-	OPL::OPL *_opl = nullptr;
 	SoundDriver *_driver = nullptr;
-	bool _pollSoundEnabled = false;
-	bool _soundPollFlag = false;
 	bool _newSoundsPaused = false;
-	Common::Queue<int> _queuedCommands;
-	int _masterVolume = 255;
+	Common::Queue<QueuedCommand> _queuedCommands;
+
+	NativeSoundTimer _hostTimer;
 
 protected:
 	/**
@@ -107,12 +134,14 @@ protected:
 	virtual void loadDriver(int sectionNum) = 0;
 
 public:
-	SoundManager(Audio::Mixer *mixer, bool &soundFlag);
+	SoundManager(Audio::Mixer *mixer, bool &soundFlag,
+			bool supportsGeneralMidi = false);
 	virtual ~SoundManager();
 
+	/**
+	 * Validate the sound driver files needed for data
+	 */
 	virtual void validate() = 0;
-
-	bool _preferRoland;
 
 	/**
 	 * Initializes the sound driver for a given game section
@@ -127,6 +156,25 @@ public:
 	}
 
 	/**
+	 * Sound manager is ready to start sound playback.
+	 * This will return false while the MT-32 driver is sending SysEx messages
+	 * to the unit. Do not start sound playback while this returns false.
+	 */
+	bool isReady();
+
+	/**
+	 * Returns whether the current driver reports an active sound.
+	 */
+	bool isDriverActive();
+
+	/**
+	 * Returns whether the selected driver family uses PC speaker data.
+	 */
+	bool usesPCSpeaker() const {
+		return _driverType == SOUND_PCSPEAKER;
+	}
+
+	/**
 	 * Stop any currently active sound and remove the driver
 	 */
 	void closeDriver();
@@ -137,12 +185,6 @@ public:
 	void removeDriver();
 
 	/**
-	 * Sets the enabled status of the sound
-	 * @flag		True if sound should be enabled
-	 */
-	void setEnabled(bool flag);
-
-	/**
 	 * Temporarily pause the playback of any new sound commands
 	 */
 	void pauseNewCommands();
@@ -150,12 +192,12 @@ public:
 	/**
 	 * Stop queueing sound commands, and execute any previously queued ones
 	 */
-	void startQueuedCommands();
+	virtual void startQueuedCommands();
 
 	/**
-	 * Set the master volume
+	 * Applies sound settings from the ScummVM configuration manager.
 	 */
-	void setVolume(int volume);
+	void syncSoundSettings();
 
 	//@{
 	/**
@@ -171,12 +213,20 @@ public:
 	void stop();
 
 	/**
+	 * Pauses or unpauses playback.
+	 */
+	void pause(bool pause);
+
+	/**
 	 * Noise
 	 * Some sort of random noise generation?
 	 */
 	void noise();
 
 	//@}
+
+	void onTimer();
+	static void timerCallback(void *data);
 };
 
 } // namespace MADS

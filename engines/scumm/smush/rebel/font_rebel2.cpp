@@ -547,12 +547,20 @@ void Rebel2NutRenderer::loadRebel2SpriteFromData(const byte *data, int32 dataSiz
 						memcpy(_codec23Lookup, frame.data, sizeof(_codec23Lookup));
 					}
 
+					// Codec 45 setup frames have no drawable dimensions.
+					if (frame.codec == 45 && ((int16)frame.width < 0 || (int16)frame.height < 0)) {
+						frame.width = 0;
+						frame.height = 0;
+					}
+
 					const uint64 pixels = (uint64)frame.width * frame.height;
 					if (pixels == 0) {
 						frame.width = 0;
 						frame.height = 0;
-						frame.data = nullptr;
-						frame.dataSize = 0;
+						if (frame.codec != 45) {
+							frame.data = nullptr;
+							frame.dataSize = 0;
+						}
 					} else if (pixels > kRebel2MaxSpritePixels || decodedLength + pixels > kRebel2MaxDecodedSpriteBytes) {
 						warning("Rebel2NutRenderer::loadRebel2SpriteFromData: invalid sprite dimensions %ux%u at frame %d",
 							frame.width, frame.height, frameCount);
@@ -596,6 +604,12 @@ void Rebel2NutRenderer::loadRebel2SpriteFromData(const byte *data, int32 dataSiz
 		_chars[i].height = frame.height;
 		_chars[i].transparency = kDefaultTransparentColor;
 
+		if (frame.codec == 45 && frame.data) {
+			const byte *maskData;
+			int maskSize;
+			smushPrepareRA2BlurData(frame.data, frame.dataSize, _codec45Palette, _codec45Lookup, maskData, maskSize);
+		}
+
 		if (frame.width == 0 || frame.height == 0 || frame.data == nullptr)
 			continue;
 
@@ -637,7 +651,7 @@ bool drawRebel2Codec23Sprite(NutRenderer *sprite, byte *buffer, int pitch, int w
 	return renderer && renderer->drawCodec23Sprite(buffer, pitch, width, height, clipRect, x, y, spriteIdx, scale);
 }
 
-Rebel2FontSet::Rebel2FontSet() : numFonts(0), defaultFont(0) {
+Rebel2FontSet::Rebel2FontSet(bool useCJKMode) : numFonts(0), defaultFont(0), useCJK(useCJKMode) {
 	memset(fonts, 0, sizeof(fonts));
 }
 
@@ -694,9 +708,28 @@ static bool parseRebel2FormatCode(const char *str, uint len, uint &pos, int &fon
 	return false;
 }
 
+uint16 decodeRebel2Char(const char *str, uint len, uint &charLen, bool useCJK) {
+	charLen = 0;
+	if (!str || len == 0)
+		return 0;
+
+	const byte lead = (byte)str[0];
+	charLen = 1;
+	if (useCJK && len > 1 && ((lead >= 0x80 && lead <= 0x9f) || (lead >= 0xe0 && lead <= 0xfc))) {
+		charLen = 2;
+		return lead | ((uint16)(byte)str[1] << 8);
+	}
+
+	return lead;
+}
+
 int drawRebel2Char(NutRenderer *font, byte *buffer, Common::Rect &clipRect, int x, int y,
-		int pitch, int16 col, byte chr) {
-	if (!font || chr >= font->getNumChars())
+		int pitch, int16 col, uint16 chr) {
+	if (!font)
+		return 0;
+	if (chr > 0xff)
+		return font->draw2byte(buffer, clipRect, x, y, pitch, col, chr);
+	if (chr >= font->getNumChars())
 		return 0;
 
 	const int charWidth = font->getCharWidth(chr);
@@ -740,13 +773,15 @@ int getRebel2StringWidth(const Rebel2FontSet &fontSet, const char *str, uint len
 		if (parseRebel2FormatCode(str, len, pos, fontId, color))
 			continue;
 
-		const byte chr = (byte)str[pos++];
+		uint charLen;
+		const uint16 chr = decodeRebel2Char(str + pos, len - pos, charLen, fontSet.useCJK);
+		pos += charLen;
 		if (chr == '\n' || chr == '\r')
 			continue;
 
 		NutRenderer *font = fontSet.getFont(fontId);
-		if (font && chr < font->getNumChars())
-			width += font->getCharWidth(chr);
+		if (font && (chr > 0xff || chr < font->getNumChars()))
+			width += font->getCharWidth((byte)chr);
 	}
 
 	return width;
@@ -762,15 +797,17 @@ int getRebel2StringHeight(const Rebel2FontSet &fontSet, const char *str, uint le
 		if (parseRebel2FormatCode(str, len, pos, fontId, color))
 			continue;
 
-		const byte chr = (byte)str[pos++];
+		uint charLen;
+		const uint16 chr = decodeRebel2Char(str + pos, len - pos, charLen, fontSet.useCJK);
+		pos += charLen;
 		if (chr == '\n') {
 			NutRenderer *font = fontSet.getFont(fontId);
 			height += lineHeight ? lineHeight : (font ? font->getFontHeight() : 0);
 			lineHeight = 0;
 		} else if (chr != '\r') {
 			NutRenderer *font = fontSet.getFont(fontId);
-			if (font && chr < font->getNumChars())
-				lineHeight = MAX<int>(lineHeight, font->getCharHeight(chr));
+			if (font && (chr > 0xff || chr < font->getNumChars()))
+				lineHeight = MAX<int>(lineHeight, font->getCharHeight((byte)chr));
 		}
 	}
 
@@ -785,7 +822,9 @@ static void drawRebel2Substring(const Rebel2FontSet &fontSet, const char *str, u
 		if (parseRebel2FormatCode(str, len, pos, fontId, color))
 			continue;
 
-		const byte chr = (byte)str[pos++];
+		uint charLen;
+		const uint16 chr = decodeRebel2Char(str + pos, len - pos, charLen, fontSet.useCJK);
+		pos += charLen;
 		if (chr == '\n' || chr == '\r')
 			continue;
 

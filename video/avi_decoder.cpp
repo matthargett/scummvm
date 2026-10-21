@@ -438,12 +438,14 @@ bool AVIDecoder::loadStream(Common::SeekableReadStream *stream) {
 
 	if (!stream->size()) {
 		debugC(8, kDebugLevelGVideo, "AVIDecoder::loadStream(): skipping empty stream");
+		delete stream;
 		return false;
 	}
 
 	uint32 riffTag = stream->readUint32BE();
 	if (riffTag != ID_RIFF) {
 		warning("Failed to find RIFF header");
+		delete stream;
 		return false;
 	}
 
@@ -452,6 +454,7 @@ bool AVIDecoder::loadStream(Common::SeekableReadStream *stream) {
 
 	if (riffType != ID_AVI) {
 		warning("RIFF not an AVI file");
+		delete stream;
 		return false;
 	}
 
@@ -462,8 +465,16 @@ bool AVIDecoder::loadStream(Common::SeekableReadStream *stream) {
 		;
 
 	if (_decodedHeader) {
-		// Ensure there's at least a supported video track
-		_decodedHeader = findNextVideoTrack() != nullptr;
+		// Ensure there's at least one supported media track. Some AVI files
+		// carry only audio data, which is still valid for MCI-style playback.
+		bool hasSupportedTrack = findNextVideoTrack() != nullptr;
+		for (TrackListIterator it = getTrackListBegin(); it != getTrackListEnd(); it++) {
+			if ((*it)->getTrackType() == Track::kTrackTypeVideo || (*it)->getTrackType() == Track::kTrackTypeAudio) {
+				hasSupportedTrack = true;
+				break;
+			}
+		}
+		_decodedHeader = hasSupportedTrack;
 	}
 
 	if (!_decodedHeader) {
@@ -535,7 +546,7 @@ void AVIDecoder::close() {
 
 void AVIDecoder::readNextPacket() {
 	// Shouldn't get this unless called on a non-open video
-	if (_videoTracks.empty())
+	if (_videoTracks.empty() && _audioTracks.empty())
 		return;
 
 	// Handle the video first
@@ -554,6 +565,8 @@ void AVIDecoder::readNextPacket() {
 void AVIDecoder::handleNextPacket(TrackStatus &status) {
 	// If there's no more to search, bail out
 	if (status.chunkSearchOffset + 8 >= _movieListEnd) {
+		if (status.track->getTrackType() == Track::kTrackTypeAudio)
+			((AVIAudioTrack *)status.track)->setAllPacketsQueued();
 		if (status.track->getTrackType() == Track::kTrackTypeVideo) {
 			// Horrible AVI video has a premature end
 			// Force the frame to be the last frame
@@ -576,6 +589,8 @@ void AVIDecoder::handleNextPacket(TrackStatus &status) {
 	for (;;) {
 		// If there's no more to search, bail out
 		if ((uint32)_fileStream->pos() + 8 >= _movieListEnd) {
+			if (status.track->getTrackType() == Track::kTrackTypeAudio)
+				((AVIAudioTrack *)status.track)->setAllPacketsQueued();
 			if (status.track->getTrackType() == Track::kTrackTypeVideo) {
 				// Horrible AVI video has a premature end
 				// Force the frame to be the last frame
@@ -649,6 +664,9 @@ bool AVIDecoder::shouldQueueAudio(TrackStatus& status) {
 	// Sanity check:
 	if (status.track->getTrackType() != Track::kTrackTypeAudio)
 		return false;
+
+	if (_videoTracks.empty())
+		return static_cast<AVIAudioTrack *>(status.track)->needsAudioOnlyBuffering();
 
 	// If video is done, make sure that the rest of the audio is queued
 	// (I guess this is also really a sanity check)
@@ -923,8 +941,8 @@ void AVIDecoder::readOldIndex(uint32 size) {
 }
 
 void AVIDecoder::checkTruemotion1() {
-	// If we got here from loadStream(), we know the track is valid
-	assert(!_videoTracks.empty());
+	if (_videoTracks.empty())
+		return;
 
 	TrackStatus &status = _videoTracks[0];
 	AVIVideoTrack *track = (AVIVideoTrack *)status.track;
@@ -1137,7 +1155,9 @@ AVIDecoder::AVIAudioTrack::AVIAudioTrack(const AVIStreamHeader &streamHeader, co
 		_wvInfo(waveFormat),
 		_audioStream(0),
 		_packetStream(0),
-		_curChunk(0) {
+		_curChunk(0),
+		_bufferedAudioOnly(false),
+		_allPacketsQueued(false) {
 }
 
 AVIDecoder::AVIAudioTrack::~AVIAudioTrack() {
@@ -1176,6 +1196,19 @@ void AVIDecoder::AVIAudioTrack::resetStream() {
 	delete _audioStream;
 	createAudioStream();
 	_curChunk = 0;
+	_allPacketsQueued = false;
+}
+
+bool AVIDecoder::AVIAudioTrack::needsAudioOnlyBuffering() {
+	if (_wvInfo.tag != Audio::kWaveFormatPCM || !_packetStream)
+		return true;
+
+	_bufferedAudioOnly = true;
+	return static_cast<Audio::StatelessPacketizedAudioStream *>(_packetStream)->numQueuedStreams() < 3;
+}
+
+bool AVIDecoder::AVIAudioTrack::endOfTrack() const {
+	return (!_bufferedAudioOnly || _allPacketsQueued) && AudioTrack::endOfTrack();
 }
 
 bool AVIDecoder::AVIAudioTrack::rewind() {

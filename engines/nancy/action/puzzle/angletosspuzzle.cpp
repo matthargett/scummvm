@@ -33,15 +33,9 @@ namespace Nancy {
 namespace Action {
 
 void AngleTossPuzzle::init() {
-	Common::Rect screenBounds = NancySceneState.getViewport().getBounds();
-	_drawSurface.create(screenBounds.width(), screenBounds.height(), g_nancy->_graphics->getInputPixelFormat());
-	_drawSurface.clear(g_nancy->_graphics->getTransColor());
-	setTransparent(true);
-	setVisible(true);
-	moveTo(screenBounds);
+	initViewportSurface();
 
-	g_nancy->_resource->loadImage(_imageName, _image);
-	_image.setTransparentColor(_drawSurface.getTransparentColor());
+	loadImage();
 
 	// Draw the initial angle and power indicators.
 	// The throw button sprite is NOT drawn here — the static background already shows the
@@ -83,7 +77,7 @@ void AngleTossPuzzle::readData(Common::SeekableReadStream &stream) {
 
 	_throwSquidScene.readData(stream);	// data+0x220, ends at data+0x238
 
-	// HACK: We've skipped some of the flag data at this point,
+	// WORKAROUND: We've skipped some of the flag data at this point,
 	// so go back to read them correctly
 	_throwSquidScene._flag.label = kEvNoEvent;
 	_throwSquidScene._flag.flag = 0;
@@ -108,6 +102,7 @@ void AngleTossPuzzle::execute() {
 
 		init();
 		registerGraphics();
+		NancySceneState.setNoHeldItem();
 
 		g_nancy->_sound->loadSound(_powerSound);
 		g_nancy->_sound->loadSound(_squeakSound);
@@ -132,19 +127,14 @@ void AngleTossPuzzle::execute() {
 			// Set exactly one result flag based on how accurate the throw was.
 			// The animation scene reads these flags to decide what to show.
 			if (_curPower == _targetPower && _curAngle == _targetAngle) {
-				// Exact match of power and angle — player wins round!
 				NancySceneState.setEventFlag(_winFlag, g_nancy->_true);
 			} else if (_curPower > _targetPower) {
-				// Power too strong
 				NancySceneState.setEventFlag(_powerTooStrongFlag, g_nancy->_true);
 			} else if (_curPower < _targetPower) {
-				// Power too weak
 				NancySceneState.setEventFlag(_powerTooWeakFlag, g_nancy->_true);
 			} else if (_curAngle > _targetAngle) {
-				// Angle too far right
 				NancySceneState.setEventFlag(_angleTooRightFlag, g_nancy->_true);
 			} else if (_curAngle < _targetAngle) {
-				// Angle too far left
 				NancySceneState.setEventFlag(_angleTooLeftFlag, g_nancy->_true);
 			}
 
@@ -179,9 +169,7 @@ void AngleTossPuzzle::handleInput(NancyInput &input) {
 	localMousePos -= Common::Point(vpPos.left, vpPos.top);
 
 	// Exit button
-	if (_exitHotspot.contains(localMousePos)) {
-		g_nancy->_cursor->setCursorType(g_nancy->_cursor->_puzzleExitCursor);
-
+	if (hoverExitHotspot(input)) {
 		if (input.input & NancyInput::kLeftMouseButtonUp) {
 			_exitPressed = true;
 			_state = kActionTrigger;
@@ -245,7 +233,6 @@ void AngleTossPuzzle::handleInput(NancyInput &input) {
 			_drawSurface.blitFrom(_image, _throwSprite, _throwDisplay);
 			_needsRedraw = true;
 		}
-		return;
 	}
 }
 

@@ -45,6 +45,17 @@ const ADExtraGuiOptionsMap optionsList[] = {
 			_s("Widescreen mod"),
 			_s("Enable widescreen rendering in fullscreen mode."),
 			"widescreen_mod",
+			true,
+			0,
+			0
+		}
+	},
+	{
+		GAMEOPTION_INVERT_Y,
+		{
+			_s("Invert Y-axis on mouse"),
+			_s("Use alternative camera controls"),
+			"invert_y",
 			false,
 			0,
 			0
@@ -185,6 +196,19 @@ Common::KeymapArray ColonyMetaEngine::initKeymaps(const char *target) const {
 	act->setCustomEngineActionEvent(kActionFire);
 	act->addDefaultInputMapping("LCTRL");
 	act->addDefaultInputMapping("JOY_B");
+	engineKeyMap->addAction(act);
+
+	act = new Common::Action("MAPIN", _("Zoom in (map)"));
+	act->setCustomEngineActionEvent(kActionAutomapZoomIn);
+	act->addDefaultInputMapping("PLUS");
+	act->addDefaultInputMapping("EQUALS");
+	act->addDefaultInputMapping("KP_PLUS");
+	engineKeyMap->addAction(act);
+
+	act = new Common::Action("MAPOUT", _("Zoom out (map)"));
+	act->setCustomEngineActionEvent(kActionAutomapZoomOut);
+	act->addDefaultInputMapping("MINUS");
+	act->addDefaultInputMapping("KP_MINUS");
 	engineKeyMap->addAction(act);
 
 	return Common::Keymap::arrayOf(engineKeyMap);

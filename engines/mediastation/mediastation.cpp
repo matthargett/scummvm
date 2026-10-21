@@ -27,6 +27,7 @@
 #include "mediastation/detection.h"
 #include "mediastation/boot.h"
 #include "mediastation/context.h"
+#include "mediastation/clients.h"
 #include "mediastation/actor.h"
 #include "mediastation/actors/document.h"
 #include "mediastation/actors/movie.h"
@@ -65,7 +66,7 @@ MediaStationEngine::~MediaStationEngine() {
 	delete _displayManager;
 	delete _displayUpdateManager;
 	delete _functionManager;
-	// delete _printManager;
+	delete _printManager;
 	delete _imtGod;
 	// delete _streamProfiler;
 	delete _streamFeedManager;
@@ -142,6 +143,14 @@ bool MediaStationEngine::hasFeature(EngineFeature f) const {
 	return (f == kSupportsReturnToLauncher);
 }
 
+uint MediaStationEngine::currentTimeInSeconds() {
+	// Calculate seconds since midnight.
+	TimeDate timeDate;
+	g_system->getTimeAndDate(timeDate);
+	uint secondsSinceMidnight = (timeDate.tm_hour * 60 + timeDate.tm_min) * 60 + timeDate.tm_sec;
+	return secondsSinceMidnight;
+}
+
 Common::Error MediaStationEngine::run() {
 	_debugger = new Debugger(this);
 	setDebugger(_debugger);
@@ -155,7 +164,7 @@ Common::Error MediaStationEngine::run() {
 	_functionManager = new FunctionManager;
 	_displayUpdateManager = new DisplayUpdateManager;
 	_displayManager = new VideoDisplayManager(this);
-	// _printManager = new PrintManager;
+	_printManager = new PrintManager;
 	_document = new Document;
 	DocumentActor *documentActor = new DocumentActor;
 	_imtGod->addConstructedActor(documentActor);

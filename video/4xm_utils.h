@@ -19,6 +19,9 @@
  *
  */
 
+#ifndef VIDEO_4XM_UTILS_H
+#define VIDEO_4XM_UTILS_H
+
 #include "common/array.h"
 #include "common/compression/huffman.h"
 #include "common/debug.h"
@@ -40,9 +43,15 @@ struct RawDeltaReader {
 	uint32 nibbleWord = 0;
 	uint32 pairOffset = 0;
 	uint32 byteOffset = 0;
+	uint32 signedByteOffset = 0;
 	uint32 nibbleOffset = 0;
+	uint32 signedByteIndex = 0;
+	bool separateSignedByteStream = false;
 
+	RawDeltaReader() = default;
 	RawDeltaReader(const byte *ptr, uint32 len);
+	RawDeltaReader(const byte *ptr, uint32 len, uint32 streamBase, uint32 pairOff, uint32 byteOff,
+				   uint32 signedByteOff, uint32 nibbleOff, uint32 controlOff);
 
 	bool valid() const;
 	uint32 readControl2();
@@ -100,3 +109,5 @@ inline int readInt(BitStream &bs, size_t n) {
 
 } // namespace FourXM
 } // namespace Video
+
+#endif // VIDEO_4XM_UTILS_H

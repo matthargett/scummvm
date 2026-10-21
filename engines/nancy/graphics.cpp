@@ -25,6 +25,7 @@
 
 #include "engines/nancy/nancy.h"
 #include "engines/nancy/graphics.h"
+#include "engines/nancy/iff.h"
 #include "engines/nancy/renderobject.h"
 #include "engines/nancy/resource.h"
 #include "engines/nancy/cursor.h"
@@ -32,17 +33,82 @@
 
 namespace Nancy {
 
+// The ARGB colors in the game data are 32-bit ARGB pixels
+const Graphics::PixelFormat kARGBFormat(4, 8, 8, 8, 8, 16, 8, 0, 24);
+
+uint32 argbToColor(const Graphics::PixelFormat &format, uint32 argb) {
+	byte a, r, g, b;
+	kARGBFormat.colorToARGB(argb, a, r, g, b);
+	return format.ARGBToColor(a, r, g, b);
+}
+
+void blendPixel(Graphics::ManagedSurface &surface, int x, int y, byte a, byte r, byte g, byte b) {
+	if (x < 0 || y < 0 || x >= surface.w || y >= surface.h) {
+		return;
+	}
+
+	byte destA, destR, destG, destB;
+	surface.format.colorToARGB(surface.getPixel(x, y), destA, destR, destG, destB);
+
+	uint destWeight = destA * (255 - a) / 255;
+	uint outA = a + destWeight;
+	if (outA == 0) {
+		return;
+	}
+
+	surface.setPixel(x, y, surface.format.ARGBToColor(outA,
+		(r * a + destR * destWeight) / outA,
+		(g * a + destG * destWeight) / outA,
+		(b * a + destB * destWeight) / outA));
+}
+
+byte colorChannelToByte(float channel) {
+	return (byte)(CLIP(channel, 0.0f, 1.0f) * 255 + 0.5f);
+}
+
+void argbToChannels(uint32 argb, float *channels) {
+	byte a, r, g, b;
+	kARGBFormat.colorToARGB(argb, a, r, g, b);
+	channels[0] = a / 255.0f;
+	channels[1] = r / 255.0f;
+	channels[2] = g / 255.0f;
+	channels[3] = b / 255.0f;
+}
+
+uint32 channelsToArgb(const float *channels) {
+	return kARGBFormat.ARGBToColor(colorChannelToByte(channels[0]), colorChannelToByte(channels[1]),
+		colorChannelToByte(channels[2]), colorChannelToByte(channels[3]));
+}
+
+float getBlendAmount(float seconds, float rate) {
+	return 1.0f - powf(rate, 30.0f * seconds);
+}
+
+bool blendColor(float *current, uint32 target, float amount) {
+	float targetChannels[4];
+	argbToChannels(target, targetChannels);
+
+	bool changed = false;
+	for (uint i = 0; i < 4; ++i) {
+		byte before = colorChannelToByte(current[i]);
+		current[i] += (targetChannels[i] - current[i]) * amount;
+		changed |= colorChannelToByte(current[i]) != before;
+	}
+
+	return changed;
+}
+
 GraphicsManager::GraphicsManager() :
 	_objects(objectComparator),
 	_inputPixelFormat16(2, 5, 5, 5, 0, 10, 5, 0, 0),
 	_inputPixelFormat24(Graphics::PixelFormat::createFormatBGR24()),
 	_inputPixelFormat32(Graphics::PixelFormat::createFormatBGRA32()),
-	_screenPixelFormat(2, 5, 6, 5, 0, 11, 5, 0, 0),
+	_screenPixelFormat16(2, 5, 6, 5, 0, 11, 5, 0, 0),
+	_screenPixelFormat32(Graphics::PixelFormat::createFormatBGRA32()),
 	_clut8Format(Graphics::PixelFormat::createFormatCLUT8()),
-	_transparentPixelFormat(4, 8, 8, 8, 8, 8, 16, 24, 0),
-	_isSuppressed(false),
-	_screen(640, 480, _screenPixelFormat){}
-
+	_transparentPixelFormat(Graphics::PixelFormat::createFormatBGRA32()),
+	_screen(getScreenBounds().width(), getScreenBounds().height(), getScreenPixelFormat()),
+	_isSuppressed(false){}
 void GraphicsManager::init() {
 	auto *bsum = GetEngineData(BSUM);
 	assert(bsum);
@@ -51,19 +117,31 @@ void GraphicsManager::init() {
 	if (g_nancy->getGameType() == kGameTypeVampire) {
 		_transColor = bsum->paletteTrans;
 	} else {
-		_transColor = 	(bsum->rTrans << _inputPixelFormat16.rShift) |
-						(bsum->gTrans << _inputPixelFormat16.gShift) |
-						(bsum->bTrans << _inputPixelFormat16.bShift);
+		const Graphics::PixelFormat &format = getInputPixelFormat();
+		_transColor = (bsum->rTrans << format.rShift) |
+					  (bsum->gTrans << format.gShift) |
+					  (bsum->bTrans << format.bShift);
 	}
 
-	initGraphics(640, 480, &_screenPixelFormat);
+	initGraphics(_screen.w, _screen.h, &getScreenPixelFormat());
 	_screen.setTransparentColor(getTransColor());
 	_screen.clear();
 
-	const ImageChunk *ob0 = (const ImageChunk *)g_nancy->getEngineData("OB0");
-	assert(ob0);
+	// Nancy16 runs at a higher resolution than the game was made for. The
+	// viewport's chunk holds the resolution the game gets drawn at.
+	if (g_nancy->getGameType() >= kGameTypeNancy16) {
+		auto *viewportData = GetEngineData(VIEW);
+		assert(viewportData);
 
-	g_nancy->_resource->loadImage(ob0->imageName, _object0);
+		_gameSurface.create(viewportData->bounds.width(), viewportData->bounds.height(), getScreenPixelFormat());
+		_gameSurface.setTransparentColor(getTransColor());
+		_gameSurface.clear();
+	}
+
+	// OB0 has been dropped in Nancy16+
+	const ImageChunk *ob0 = (const ImageChunk *)g_nancy->getEngineData("OB0");
+	if (ob0)
+		g_nancy->_resource->loadImage(ob0->imageName, _object0);
 }
 
 void GraphicsManager::draw(bool updateScreen) {
@@ -85,14 +163,14 @@ void GraphicsManager::draw(bool updateScreen) {
 			if (current.isVisible()) {
 				if (current.hasMoved() && !current.getPreviousScreenPosition().isEmpty()) {
 					// Object moved to a new location on screen, update the previous one
-					_dirtyRects.push_back(current.getPreviousScreenPosition());
+					addDirtyRect(current, current.getPreviousScreenPosition());
 				}
 
 				// Redraw the current location
-				_dirtyRects.push_back(current.getScreenPosition());
+				addDirtyRect(current, current.getScreenPosition());
 			} else if (!current.getPreviousScreenPosition().isEmpty()) {
 				// Object just turned invisible, redraw the last location
-				_dirtyRects.push_back(current.getPreviousScreenPosition());
+				addDirtyRect(current, current.getPreviousScreenPosition());
 			}
 		}
 
@@ -101,23 +179,83 @@ void GraphicsManager::draw(bool updateScreen) {
 		current.updatePreviousScreenPosition();
 	}
 
-	// Filter out dirty rects that are completely inside others to reduce overdraw
-	for (auto outer = _dirtyRects.begin(); outer != _dirtyRects.end(); ++outer) {
-		for (auto inner = _dirtyRects.begin(); inner != _dirtyRects.end(); ++inner) {
-			if (inner != outer && (*outer).contains(*inner)) {
-				_dirtyRects.erase(inner);
-				break;
-			}
+	filterDirtyRects(_dirtyRects);
+
+	if (!isGameScaled()) {
+		drawObjects(_screen, _dirtyRects, kLayerAll);
+	} else {
+		// The game gets drawn at its own resolution, and the changed parts get scaled
+		// onto the screen, where the objects at the screen's resolution go over them
+		drawObjects(_gameSurface, _dirtyRects, kLayerGame);
+
+		for (const Common::Rect &rect : _dirtyRects) {
+			// Filtering blends each screen pixel with its game pixel's neighbors
+			Common::Rect screenRect = gameToScreen(rect);
+			screenRect.grow(2);
+			screenRect.clip(Common::Rect(_screen.w, _screen.h));
+			_nativeDirtyRects.push_back(screenRect);
 		}
+
+		filterDirtyRects(_nativeDirtyRects);
+
+		for (const Common::Rect &rect : _nativeDirtyRects) {
+			blitGameToScreen(rect);
+		}
+
+		drawObjects(_screen, _nativeDirtyRects, kLayerNative);
 	}
 
-	// Perform the actual drawing. This checks for cases where something would be fully obscured,
-	// and skips them (e.g. redrawing the Viewport won't also redraw the background)
-	for (Common::Rect rect : _dirtyRects) {
+	// Draw the screen
+	if (updateScreen) {
+		_screen.update();
+	}
+
+	// Remove all dirty rects for the next frame
+	_dirtyRects.clear();
+	_nativeDirtyRects.clear();
+}
+
+void GraphicsManager::addDirtyRect(const RenderObject &object, const Common::Rect &rect) {
+	if (isGameScaled() && object.isNativeResolution()) {
+		_nativeDirtyRects.push_back(rect);
+	} else {
+		_dirtyRects.push_back(rect);
+	}
+}
+
+bool GraphicsManager::isInLayer(const RenderObject &object, Layer layer) const {
+	return layer == kLayerAll || object.isNativeResolution() == (layer == kLayerNative);
+}
+
+// Filter out dirty rects that are completely inside others to reduce overdraw
+void GraphicsManager::filterDirtyRects(Common::List<Common::Rect> &rects) {
+	// Rects that overlap are merged into one. An area that gets drawn twice would
+	// have the objects with an alpha channel blended onto it twice.
+	bool hasMerged;
+	do {
+		hasMerged = false;
+
+		for (auto outer = rects.begin(); outer != rects.end() && !hasMerged; ++outer) {
+			for (auto inner = rects.begin(); inner != rects.end(); ++inner) {
+				if (inner != outer && outer->intersects(*inner)) {
+					outer->extend(*inner);
+					rects.erase(inner);
+					hasMerged = true;
+					break;
+				}
+			}
+		}
+	} while (hasMerged);
+}
+
+// Perform the actual drawing. This checks for cases where something would be fully obscured,
+// and skips them (e.g. redrawing the Viewport won't also redraw the background)
+void GraphicsManager::drawObjects(Graphics::ManagedSurface &target, const Common::List<Common::Rect> &rects, Layer layer) {
+	for (const Common::Rect &rect : rects) {
 		for (RenderObject **it = _objects.begin(); it < _objects.end(); ++it) {
 			RenderObject &current = **it;
 
-			if (!current.isVisible() || current.getScreenPosition().isEmpty()) {
+			if (!isInLayer(current, layer) || !current.isVisible() || current.getScreenPosition().isEmpty()) {
 				continue;
 			}
 
@@ -130,7 +268,7 @@ void GraphicsManager::draw(bool updateScreen) {
 				for (auto it2 = it + 1; it2 < _objects.end(); ++it2) {
 					RenderObject &other = **it2;
 
-					if (!other.isVisible() || other.getScreenPosition().isEmpty()) {
+					if (!isInLayer(other, layer) || !other.isVisible() || other.getScreenPosition().isEmpty()) {
 						continue;
 					}
 
@@ -151,18 +289,93 @@ void GraphicsManager::draw(bool updateScreen) {
 					continue;
 				}
 
-				blitToScreen(current, rect.findIntersectingRect(current.getScreenPosition()));
+				blitObject(target, current, rect.findIntersectingRect(current.getScreenPosition()));
+			}
+		}
+	}
+}
+
+// The game pixel a screen pixel's center falls on, in 1/256ths of a pixel, as texture
+// sampling puts it; the fraction is how much of the next game pixel gets blended in
+static int getBilinearPosition(int screenPos, int screenSize, int gameSize) {
+	int pos = (2 * screenPos + 1) * gameSize * 128 / screenSize - 128;
+	return CLIP<int>(pos, 0, (gameSize - 1) * 256);
+}
+
+// The game gets scaled onto the screen with bilinear filtering, like the original's
+// Direct3D texture sampling does
+void GraphicsManager::blitGameToScreen(Common::Rect screenRect) {
+	screenRect.clip(Common::Rect(_screen.w, _screen.h));
+	if (screenRect.isEmpty()) {
+		return;
+	}
+
+	assert(_screen.format.bytesPerPixel == 4 && _gameSurface.format == _screen.format);
+
+	// Where each column samples the game, and how much of the next game pixel it takes
+	Common::Array<int> srcColumns(screenRect.width());
+	Common::Array<int> columnWeights(screenRect.width());
+	for (int x = screenRect.left; x < screenRect.right; ++x) {
+		int pos = getBilinearPosition(x, _screen.w, _gameSurface.w);
+		srcColumns[x - screenRect.left] = pos >> 8;
+		columnWeights[x - screenRect.left] = pos & 0xFF;
+	}
+
+	for (int y = screenRect.top; y < screenRect.bottom; ++y) {
+		int pos = getBilinearPosition(y, _screen.h, _gameSurface.h);
+		int srcY = pos >> 8;
+		int rowWeight = pos & 0xFF;
+
+		const byte *row0 = (const byte *)_gameSurface.getBasePtr(0, srcY);
+		const byte *row1 = (const byte *)_gameSurface.getBasePtr(0, MIN<int>(srcY + 1, _gameSurface.h - 1));
+		byte *dest = (byte *)_screen.getBasePtr(screenRect.left, y);
+
+		for (int i = 0; i < screenRect.width(); ++i) {
+			int x0 = srcColumns[i] * 4;
+			int x1 = MIN<int>(srcColumns[i] + 1, _gameSurface.w - 1) * 4;
+			int colWeight = columnWeights[i];
+
+			for (int channel = 0; channel < 4; ++channel) {
+				int top = row0[x0 + channel] * (256 - colWeight) + row0[x1 + channel] * colWeight;
+				int bottom = row1[x0 + channel] * (256 - colWeight) + row1[x1 + channel] * colWeight;
+				*dest++ = (top * (256 - rowWeight) + bottom * rowWeight + (1 << 15)) >> 16;
 			}
 		}
 	}
 
-	// Draw the screen
-	if (updateScreen) {
-		_screen.update();
+	_screen.addDirtyRect(screenRect);
+}
+
+Common::Rect GraphicsManager::getGameBounds() const {
+	return isGameScaled() ? Common::Rect(_gameSurface.w, _gameSurface.h) : Common::Rect(_screen.w, _screen.h);
+}
+
+Common::Point GraphicsManager::screenToGame(const Common::Point &pos) const {
+	if (!isGameScaled()) {
+		return pos;
 	}
 
-	// Remove all dirty rects for the next frame
-	_dirtyRects.clear();
+	return Common::Point(pos.x * _gameSurface.w / _screen.w, pos.y * _gameSurface.h / _screen.h);
+}
+
+Common::Point GraphicsManager::gameToScreen(const Common::Point &pos) const {
+	if (!isGameScaled()) {
+		return pos;
+	}
+
+	return Common::Point(pos.x * _screen.w / _gameSurface.w, pos.y * _screen.h / _gameSurface.h);
+}
+
+// The screen area covering every pixel the game rect gets scaled onto
+Common::Rect GraphicsManager::gameToScreen(const Common::Rect &rect) const {
+	if (!isGameScaled()) {
+		return rect;
+	}
+
+	return Common::Rect(rect.left * _screen.w / _gameSurface.w,
+		rect.top * _screen.h / _gameSurface.h,
+		(rect.right * _screen.w + _gameSurface.w - 1) / _gameSurface.w,
+		(rect.bottom * _screen.h + _gameSurface.h - 1) / _gameSurface.h);
 }
 
 void GraphicsManager::loadFonts(Common::SeekableReadStream *chunkStream) {
@@ -179,6 +392,104 @@ void GraphicsManager::loadFonts(Common::SeekableReadStream *chunkStream) {
 	delete chunkStream;
 }
 
+// Fonts get placed at their IDs, which font tags in text refer to. The bold versions
+// follow them, and can only be found by name.
+void GraphicsManager::loadSystemFonts(const IFF &fontIFF) {
+	Common::SeekableReadStream *chunkStream = nullptr;
+	for (uint i = 0; (chunkStream = fontIFF.getChunkStream("FONT", i)); ++i) {
+		uint32 id = chunkStream->readUint32LE();
+		if (id >= _fonts.size()) {
+			_fonts.resize(id + 1);
+		}
+
+		_fonts[id].readSystemFont(*chunkStream, false);
+		delete chunkStream;
+	}
+
+	for (uint i = 0; (chunkStream = fontIFF.getChunkStream("FONT", i)); ++i) {
+		chunkStream->skip(4);
+		_fonts.resize(_fonts.size() + 1);
+		_fonts.back().readSystemFont(*chunkStream, true);
+		delete chunkStream;
+	}
+
+	for (uint i = 0; (chunkStream = fontIFF.getChunkStream("COLR", i)); ++i) {
+		uint32 id = chunkStream->readUint32LE();
+		if (id >= _fontColors.size()) {
+			_fontColors.resize(id + 1);
+		}
+
+		// ARGB colors for the normal, disabled, mouse over and pressed states. The
+		// focused state looks normal, and the hidden one is transparent.
+		FontColor &color = _fontColors[id];
+		color.colors[kFontColorNormal] = chunkStream->readUint32BE();
+		color.colors[kFontColorFocus] = color.colors[kFontColorNormal];
+		color.colors[kFontColorDisabled] = chunkStream->readUint32BE();
+		color.colors[kFontColorMouseOver] = chunkStream->readUint32BE();
+		color.colors[kFontColorPressed] = chunkStream->readUint32BE();
+		delete chunkStream;
+	}
+}
+
+void GraphicsManager::loadSystemFonts(const ScriptBootData &boot) {
+	const int32 kNormalWeight = 400;
+	const int32 kBoldWeight = 700;
+
+	for (const ScriptBootData::SystemFont &font : boot.fonts) {
+		if (font.id < 0) {
+			continue;
+		}
+
+		if ((uint)font.id >= _fonts.size()) {
+			_fonts.resize(font.id + 1);
+		}
+
+		_fonts[font.id].setSystemFont(font.name, font.faceName, font.height, font.isBold ? kBoldWeight : kNormalWeight);
+	}
+
+	// Every font also comes in bold, after the ones with a number of their own
+	for (const ScriptBootData::SystemFont &font : boot.fonts) {
+		_fonts.resize(_fonts.size() + 1);
+		_fonts.back().setSystemFont(font.name + "_Bold", font.faceName, font.height, kBoldWeight);
+	}
+
+	for (const ScriptBootData::FontColor &color : boot.fontColors) {
+		if (color.id < 0) {
+			continue;
+		}
+
+		if ((uint)color.id >= _fontColors.size()) {
+			_fontColors.resize(color.id + 1);
+		}
+
+		FontColor &fontColor = _fontColors[color.id];
+		fontColor.colors[kFontColorNormal] = color.normal;
+		fontColor.colors[kFontColorFocus] = color.normal;
+		fontColor.colors[kFontColorDisabled] = color.disabled;
+		fontColor.colors[kFontColorMouseOver] = color.mouseOver;
+		fontColor.colors[kFontColorPressed] = color.pressed;
+	}
+}
+
+const Font *GraphicsManager::getFont(const Common::String &name) const {
+	int id = getFontID(name);
+	return id >= 0 ? &_fonts[id] : nullptr;
+}
+
+int GraphicsManager::getFontID(const Common::String &name) const {
+	for (uint i = 0; i < _fonts.size(); ++i) {
+		if (_fonts[i].getName().equalsIgnoreCase(name)) {
+			return i;
+		}
+	}
+
+	return -1;
+}
+
+uint32 GraphicsManager::getFontColor(uint id, const Graphics::PixelFormat &format, FontColorState state) const {
+	return argbToColor(format, id < _fontColors.size() ? _fontColors[id].colors[state] : 0xFFFFFFFF);
+}
+
 void GraphicsManager::addObject(RenderObject *object) {
 	for (auto &r : _objects) {
 		if (r == object) {
@@ -191,11 +502,25 @@ void GraphicsManager::addObject(RenderObject *object) {
 	_objects.insert(object);
 }
 
+void GraphicsManager::reorderObject(RenderObject *object) {
+	// The array is kept sorted as objects are inserted, so an object that has
+	// changed its z depth has to be taken out and put back to move. One that is
+	// not in the list yet has nothing to reorder; it will be sorted when it is
+	// added.
+	for (auto &r : _objects) {
+		if (r == object) {
+			_objects.erase(&r);
+			_objects.insert(object);
+			return;
+		}
+	}
+}
+
 void GraphicsManager::removeObject(RenderObject *object) {
 	for (auto &r : _objects) {
 		if (r == object) {
 			// Make sure the object gets properly cleared
-			_dirtyRects.push_back(r->getPreviousScreenPosition());
+			addDirtyRect(*r, r->getPreviousScreenPosition());
 			_objects.erase(&r);
 			break;
 		}
@@ -227,7 +552,7 @@ void GraphicsManager::loadSurfacePalette(Graphics::ManagedSurface &inSurf, const
 }
 
 void GraphicsManager::copyToManaged(const Graphics::Surface &src, Graphics::ManagedSurface &dst, bool verticalFlip, bool doubleSize) {
-	if (dst.w != (doubleSize ? src.w * 2 : src.w) || dst.h != (doubleSize ? src.h * 2 : src.h)) {
+	if (dst.w != (doubleSize ? src.w * 2 : src.w) || dst.h != (doubleSize ? src.h * 2 : src.h) || dst.format != src.format) {
 		uint8 palette[256 * 3];
 		bool hasPalette = dst.hasPalette();
 		bool hasTransColor = dst.hasTransparentColor();
@@ -324,11 +649,11 @@ void GraphicsManager::copyToManaged(void *src, Graphics::ManagedSurface &dst, ui
 void GraphicsManager::rotateBlit(const Graphics::ManagedSurface &src, Graphics::ManagedSurface &dest, byte rotation) {
 	assert(!src.empty() && !dest.empty());
 	assert(rotation <= 3);
-	assert(src.format.bytesPerPixel == 2 && dest.format.bytesPerPixel == 2);
+	assert(src.format.bytesPerPixel == dest.format.bytesPerPixel);
 
-	uint srcW = src.w;
-	uint srcH = src.h;
-	const uint16 *s, *e;
+	const uint srcW = src.w;
+	const uint srcH = src.h;
+	const uint bpp = src.format.bytesPerPixel;
 
 	if (rotation % 2) {
 		if (src.h != dest.w || src.w != dest.h) {
@@ -342,45 +667,33 @@ void GraphicsManager::rotateBlit(const Graphics::ManagedSurface &src, Graphics::
 		}
 	}
 
-	switch (rotation) {
-	case 0 :
+	if (rotation == 0) {
 		// No rotation, just blit
 		dest.rawBlitFrom(src, src.getBounds(), Common::Point());
 		return;
-	case 2 : {
-		// 180 degrees
-		uint16 *d;
-		for (uint y = 0; y < srcH; ++y) {
-			s = (const uint16 *)src.getBasePtr(0, y);
-			e = (const uint16 *)src.getBasePtr(srcW, y);
-			d = (uint16 *)dest.getBasePtr(srcW - 1, srcH - y - 1);
-			for (; s < e; ++s, --d) {
-				*d = *s;
-			}
-		}
-
-		break;
 	}
-	case 1 :
-		// 90 degrees
-		for (uint y = 0; y < srcH; ++y) {
-			s = (const uint16 *)src.getBasePtr(0, y);
-			for (uint x = 0; x < srcW; ++x, ++s) {
-				*((uint16 *)dest.getBasePtr(srcH - y - 1, x)) = *s;
-			}
-		}
 
-		break;
-	case 3 :
-		// 270 degrees
-		for (uint y = 0; y < srcH; ++y) {
-			s = (const uint16 *)src.getBasePtr(0, y);
-			for (uint x = 0; x < srcW; ++x, ++s) {
-				*((uint16 *)dest.getBasePtr(y, srcW - x - 1)) = *s;
+	for (uint y = 0; y < srcH; ++y) {
+		const byte *s = (const byte *)src.getBasePtr(0, y);
+		for (uint x = 0; x < srcW; ++x, s += bpp) {
+			byte *d;
+			switch (rotation) {
+			case 1:
+				// 90 degrees
+				d = (byte *)dest.getBasePtr(srcH - y - 1, x);
+				break;
+			case 2:
+				// 180 degrees
+				d = (byte *)dest.getBasePtr(srcW - x - 1, srcH - y - 1);
+				break;
+			default:
+				// 270 degrees
+				d = (byte *)dest.getBasePtr(y, srcW - x - 1);
+				break;
 			}
-		}
 
-		break;
+			memcpy(d, s, bpp);
+		}
 	}
 }
 
@@ -400,6 +713,8 @@ const Graphics::PixelFormat &GraphicsManager::getInputPixelFormat(uint bpp) {
 		return _clut8Format;
 
 	switch (bpp) {
+	case 0:
+		return g_nancy->getGameType() >= kGameTypeNancy13 ? _inputPixelFormat32 : _inputPixelFormat16;
 	case 16:
 		return _inputPixelFormat16;	// RGB555
 	case 24:
@@ -411,8 +726,12 @@ const Graphics::PixelFormat &GraphicsManager::getInputPixelFormat(uint bpp) {
 	}
 }
 
+Common::Rect GraphicsManager::getScreenBounds() {
+	return (g_nancy->getGameType() >= kGameTypeNancy16) ? Common::Rect(800, 600) : Common::Rect(640, 480);
+}
+
 const Graphics::PixelFormat &GraphicsManager::getScreenPixelFormat() {
-	return _screenPixelFormat;
+	return (g_nancy->getGameType() >= kGameTypeNancy13) ? _screenPixelFormat32 : _screenPixelFormat16;
 }
 
 const Graphics::PixelFormat &GraphicsManager::getTransparentPixelFormat() {
@@ -437,9 +756,14 @@ void GraphicsManager::screenshotScreen(Graphics::ManagedSurface &inSurf) {
 	inSurf.copyFrom(_screen);
 }
 
-// Draw a given screen-space rectangle to the screen
-void GraphicsManager::blitToScreen(const RenderObject &src, Common::Rect screenRect) {
-	_screen.blitFrom(src._drawSurface, src._drawSurface.getBounds().findIntersectingRect(src.convertToLocal(screenRect)), screenRect);
+// Draw a given screen-space rectangle of an object
+void GraphicsManager::blitObject(Graphics::ManagedSurface &target, const RenderObject &src, Common::Rect screenRect) {
+	// An object whose image is missing has nothing to draw
+	if (src._drawSurface.empty()) {
+		return;
+	}
+
+	target.blitFrom(src._drawSurface, src._drawSurface.getBounds().findIntersectingRect(src.convertToLocal(screenRect)), screenRect);
 }
 
 int GraphicsManager::objectComparator(const void *a, const void *b) {

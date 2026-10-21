@@ -22,6 +22,7 @@
 #include "engines/nancy/puzzledata.h"
 #include "engines/nancy/enginedata.h"
 #include "engines/nancy/nancy.h"
+#include "state/scene.h"
 
 namespace Nancy {
 
@@ -55,7 +56,8 @@ void SliderPuzzleData::synchronize(Common::Serializer &ser) {
 RippedLetterPuzzleData::RippedLetterPuzzleData() :
 	order(24, 0),
 	rotations(24, 0),
-	playerHasTriedPuzzle(false) {}
+	playerHasTriedPuzzle(false),
+	sceneId(0) {}
 
 void RippedLetterPuzzleData::synchronize(Common::Serializer &ser) {
 	// Serialize through fixed size buffers so save or load never
@@ -73,9 +75,9 @@ void RippedLetterPuzzleData::synchronize(Common::Serializer &ser) {
 
 	// A piece may still be held while saving; make sure the saved data
 	// has it back in the last place it was picked up from
-	if (ser.isSaving() && _pickedUpPieceID != -1) {
-		serializedOrder[_pickedUpPieceLastPos] = _pickedUpPieceID;
-		serializedRotations[_pickedUpPieceLastPos] = _pickedUpPieceRot;
+	if (ser.isSaving() && pickedUpPieceID != -1) {
+		serializedOrder[pickedUpPieceLastPos] = pickedUpPieceID;
+		serializedRotations[pickedUpPieceLastPos] = pickedUpPieceRot;
 	}
 
 	ser.syncArray(serializedOrder.data(), serializedOrder.size(), Common::Serializer::Byte);
@@ -84,6 +86,11 @@ void RippedLetterPuzzleData::synchronize(Common::Serializer &ser) {
 	if (ser.isLoading()) {
 		Common::move(serializedOrder.begin(), serializedOrder.end(), order.begin());
 		Common::move(serializedRotations.begin(), serializedRotations.end(), rotations.begin());
+	}
+
+	if (ser.getVersion() >= 9) {
+		ser.syncAsByte(playerHasTriedPuzzle);
+		ser.syncAsUint16LE(sceneId);
 	}
 }
 
@@ -134,8 +141,61 @@ void SimplePuzzleData::synchronize(Common::Serializer &ser) {
 	ser.syncAsByte(solvedPuzzle);
 }
 
+// PCUI has room for more characters than any game actually ships, so the
+// active one is kept inside the journals we keep
+static uint activePlayerCharacterSlot() {
+	return MIN<uint>(g_nancy->getPlayerCharacter(), kMaxPlayerCharacters - 1);
+}
+
+Common::Array<JournalData::Entry> &JournalData::entries(uint16 surfaceID) {
+	return journalEntries[activePlayerCharacterSlot()][surfaceID];
+}
+
+bool JournalData::hasEntries(uint16 surfaceID) const {
+	return journalEntries[activePlayerCharacterSlot()].contains(surfaceID);
+}
+
+void JournalData::inheritEntries(uint from, uint to) {
+	if (from < kMaxPlayerCharacters && to < kMaxPlayerCharacters) {
+		journalEntries[to] = journalEntries[from];
+	}
+}
+
 void JournalData::synchronize(Common::Serializer &ser) {
-	uint16 numEntries = journalEntries.size();
+	syncOneJournal(ser, journalEntries[0]);
+
+	// Nancy15+ protagonists each keep their own journal. Only their slots are
+	// written, so the save format of every earlier game is untouched.
+	if (g_nancy->getGameType() >= kGameTypeNancy15) {
+		for (uint i = 1; i < kMaxPlayerCharacters; ++i) {
+			syncOneJournal(ser, journalEntries[i]);
+		}
+	}
+}
+
+void TasklistData::synchronize(Common::Serializer &ser) {
+	uint32 numEntries = checkedEntries.size();
+	ser.syncAsUint32LE(numEntries);
+	checkedEntries.resize(numEntries);
+
+	for (Common::String &entry : checkedEntries) {
+		ser.syncString(entry);
+	}
+}
+
+void UIStateData::synchronize(Common::Serializer &ser) {
+	uint32 numChanges = changes.size();
+	ser.syncAsUint32LE(numChanges);
+	changes.resize(numChanges);
+
+	for (Change &change : changes) {
+		ser.syncString(change.name);
+		ser.syncAsSint32LE(change.action);
+	}
+}
+
+void JournalData::syncOneJournal(Common::Serializer &ser, Common::HashMap<uint16, Common::Array<Entry>> &journal) {
+	uint16 numEntries = journal.size();
 	ser.syncAsUint16LE(numEntries);
 
 	if (ser.isLoading()) {
@@ -144,7 +204,7 @@ void JournalData::synchronize(Common::Serializer &ser) {
 			ser.syncAsUint16LE(id);
 			uint16 numStrings = 0;
 			ser.syncAsUint16LE(numStrings);
-			auto &entry = journalEntries[id];
+			auto &entry = journal[id];
 			for (uint j = 0; j < numStrings; ++j) {
 				entry.push_back(Entry());
 				ser.syncString(entry.back().stringID);
@@ -162,7 +222,7 @@ void JournalData::synchronize(Common::Serializer &ser) {
 			}
 		}
 	} else {
-		for (auto &a : journalEntries) {
+		for (auto &a : journal) {
 			uint16 id = a._key;
 			ser.syncAsUint16LE(id);
 			uint16 numStrings = a._value.size();
@@ -211,6 +271,26 @@ void TableData::synchronize(Common::Serializer &ser) {
 	}
 
 	ser.syncArray(comboValues.data(), num, Common::Serializer::FloatLE);
+
+	if (ser.isLoading() && ser.getVersion() < 11 && g_nancy->getGameType() >= kGameTypeNancy12) {
+		// Older saves split the values at index 30 instead of 100, so everything
+		// from index 30 on was stored as a combo value
+		Common::Array<float> oldComboValues = comboValues;
+		comboValues.clear();
+
+		for (uint i = 0; i < oldComboValues.size(); ++i) {
+			if (oldComboValues[i] == (float)kNoTableValue) {
+				continue;
+			}
+
+			uint index = i + 30;
+			if (index < getNumSingleValues()) {
+				setSingleValue(index, (int16)oldComboValues[i]);
+			} else {
+				setComboValue(index - getNumSingleValues(), oldComboValues[i]);
+			}
+		}
+	}
 }
 
 static void syncInt16Array(Common::Serializer &ser, Common::Array<int16> &arr) {
@@ -239,20 +319,26 @@ void GridMapPuzzleData::synchronize(Common::Serializer &ser) {
 }
 
 void QuizPuzzleData::synchronize(Common::Serializer &ser) {
-	// Serialize as: numScenes, then for each scene: sceneID, numBoxes, box data
-	uint16 numScenes = (uint16)boxCorrect.size();
-	ser.syncAsUint16LE(numScenes);
+	// Serialize as: numSlots, then for each slot: key, numBoxes, box data
+	uint16 numSlots = (uint16)boxCorrect.size();
+	ser.syncAsUint16LE(numSlots);
 
 	if (ser.isLoading()) {
 		boxCorrect.clear();
 		typedText.clear();
-		for (uint16 s = 0; s < numScenes; ++s) {
-			uint16 sceneID = 0;
-			ser.syncAsUint16LE(sceneID);
+		for (uint16 s = 0; s < numSlots; ++s) {
+			uint32 key = 0;
+			if (ser.getVersion() >= 12) {
+				ser.syncAsUint32LE(key);
+			} else {
+				uint16 sceneID = 0;
+				ser.syncAsUint16LE(sceneID);
+				key = sceneID;
+			}
 			byte num = 0;
 			ser.syncAsByte(num);
-			auto &bc = boxCorrect[sceneID];
-			auto &tt = typedText[sceneID];
+			auto &bc = boxCorrect[key];
+			auto &tt = typedText[key];
 			bc.resize(num, false);
 			tt.resize(num);
 			for (uint i = 0; i < num; ++i) {
@@ -264,11 +350,11 @@ void QuizPuzzleData::synchronize(Common::Serializer &ser) {
 		}
 	} else {
 		for (auto &entry : boxCorrect) {
-			uint16 sceneID = entry._key;
-			ser.syncAsUint16LE(sceneID);
+			uint32 key = entry._key;
+			ser.syncAsUint32LE(key);
 			byte num = (byte)entry._value.size();
 			ser.syncAsByte(num);
-			auto &tt = typedText[sceneID];
+			auto &tt = typedText[key];
 			for (uint i = 0; i < num; ++i) {
 				byte b = entry._value[i] ? 1 : 0;
 				ser.syncAsByte(b);
@@ -279,6 +365,11 @@ void QuizPuzzleData::synchronize(Common::Serializer &ser) {
 }
 
 void TableData::setSingleValue(uint16 index, int16 value) {
+	if (index >= getNumSingleValues()) {
+		warning("TableData: single value index %u is out of range", index);
+		return;
+	}
+
 	if (singleValues.size() <= index) {
 		singleValues.resize(index + 1, kNoTableValue);
 	}
@@ -291,6 +382,11 @@ int16 TableData::getSingleValue(uint16 index) const {
 }
 
 void TableData::setComboValue(uint16 index, float value) {
+	if (index >= getNumComboValues()) {
+		warning("TableData: combo value index %u is out of range", index);
+		return;
+	}
+
 	if (comboValues.size() <= index) {
 		comboValues.resize(index + 1, kNoTableValue);
 	}
@@ -302,11 +398,108 @@ float TableData::getComboValue(uint16 index) const {
 	return index < comboValues.size() ? comboValues[index] : kNoTableValue;
 }
 
-void CellPhoneData::synchronize(Common::Serializer &ser) {
-	ser.syncAsByte(noSignal);
-	ser.syncAsByte(batteryLow);
-	ser.syncAsByte(seeded);
+uint TableData::getNumSingleValues() const {
+	if (g_nancy->getGameType() <= kGameTypeNancy8) {
+		return 20;
+	} else if (g_nancy->getGameType() <= kGameTypeNancy11) {
+		return 30;
+	}
 
+	return 100;
+}
+
+uint TableData::getNumComboValues() const {
+	if (g_nancy->getGameType() >= kGameTypeNancy16) {
+		// Every byte index is a valid value
+		return 256 - getNumSingleValues();
+	}
+
+	return g_nancy->getGameType() == kGameTypeNancy8 ? 20 : 10;
+}
+
+byte TableData::getNoIndex() const {
+	if (g_nancy->getGameType() <= kGameTypeNancy11) {
+		return kNoTableIndex;
+	} else if (g_nancy->getGameType() == kGameTypeNancy12) {
+		return 121;
+	}
+
+	return 255;
+}
+
+byte TableData::getLiteralIndex() const {
+	return g_nancy->getGameType() <= kGameTypeNancy11 ? 100 : 120;
+}
+
+int16 TableData::getValue(uint16 index) const {
+	uint numSingleValues = getNumSingleValues();
+	if (index < numSingleValues) {
+		return getSingleValue(index);
+	}
+
+	float value = getComboValue(index - numSingleValues);
+	return (int16)(value + (value < 0 ? -0.5f : 0.5f));
+}
+
+int16 TableData::getValueOrZero(uint16 index) const {
+	int16 value = getValue(index);
+	return value == kNoTableValue ? 0 : value;
+}
+
+bool TableData::compare(int32 value, int32 other, uint16 comparison) {
+	switch (comparison) {
+	case kEqual:
+		return value == other;
+	case kGreater:
+		return value > other;
+	case kGreaterOrEqual:
+		return value >= other;
+	case kLess:
+		return value < other;
+	case kLessOrEqual:
+		return value <= other;
+	case kNotEqual:
+		return value != other;
+	default:
+		return false;
+	}
+}
+
+void TableData::setValue(uint16 index, int16 value) {
+	uint numSingleValues = getNumSingleValues();
+	if (index < numSingleValues) {
+		setSingleValue(index, value);
+	} else {
+		setComboValue(index - numSingleValues, value);
+	}
+}
+
+CellPhoneData::Phone &CellPhoneData::active() {
+	return phones[activePlayerCharacterSlot()];
+}
+
+const CellPhoneData::Phone &CellPhoneData::active() const {
+	return phones[activePlayerCharacterSlot()];
+}
+
+void CellPhoneData::synchronize(Common::Serializer &ser) {
+	syncPhone(ser, phones[0]);
+
+	// Nancy15+ protagonists each carry their own phone. Only their slots are
+	// written, so the save format of every earlier game is untouched.
+	if (g_nancy->getGameType() >= kGameTypeNancy15 && ser.getVersion() >= 12) {
+		for (uint i = 1; i < kMaxPlayerCharacters; ++i) {
+			syncPhone(ser, phones[i]);
+		}
+	}
+}
+
+void CellPhoneData::syncPhone(Common::Serializer &ser, Phone &phone) {
+	ser.syncAsByte(phone.noSignal);
+	ser.syncAsByte(phone.batteryLow);
+	ser.syncAsByte(phone.seeded);
+
+	Common::Array<UICL::Contact> &contacts = phone.contacts;
 	uint16 numContacts = (uint16)contacts.size();
 	ser.syncAsUint16LE(numContacts);
 
@@ -317,7 +510,8 @@ void CellPhoneData::synchronize(Common::Serializer &ser) {
 	char nameBuf[21];
 	for (uint16 i = 0; i < numContacts; ++i) {
 		UICL::Contact &c = contacts[i];
-		ser.syncBytes(c.unknownPrefix, sizeof(c.unknownPrefix));
+		ser.syncAsUint16LE(c.visibility);
+		ser.syncBytes(c.dialPattern, sizeof(c.dialPattern));
 
 		if (ser.isSaving()) {
 			memset(nameBuf, 0, sizeof(nameBuf));
@@ -329,11 +523,19 @@ void CellPhoneData::synchronize(Common::Serializer &ser) {
 			c.name = nameBuf;
 		}
 
-		ser.syncBytes(c.unknownSuffix, sizeof(c.unknownSuffix));
+		ser.syncAsUint16LE(c.sceneID);
+		ser.syncAsUint16LE(c.frameID);
+		ser.syncAsSint16LE(c.flag.label);
+
+		uint16 flagValue = c.flag.flag;
+		ser.syncAsUint16LE(flagValue);
+		if (ser.isLoading()) {
+			c.flag.flag = (byte)flagValue;
+		}
 	}
 
-	syncLinkArray(ser, emailMessages);
-	syncLinkArray(ser, searchLinks);
+	syncLinkArray(ser, phone.emailMessages);
+	syncLinkArray(ser, phone.searchLinks);
 }
 
 void CellPhoneData::syncLinkArray(Common::Serializer &ser, Common::Array<SearchLink> &arr) {
@@ -352,8 +554,42 @@ void CellPhoneData::syncLinkArray(Common::Serializer &ser, Common::Array<SearchL
 	}
 }
 
+void CellPhonePictureData::synchronize(Common::Serializer &ser) {
+	uint16 numPictures = (uint16)pictures.size();
+	ser.syncAsUint16LE(numPictures);
+	if (ser.isLoading()) {
+		pictures.resize(numPictures);
+	}
+
+	for (uint16 i = 0; i < numPictures; ++i) {
+		CapturedPicture &p = pictures[i];
+		ser.syncAsUint16LE(p.width);
+		ser.syncAsUint16LE(p.height);
+		ser.syncAsByte(p.sent);
+
+		uint32 numBytes = (uint32)p.width * p.height * 4;
+		if (ser.isLoading()) {
+			p.pixels.resize(numBytes);
+		}
+		if (numBytes) {
+			ser.syncBytes(p.pixels.data(), numBytes);
+		}
+
+		uint16 numSubjects = (uint16)p.subjects.size();
+		ser.syncAsUint16LE(numSubjects);
+		if (ser.isLoading()) {
+			p.subjects.resize(numSubjects);
+		}
+		for (uint16 j = 0; j < numSubjects; ++j) {
+			ser.syncAsSint16LE(p.subjects[j]);
+		}
+	}
+}
+
 void TimerData::synchronize(Common::Serializer &ser) {
-	for (uint i = 0; i < kNumTimers; ++i) {
+	// Nancy14 only saves 10 of its 20 timers, see kNumSavedTimers
+	const uint numTimers = g_nancy->getGameType() >= kGameTypeNancy15 ? kNumTimers : kNumSavedTimers;
+	for (uint i = 0; i < numTimers; ++i) {
 		Timer &t = timers[i];
 		ser.syncAsSint32LE(t.state);
 		ser.syncAsUint32LE(t.currentTimeMs);
@@ -373,7 +609,42 @@ void TimerData::synchronize(Common::Serializer &ser) {
 			ser.syncAsSint16LE(t.flags[j].label);
 			ser.syncAsByte(t.flags[j].flag);
 		}
+
+		// Nancy 12+ triggers, added in savegame version 6
+		if (ser.getVersion() >= 6) {
+			uint16 numTriggers = (uint16)t.triggers.size();
+			ser.syncAsUint16LE(numTriggers);
+			if (ser.isLoading()) {
+				t.triggers.resize(numTriggers);
+			}
+
+			for (uint j = 0; j < numTriggers; ++j) {
+				TimerData::Trigger &trig = t.triggers[j];
+				ser.syncAsSint32LE(trig.type);
+				ser.syncAsUint32LE(trig.durationMs);
+				ser.syncAsByte(trig.hasFired);
+
+				ser.syncString(trig.sound.name);
+				ser.syncAsUint16LE(trig.sound.channelID);
+				ser.syncAsUint16LE(trig.sound.playCommands);
+				ser.syncAsUint16LE(trig.sound.numLoops);
+				ser.syncAsUint16LE(trig.sound.volume);
+
+				for (uint k = 0; k < ARRAYSIZE(trig.flags); ++k) {
+					ser.syncAsSint16LE(trig.flags[k].label);
+					ser.syncAsByte(trig.flags[k].flag);
+				}
+			}
+		}
 	}
+}
+
+Common::Array<int32> &UIResourceData::getCharacterValues(uint character) {
+	if (character >= characterValues.size()) {
+		characterValues.resize(character + 1);
+	}
+
+	return characterValues[character];
 }
 
 void UIResourceData::synchronize(Common::Serializer &ser) {
@@ -387,6 +658,34 @@ void UIResourceData::synchronize(Common::Serializer &ser) {
 
 	for (uint16 i = 0; i < numValues; ++i) {
 		ser.syncAsSint32LE(values[i]);
+	}
+
+	// Only Nancy15 has more than one protagonist, so no earlier game's saves
+	// carry this block -- and the chunks are written back to back, so reading
+	// it where it was never written would desync the ones after
+	if (g_nancy->getGameType() < kGameTypeNancy15) {
+		return;
+	}
+
+	uint16 numCharacters = (uint16)characterValues.size();
+	ser.syncAsUint16LE(numCharacters);
+	if (ser.isLoading()) {
+		characterValues.clear();
+		characterValues.resize(numCharacters);
+	}
+
+	for (uint16 i = 0; i < numCharacters; ++i) {
+		Common::Array<int32> &characterSet = characterValues[i];
+
+		numValues = (uint16)characterSet.size();
+		ser.syncAsUint16LE(numValues);
+		if (ser.isLoading()) {
+			characterSet.resize(numValues);
+		}
+
+		for (uint16 j = 0; j < numValues; ++j) {
+			ser.syncAsSint32LE(characterSet[j]);
+		}
 	}
 }
 
@@ -409,8 +708,390 @@ void TaskbarData::synchronize(Common::Serializer &ser) {
 	}
 }
 
+PlayerCharacterData::Inventory &PlayerCharacterData::getInventory(uint character) {
+	if (character >= inventories.size()) {
+		inventories.resize(character + 1);
+	}
+
+	return inventories[character];
+}
+
+void PlayerCharacterData::synchronize(Common::Serializer &ser) {
+	ser.syncAsUint16LE(characterIndex);
+
+	for (uint i = 0; i < kMaxPlayerCharacters; ++i) {
+		ser.syncString(designs[i]);
+	}
+
+	uint16 numInventories = inventories.size();
+	ser.syncAsUint16LE(numInventories);
+
+	if (ser.isLoading()) {
+		inventories.clear();
+		inventories.resize(numInventories);
+	}
+
+	for (uint i = 0; i < numInventories; ++i) {
+		Inventory &inventory = inventories[i];
+
+		ser.syncAsByte(inventory.isValid);
+		ser.syncAsSint16LE(inventory.heldItem);
+
+		uint16 numItems = inventory.items.size();
+		ser.syncAsUint16LE(numItems);
+		if (ser.isLoading()) {
+			inventory.items.resize(numItems);
+			inventory.disabledItems.resize(numItems);
+		}
+
+		uint16 orderSize = inventory.order.size();
+		ser.syncAsUint16LE(orderSize);
+		if (ser.isLoading()) {
+			inventory.order.resize(orderSize);
+		}
+
+		if (numItems) {
+			ser.syncArray(inventory.items.data(), numItems, Common::Serializer::Byte);
+			ser.syncArray(inventory.disabledItems.data(), numItems, Common::Serializer::Byte);
+		}
+
+		if (orderSize) {
+			ser.syncArray(inventory.order.data(), orderSize, Common::Serializer::Sint16LE);
+		}
+	}
+}
+
+void WordFindPuzzleData::synchronize(Common::Serializer &ser) {
+	ser.syncAsSint16LE(currentWord);
+}
+
+void HangmanData::synchronize(Common::Serializer &ser) {
+	uint16 count = usedWords.size();
+	ser.syncAsUint16LE(count);
+	if (ser.isLoading()) {
+		usedWords.resize(count);
+	}
+	for (uint i = 0; i < count; ++i) {
+		ser.syncString(usedWords[i]);
+	}
+}
+
+void DecoderData::synchronize(Common::Serializer &ser) {
+	ser.syncAsUint16LE(sceneID);
+	ser.syncString(text);
+}
+
+void DrivingData::synchronize(Common::Serializer &ser) {
+	ser.syncAsByte(valid);
+	ser.syncAsSint32LE(carX);
+	ser.syncAsSint32LE(carY);
+	ser.syncAsDoubleLE(heading);
+	ser.syncAsSint32LE(tireDamage);
+	ser.syncAsByte(flatTire);
+	// Added in savegame version 8; older saves default these to 0/false.
+	ser.syncAsDoubleLE(fuelBurnAccum, 8);
+	ser.syncAsByte(infiniteFuel, 8);
+}
+
+void MirrorLightData::synchronize(Common::Serializer &ser) {
+	uint16 num = (uint16)angles.size();
+	ser.syncAsUint16LE(num);
+	if (ser.isLoading())
+		angles.resize(num);
+	for (uint i = 0; i < num; ++i)
+		ser.syncAsDoubleLE(angles[i]);
+}
+
+void BuildPuzzleData::synchronize(Common::Serializer &ser) {
+	ser.syncAsUint16LE(sceneID);
+	ser.syncAsSint16LE(placedCount);
+	ser.syncAsByte(solved);
+	ser.syncAsByte(wrongIngredient);
+	syncInt16Array(ser, pieces);
+	syncInt16Array(ser, zones);
+}
+
+int16 BuildBoardData::Board::getPieceInZone(int16 zoneID) const {
+	for (const Piece &piece : pieces) {
+		if (piece.zoneID == zoneID) {
+			return piece.sourceID;
+		}
+	}
+
+	return -1;
+}
+
+void BuildBoardData::synchronize(Common::Serializer &ser) {
+	uint16 numBoards = boards.size();
+	ser.syncAsUint16LE(numBoards);
+
+	Common::Array<Common::String> names;
+	if (ser.isSaving()) {
+		for (auto &entry : boards) {
+			names.push_back(entry._key);
+		}
+	} else {
+		boards.clear();
+		names.resize(numBoards);
+	}
+
+	for (Common::String &name : names) {
+		ser.syncString(name);
+
+		Board &board = boards[name];
+		ser.syncAsSint16LE(board.placedCount);
+		ser.syncAsSint16LE(board.heldPiece);
+
+		uint16 numPieces = board.pieces.size();
+		ser.syncAsUint16LE(numPieces);
+		board.pieces.resize(numPieces);
+
+		for (Piece &piece : board.pieces) {
+			ser.syncAsSint16LE(piece.sourceID);
+			ser.syncAsSint16LE(piece.zoneID);
+			ser.syncAsSint16LE(piece.rect.left);
+			ser.syncAsSint16LE(piece.rect.top);
+			ser.syncAsSint16LE(piece.rect.right);
+			ser.syncAsSint16LE(piece.rect.bottom);
+			ser.syncAsByte(piece.isLocked);
+		}
+	}
+}
+
+void DragSurfaceData::synchronize(Common::Serializer &ser) {
+	uint16 numViews = viewOrigins.size();
+	ser.syncAsUint16LE(numViews);
+
+	Common::Array<Common::String> names;
+	if (ser.isSaving()) {
+		for (auto &entry : viewOrigins) {
+			names.push_back(entry._key);
+		}
+	} else {
+		viewOrigins.clear();
+		names.resize(numViews);
+	}
+
+	for (Common::String &name : names) {
+		ser.syncString(name);
+
+		Common::Point &origin = viewOrigins[name];
+		ser.syncAsSint16LE(origin.x);
+		ser.syncAsSint16LE(origin.y);
+	}
+}
+
+void StreamData::synchronize(Common::Serializer &ser) {
+	uint16 numStreams = streams.size();
+	ser.syncAsUint16LE(numStreams);
+	streams.resize(numStreams);
+
+	for (Stream &stream : streams) {
+		ser.syncAsByte(stream.isMainStream);
+		ser.syncString(stream.name);
+		ser.syncAsByte(stream.lifetime);
+		ser.syncAsByte(stream.capturesInput);
+		ser.syncAsByte(stream.runsFirst);
+		ser.syncAsSint32LE(stream.zOffset);
+		ser.syncString(stream.sceneName);
+		ser.syncAsUint16LE(stream.frameID);
+
+		uint16 numChildren = stream.children.size();
+		ser.syncAsUint16LE(numChildren);
+		stream.children.resize(numChildren);
+		for (Child &child : stream.children) {
+			ser.syncString(child.name);
+			ser.syncAsByte(child.lifetime);
+		}
+	}
+}
+
+static void syncCollection(Common::Serializer &ser, CollectionData::Collection &collection) {
+	ser.syncAsUint32LE(collection.maxSize);
+
+	uint16 numNumbers = collection.values.numbers.size();
+	ser.syncAsUint16LE(numNumbers);
+	collection.values.numbers.resize(numNumbers);
+	ser.syncArray(collection.values.numbers.data(), numNumbers, Common::Serializer::DoubleLE);
+
+	// Collections of names were added in Nancy18
+	if (g_nancy->getGameType() >= kGameTypeNancy18) {
+		uint16 numNames = collection.values.names.size();
+		ser.syncAsUint16LE(numNames);
+		collection.values.names.resize(numNames);
+		for (Common::String &name : collection.values.names) {
+			ser.syncString(name);
+		}
+	}
+}
+
+void CollectionData::synchronize(Common::Serializer &ser) {
+	uint16 numCollections = collections.size();
+	ser.syncAsUint16LE(numCollections);
+
+	if (ser.isSaving()) {
+		for (auto &entry : collections) {
+			Common::String name = entry._key;
+			ser.syncString(name);
+			syncCollection(ser, entry._value);
+		}
+	} else {
+		collections.clear();
+		for (uint i = 0; i < numCollections; ++i) {
+			Common::String name;
+			ser.syncString(name);
+			syncCollection(ser, collections[name]);
+		}
+	}
+}
+
+Common::String PhoneBookData::Entry::getDisplayText() const {
+	if (nameFlag == -1 || NancySceneState.getEventFlag(nameFlag, g_nancy->_true)) {
+		return name;
+	}
+
+	return number;
+}
+
+void SavedStateData::synchronize(Common::Serializer &ser) {
+	uint16 numStates = states.size();
+	ser.syncAsUint16LE(numStates);
+
+	Common::Array<Common::String> names;
+	if (ser.isSaving()) {
+		for (auto &entry : states) {
+			names.push_back(entry._key);
+		}
+	} else {
+		states.clear();
+		names.resize(numStates);
+	}
+
+	for (Common::String &name : names) {
+		ser.syncString(name);
+
+		Common::Array<int32> &values = states[name];
+		uint16 numValues = values.size();
+		ser.syncAsUint16LE(numValues);
+		values.resize(numValues);
+		ser.syncArray(values.data(), numValues, Common::Serializer::Sint32LE);
+	}
+}
+
+void ScriptValueData::synchronize(Common::Serializer &ser) {
+	uint16 numValues = values.size();
+	ser.syncAsUint16LE(numValues);
+
+	Common::Array<Common::String> names;
+	if (ser.isSaving()) {
+		for (auto &entry : values) {
+			names.push_back(entry._key);
+		}
+	} else {
+		values.clear();
+		names.resize(numValues);
+	}
+
+	for (Common::String &name : names) {
+		ser.syncString(name);
+		ser.syncAsSint32LE(values[name]);
+	}
+}
+
+void ScriptSavedData::synchronize(Common::Serializer &ser) {
+	uint16 numValues = values.size();
+	ser.syncAsUint16LE(numValues);
+
+	Common::Array<Common::String> names;
+	if (ser.isSaving()) {
+		for (auto &entry : values) {
+			names.push_back(entry._key);
+		}
+	} else {
+		values.clear();
+		names.resize(numValues);
+	}
+
+	for (Common::String &name : names) {
+		ser.syncString(name);
+
+		Common::Array<byte> &value = values[name];
+		uint32 size = value.size();
+		ser.syncAsUint32LE(size);
+		value.resize(size);
+		ser.syncBytes(value.data(), size);
+	}
+}
+
+void ScriptJournalData::synchronize(Common::Serializer &ser) {
+	for (uint i = 0; i < kMaxPlayerCharacters; ++i) {
+		uint16 numEntries = journalEntries[i].size();
+		ser.syncAsUint16LE(numEntries);
+		journalEntries[i].resize(numEntries);
+
+		for (JournalEntry &entry : journalEntries[i]) {
+			ser.syncString(entry.heading);
+			ser.syncString(entry.text);
+		}
+
+		uint16 numTasks = tasks[i].size();
+		ser.syncAsUint16LE(numTasks);
+		tasks[i].resize(numTasks);
+
+		for (Task &task : tasks[i]) {
+			ser.syncString(task.text);
+			ser.syncString(task.flagName);
+		}
+	}
+}
+
+void PhoneBookData::synchronize(Common::Serializer &ser) {
+	for (uint i = 0; i < kMaxPlayerCharacters; ++i) {
+		uint16 numEntries = entries[i].size();
+		ser.syncAsUint16LE(numEntries);
+		entries[i].resize(numEntries);
+
+		for (Entry &entry : entries[i]) {
+			ser.syncString(entry.name);
+			ser.syncString(entry.number);
+			ser.syncString(entry.sceneName);
+			ser.syncAsSint16LE(entry.nameFlag);
+		}
+	}
+}
+
 PuzzleData *makePuzzleData(const uint32 tag) {
 	switch(tag) {
+	case PhoneBookData::getTag():
+		return new PhoneBookData();
+	case SavedStateData::getTag():
+		return new SavedStateData();
+	case ScriptValueData::getTag():
+		return new ScriptValueData();
+	case ScriptSavedData::getTag():
+		return new ScriptSavedData();
+	case ScriptJournalData::getTag():
+		return new ScriptJournalData();
+	case StreamData::getTag():
+		return new StreamData();
+	case BuildBoardData::getTag():
+		return new BuildBoardData();
+	case CollectionData::getTag():
+		return new CollectionData();
+	case DragSurfaceData::getTag():
+		return new DragSurfaceData();
+	case BuildPuzzleData::getTag():
+		return new BuildPuzzleData();
+	case MirrorLightData::getTag():
+		return new MirrorLightData();
+	case DrivingData::getTag():
+		return new DrivingData();
+	case WordFindPuzzleData::getTag():
+		return new WordFindPuzzleData();
+	case HangmanData::getTag():
+		return new HangmanData();
+	case DecoderData::getTag():
+		return new DecoderData();
 	case SliderPuzzleData::getTag():
 		return new SliderPuzzleData();
 	case RippedLetterPuzzleData::getTag():
@@ -435,16 +1116,24 @@ PuzzleData *makePuzzleData(const uint32 tag) {
 		return new GridMapPuzzleData();
 	case JournalData::getTag():
 		return new JournalData();
+	case TasklistData::getTag():
+		return new TasklistData();
+	case UIStateData::getTag():
+		return new UIStateData();
 	case TableData::getTag():
 		return new TableData();
 	case CellPhoneData::getTag():
 		return new CellPhoneData();
+	case CellPhonePictureData::getTag():
+		return new CellPhonePictureData();
 	case TimerData::getTag():
 		return new TimerData();
 	case UIResourceData::getTag():
 		return new UIResourceData();
 	case TaskbarData::getTag():
 		return new TaskbarData();
+	case PlayerCharacterData::getTag():
+		return new PlayerCharacterData();
 	default:
 		return nullptr;
 	}

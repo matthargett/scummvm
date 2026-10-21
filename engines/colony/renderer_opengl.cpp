@@ -25,7 +25,6 @@
  *
  */
 
-#include "common/config-manager.h"
 #include "common/system.h"
 #include "graphics/font.h"
 #include "graphics/surface.h"
@@ -93,6 +92,32 @@ public:
 	void setDepthRange(float nearVal, float farVal) override {
 		glDepthRange(nearVal, farVal);
 	}
+
+	void applyScissorRect(const Common::Rect &logical) {
+		const float scaleX = (float)_screenViewport.width() / (float)_width;
+		const float scaleY = (float)_screenViewport.height() / (float)_height;
+		const int sysH = _system->getHeight();
+		const int vpX = _screenViewport.left + (int)(logical.left * scaleX);
+		const int vpY = sysH - (_screenViewport.top + (int)(logical.bottom * scaleY));
+		const int vpW = (int)(logical.width() * scaleX);
+		const int vpH = (int)(logical.height() * scaleY);
+		glScissor(vpX, vpY, vpW > 0 ? vpW : 0, vpH > 0 ? vpH : 0);
+	}
+	void setFeatureClipX(int left, int right) override {
+		Common::Rect clipped = _active3DViewport;
+		if (left > clipped.left)
+			clipped.left = left;
+		if (right < clipped.right)
+			clipped.right = right;
+		if (clipped.left >= clipped.right)
+			clipped.right = clipped.left;
+		applyScissorRect(clipped);
+	}
+	void clearFeatureClipX() override {
+		applyScissorRect(_active3DViewport);
+	}
+	void setSquarePixelViewport(bool enable) override;
+	void setCanvasSize(int width, int height) override;
 	void computeScreenViewport() override;
 	void drawSurface(const Graphics::Surface *surf, int x, int y) override;
 	Graphics::Surface *getScreenshot() override;
@@ -102,23 +127,22 @@ public:
 
 private:
 	void useColor(uint32 color);
-	// Set glLineWidth scaled to window/logical ratio. Mirrors Freescape
-	// (gfx_opengl_shaders.cpp:692). Cached so back-to-back same-width
-	// line draws don't re-issue the GL call.
+	// Scale line widths with the canvas, excluding letterboxing.
 	void applyLineWidthForLines();
 	float _lineWidth = 1.0f;
 	GLuint _overlayTexId = 0;
 
 	OSystem *_system = nullptr;
+	Common::Rect _active3DViewport;
 	int _width = 0;
 	int _height = 0;
+	bool _squarePixelViewport = false;
 	byte _palette[256 * 3] = {};
 	bool _wireframe = true;
 	int64_t _wireframeFillColor = 0; // -1 = no fill (outline only)
 	const byte *_stippleData = nullptr; // GL_POLYGON_STIPPLE pattern (128 bytes), null = disabled
 	uint32 _stippleFgColor = 0;
 	uint32 _stippleBgColor = 0;
-	Common::Rect _screenViewport;
 };
 
 OpenGLRenderer::OpenGLRenderer(OSystem *system, int width, int height) : _system(system), _width(width), _height(height) {
@@ -175,10 +199,7 @@ void OpenGLRenderer::useColor(uint32 color) {
 }
 
 void OpenGLRenderer::applyLineWidthForLines() {
-	const int sysW = _system ? _system->getWidth() : 0;
-	float w = 1.0f;
-	if (sysW > _width)
-		w = MAX(1.0f, (float)sysW / (float)_width);
+	const float w = MAX(1.0f, (float)_screenViewport.width() / _width);
 	if (w != _lineWidth) {
 		glLineWidth(w);
 		_lineWidth = w;
@@ -275,6 +296,7 @@ void OpenGLRenderer::begin3D(int camX, int camY, int camZ, int angle, int angleY
  
 	glViewport(vpX, vpY, vpW, vpH);
 	glScissor(vpX, vpY, vpW, vpH);
+	_active3DViewport = viewport;
 	glEnable(GL_SCISSOR_TEST);
 	glEnable(GL_DEPTH_TEST);
 	glDepthFunc(GL_LEQUAL);
@@ -283,15 +305,12 @@ void OpenGLRenderer::begin3D(int camX, int camY, int camZ, int angle, int angleY
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
 	
-	// Use a proper FOV-based perspective projection (like Freescape).
-	// A fixed vertical FOV ensures the forward direction stays centered
-	// regardless of viewport dimensions (e.g. when dashboard narrows it).
-	float aspectRatio = (float)viewport.width() / (float)viewport.height();
-	float fov = 75.0f; // vertical FOV in degrees
-	float nearClip = 1.0f;
-	float farClip = 10000.0f;
-	float ymax = nearClip * tanf(fov * M_PI / 360.0f);
-	float xmax = ymax * aspectRatio;
+	// The original projection is center + (coordinate << 8) / depth, so
+	// derive the frustum from its fixed 256-logical-pixel focal length.
+	const float nearClip = kProjectionNearClip;
+	const float farClip = 10000.0f;
+	const float xmax = nearClip * viewport.width() * 0.5f / kProjectionFocalLength;
+	const float ymax = nearClip * viewport.height() * 0.5f / kProjectionFocalLength;
 	glFrustum(-xmax, xmax, -ymax, ymax, nearClip, farClip);
  
 	glMatrixMode(GL_MODELVIEW);
@@ -550,29 +569,31 @@ void OpenGLRenderer::end3D() {
 	glOrtho(0, _width, _height, 0, -1, 1);
 }
 
+void OpenGLRenderer::setSquarePixelViewport(bool enable) {
+	if (_squarePixelViewport == enable)
+		return;
+
+	_squarePixelViewport = enable;
+	computeScreenViewport();
+}
+
 void OpenGLRenderer::computeScreenViewport() {
-	int32 screenWidth = _system->getWidth();
-	int32 screenHeight = _system->getHeight();
-
-	bool widescreen = ConfMan.getBool("widescreen_mod");
-
-	if (widescreen) {
-		_screenViewport = Common::Rect(screenWidth, screenHeight);
-	} else if (_system->getFeatureState(OSystem::kFeatureAspectRatioCorrection)) {
-		// Aspect ratio correction (4:3)
-		int32 viewportWidth = MIN<int32>(screenWidth, screenHeight * 4 / 3);
-		int32 viewportHeight = MIN<int32>(screenHeight, screenWidth * 3 / 4);
-		_screenViewport = Common::Rect(viewportWidth, viewportHeight);
-
-		// Pillarboxing/Letterboxing
-		_screenViewport.translate((screenWidth - viewportWidth) / 2,
-			(screenHeight - viewportHeight) / 2);
-	} else {
-		_screenViewport = Common::Rect(screenWidth, screenHeight);
-	}
+	const int screenHeight = _system->getHeight();
+	_screenViewport = Colony::computeScreenViewport(_system, _width, _height, _squarePixelViewport);
 
 	glViewport(_screenViewport.left, screenHeight - _screenViewport.bottom, _screenViewport.width(), _screenViewport.height());
 	glScissor(_screenViewport.left, screenHeight - _screenViewport.bottom, _screenViewport.width(), _screenViewport.height());
+}
+
+void OpenGLRenderer::setCanvasSize(int width, int height) {
+	_width = width;
+	_height = height;
+	computeScreenViewport();
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+	glOrtho(0, _width, _height, 0, -1, 1);
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
 }
 
 void OpenGLRenderer::drawEllipse(int x, int y, int rx, int ry, uint32 color) {
@@ -649,10 +670,14 @@ void OpenGLRenderer::fillEllipse(int x, int y, int rx, int ry, uint32 color) {
 void OpenGLRenderer::fillDitherRect(const Common::Rect &rect, uint32 color1, uint32 color2) {
 	fillRect(rect, color1);
 	useColor(color2);
-	glBegin(GL_POINTS);
+	// Each checker covers a logical pixel, even on a scaled viewport.
+	glBegin(GL_QUADS);
 	for (int y = rect.top; y < rect.bottom; y++) {
 		for (int x = rect.left + (y % 2); x < rect.right; x += 2) {
 			glVertex2i(x, y);
+			glVertex2i(x + 1, y);
+			glVertex2i(x + 1, y + 1);
+			glVertex2i(x, y + 1);
 		}
 	}
 	glEnd();

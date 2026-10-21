@@ -21,14 +21,26 @@
 
 #include "macs2/dialogs.h"
 #include "common/config-manager.h"
+#include "common/gui_options.h"
 #include "common/translation.h"
 #include "engines/enhancements.h"
 #include "gui/widget.h"
+#include "macs2/detection.h"
 
 namespace Macs2 {
 
 Macs2OptionsWidget::Macs2OptionsWidget(GuiObject *boss, const Common::String &name, const Common::String &domain) :
 		OptionsContainerWidget(boss, name, "Macs2GameOptionsDialog", domain) {
+
+	if (Common::checkGameGUIOption(GAMEOPTION_TRANSLATION, ConfMan.get("guioptions", domain))) {
+		GUI::StaticTextWidget *label = new GUI::StaticTextWidget(widgetsBoss(), _dialogLayout + ".translationLabel", _("Translation:"));
+		label->setAlign(Graphics::kTextAlignRight);
+		_translationPopUp = new GUI::PopUpWidget(widgetsBoss(), _dialogLayout + ".translation");
+		_translationPopUp->appendEntry(_("Original"), 0);
+		_translationPackages = listTranslationPackages(Common::FSNode(ConfMan.getPath("path", domain)), ConfMan.get("gameid", domain));
+		for (uint i = 0; i < _translationPackages.size(); ++i)
+			_translationPopUp->appendEntry(_translationPackages[i].displayName, i + 1);
+	}
 
 	_originalMenusCheckbox = new GUI::CheckboxWidget(widgetsBoss(), _dialogLayout + ".originalMenus",
 		_("Use original save/load screens"),
@@ -50,10 +62,12 @@ Macs2OptionsWidget::Macs2OptionsWidget(GuiObject *boss, const Common::String &na
 		_("Fix original bugs"),
 		_("Fixes bugs which were present in the original release, and noticeable graphical/audio glitches."),
 		kEnhancementGroup1Cmd);
+#endif
 	GUI::CheckboxWidget *enh2 = new GUI::CheckboxWidget(widgetsBoss(), _dialogLayout + ".enhancementGroup2",
 		_("Audio-visual improvements"),
-		_("Makes adjustments not related to bugs for certain audio and graphics elements (e.g. version consistency changes)."),
+		_("Optional generated dialogue speech (SPEECH/*.wav) and other audio/visual polish."),
 		kEnhancementGroup2Cmd);
+#if 0
 	GUI::CheckboxWidget *enh3 = new GUI::CheckboxWidget(widgetsBoss(), _dialogLayout + ".enhancementGroup3",
 		_("Restored content"),
 		_("Restores dialogs, graphics, and audio elements which were originally cut in the original release."),
@@ -66,13 +80,26 @@ Macs2OptionsWidget::Macs2OptionsWidget(GuiObject *boss, const Common::String &na
 
 #if 0
 	_enhancementsCheckboxes.push_back(enh1);
+#endif
 	_enhancementsCheckboxes.push_back(enh2);
+#if 0
 	_enhancementsCheckboxes.push_back(enh3);
 #endif
 	_enhancementsCheckboxes.push_back(enh4);
 }
 
 void Macs2OptionsWidget::load() {
+	if (_translationPopUp) {
+		_translationPopUp->setSelectedTag(0);
+		const Common::String code = ConfMan.get(kTranslationConfigKey, _domain);
+		for (uint i = 0; i < _translationPackages.size(); ++i) {
+			if (_translationPackages[i].code.equalsIgnoreCase(code)) {
+				_translationPopUp->setSelectedTag(i + 1);
+				break;
+			}
+		}
+	}
+
 	_originalMenusCheckbox->setState(ConfMan.getBool("original_menus", _domain));
 
 #ifdef USE_TTS
@@ -108,6 +135,14 @@ void Macs2OptionsWidget::load() {
 }
 
 bool Macs2OptionsWidget::save() {
+	if (_translationPopUp) {
+		const uint32 selected = _translationPopUp->getSelectedTag();
+		if (selected > 0 && selected <= _translationPackages.size())
+			ConfMan.set(kTranslationConfigKey, _translationPackages[selected - 1].code, _domain);
+		else
+			ConfMan.removeKey(kTranslationConfigKey, _domain);
+	}
+
 	ConfMan.setBool("original_menus", _originalMenusCheckbox->getState(), _domain);
 
 #ifdef USE_TTS
@@ -149,7 +184,14 @@ bool Macs2OptionsWidget::save() {
 void Macs2OptionsWidget::defineLayout(GUI::ThemeEval &layouts, const Common::String &layoutName, const Common::String &overlayedLayout) const {
 	layouts.addDialog(layoutName, overlayedLayout)
 		.addLayout(GUI::ThemeLayout::kLayoutVertical, 5)
-			.addPadding(0, 0, 0, 0)
+			.addPadding(0, 0, 0, 0);
+	if (_translationPopUp) {
+		layouts.addLayout(GUI::ThemeLayout::kLayoutHorizontal)
+			.addWidget("translationLabel", "OptionsLabel")
+			.addWidget("translation", "PopUp")
+		.closeLayout();
+	}
+	layouts
 			.addWidget("originalMenus", "Checkbox")
 #ifdef USE_TTS
 			.addWidget("ttsEnabled", "Checkbox")

@@ -31,6 +31,7 @@
 #include "director/cast.h"
 #include "director/debugger.h"
 #include "director/lingo/lingo.h"
+#include "director/lingo/lingo-profiler.h"
 #include "director/movie.h"
 #include "director/window.h"
 #include "director/score.h"
@@ -168,8 +169,8 @@ void Window::drawChannelBox(Director::Movie *currentMovie, Graphics::ManagedSurf
 		Common::Rect bbox = channel->getBbox();
 		blitTo->frameRect(bbox, g_director->_wm->_colorWhite);
 
-		font->drawString(blitTo, Common::String::format("m: %d, ch: %d, fr: %d", channel->_sprite->_castId.member, selectedChannel, channel->_filmLoopFrame ? channel->_filmLoopFrame : channel->_movieTime), bbox.left + 3, bbox.top + 3, 128, g_director->_wm->_colorBlack);
-		font->drawString(blitTo, Common::String::format("m: %d, ch: %d, fr: %d", channel->_sprite->_castId.member, selectedChannel, channel->_filmLoopFrame ? channel->_filmLoopFrame : channel->_movieTime), bbox.left + 2, bbox.top + 2, 128, g_director->_wm->_colorWhite);
+		font->drawString(blitTo, Common::String::format("m: %d, l: %d, ch: %d, fr: %d", channel->_sprite->_castId.member, channel->_sprite->_castId.castLib, selectedChannel, channel->_filmLoopFrame ? channel->_filmLoopFrame : channel->_movieTime), bbox.left + 3, bbox.top + 3, 128, g_director->_wm->_colorBlack);
+		font->drawString(blitTo, Common::String::format("m: %d, l: %d, ch: %d, fr: %d", channel->_sprite->_castId.member, channel->_sprite->_castId.castLib, selectedChannel, channel->_filmLoopFrame ? channel->_filmLoopFrame : channel->_movieTime), bbox.left + 2, bbox.top + 2, 128, g_director->_wm->_colorWhite);
 	}
 }
 
@@ -231,6 +232,12 @@ void Window::renderChannel(Channel *channel, const Common::Rect &rect, Graphics:
 
 bool Window::render(bool forceRedraw, Graphics::ManagedSurface *blitTo) {
 	if (!_currentMovie)
+		return false;
+
+	// An embedded movie is composited via getSubChannels(); it must never
+	// render the shared window itself (e.g. from its own updateStage), which
+	// would draw its channels at the embedded movie's native origin.
+	if (_currentMovie->_isEmbedded)
 		return false;
 
 	if (!blitTo)
@@ -313,8 +320,8 @@ bool Window::render(bool forceRedraw, Graphics::ManagedSurface *blitTo) {
 				Common::Rect bbox = channel->getBbox();
 				blitTo->frameRect(bbox, g_director->_wm->_colorWhite);
 
-				font->drawString(blitTo, Common::String::format("m: %d, ch: %d, fr: %d", channel->_sprite->_castId.member, i, channel->_filmLoopFrame ? channel->_filmLoopFrame : channel->_movieTime), bbox.left + 3, bbox.top + 3, 128, g_director->_wm->_colorBlack);
-				font->drawString(blitTo, Common::String::format("m: %d, ch: %d, fr: %d", channel->_sprite->_castId.member, i, channel->_filmLoopFrame ? channel->_filmLoopFrame : channel->_movieTime), bbox.left + 2, bbox.top + 2, 128, g_director->_wm->_colorWhite);
+				font->drawString(blitTo, Common::String::format("m: %d, l: %d, ch: %d, fr: %d", channel->_sprite->_castId.member, channel->_sprite->_castId.castLib, i, channel->_filmLoopFrame ? channel->_filmLoopFrame : channel->_movieTime), bbox.left + 3, bbox.top + 3, 128, g_director->_wm->_colorBlack);
+				font->drawString(blitTo, Common::String::format("m: %d, l: %d, ch: %d, fr: %d", channel->_sprite->_castId.member, channel->_sprite->_castId.castLib, i, channel->_filmLoopFrame ? channel->_filmLoopFrame : channel->_movieTime), bbox.left + 2, bbox.top + 2, 128, g_director->_wm->_colorWhite);
 			}
 		}
 	}
@@ -603,6 +610,19 @@ bool Window::loadNextMovie() {
 
 	if (_currentMovie && archivePath == _currentMovie->getArchive()->getPathName()) {
 		debug(0, "Window::loadNextMovie: next movie '%s' is the same as current movie, skipping load", archivePath.toString(Common::Path::kNativeSeparator).c_str());
+
+		// Jump to the correct frame
+		_currentMovie->getScore()->_playState = kPlayStarted;
+		_nextMovie.movie.clear();
+		if (!_nextMovie.frameS.empty()) {
+			_currentMovie->getScore()->setStartToLabel(_nextMovie.frameS);
+			_nextMovie.frameS.clear();
+		}
+
+		if (_nextMovie.frameI != -1) {
+			_currentMovie->getScore()->setCurrentFrame(_nextMovie.frameI);
+			_nextMovie.frameI = -1;
+		}
 		return true;
 	}
 
@@ -814,6 +834,8 @@ Common::Path Window::getSharedCastPath() {
 }
 
 void Window::freezeLingoState() {
+	if (g_director->_lingoProfiler)
+		g_director->_lingoProfiler->onFreeze();
 	_frozenLingoStates.push_back(_lingoState);
 	_lingoState = new LingoState;
 	debugC(3, kDebugLingoExec, "Freezing Lingo state, depth %d", _frozenLingoStates.size());
@@ -828,6 +850,8 @@ void Window::thawLingoState() {
 		warning("Can't thaw a Lingo state in mid-execution, ignoring");
 		return;
 	}
+	if (g_director->_lingoProfiler)
+		g_director->_lingoProfiler->onThaw();
 	delete _lingoState;
 	debugC(3, kDebugLingoExec, "Thawing Lingo state, depth %d", _frozenLingoStates.size());
 	_lingoState = _frozenLingoStates.back();

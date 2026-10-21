@@ -58,6 +58,7 @@ class HotspotActor;
 class RootStage;
 class PixMapImage;
 class ImtGod;
+class ImtDeviceOwner;
 class EventLoop;
 class Debugger;
 
@@ -87,9 +88,12 @@ public:
 	const char *getAppName() const;
 	bool hasFeature(EngineFeature f) const override;
 	void dispatchOneSystemEvent(const Common::Event &event);
+	void generateMouseUpdateEvent();
+	uint currentTimeInSeconds();
 
 	VideoDisplayManager *getDisplayManager() { return _displayManager; }
 	DisplayUpdateManager *getDisplayUpdateManager() { return _displayUpdateManager; }
+	PrintManager *getPrintManager() { return _printManager; }
 	CursorManager *getCursorManager() { return _cursorManager; }
 	FunctionManager *getFunctionManager() { return _functionManager; }
 	RootStage *getRootStage() { return _stageDirector->getRootStage(); }
@@ -99,6 +103,7 @@ public:
 	Document *getDocument() { return _document; }
 	TimerService *getTimerService() { return _timerService; }
 	ImtGod *getImtGod() { return _imtGod; }
+	ImtDeviceOwner *getDeviceOwner() { return _deviceOwner; }
 
 	void registerAudioSequence(AudioSequence *sequence);
 	void unregisterAudioSequence(AudioSequence *sequence);
@@ -146,7 +151,7 @@ private:
 	FunctionManager *_functionManager = nullptr;
 	DisplayUpdateManager *_displayUpdateManager = nullptr;
 	VideoDisplayManager *_displayManager = nullptr;
-	// PrintManager *_printManager = nullptr;
+	PrintManager *_printManager = nullptr;
 	Document *_document = nullptr;
 	CursorManager *_cursorManager = nullptr;
 	StageDirector *_stageDirector = nullptr;

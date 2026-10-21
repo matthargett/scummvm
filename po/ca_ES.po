@@ -7,8 +7,8 @@ msgid ""
 msgstr ""
 "Project-Id-Version: ScummVM 1.6.0git\n"
 "Report-Msgid-Bugs-To: scummvm-devel@lists.scummvm.org\n"
-"POT-Creation-Date: 2026-07-08 18:20+0000\n"
-"PO-Revision-Date: 2026-07-04 18:22+0000\n"
+"POT-Creation-Date: 2026-07-13 11:35+0000\n"
+"PO-Revision-Date: 2026-08-27 16:22+0000\n"
 "Last-Translator: Xaviu <xaviu@xaviu.com>\n"
 "Language-Team: Catalan <https://translations.scummvm.org/projects/scummvm/"
 "scummvm/ca/>\n"
@@ -17,7 +17,7 @@ msgstr ""
 "Content-Type: text/plain; charset=utf-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
-"X-Generator: Weblate 5.15.1\n"
+"X-Generator: Weblate 2026.7.1\n"
 "X-Language-name: Català\n"
 
 #: audio/mac_plugin.cpp:30
@@ -113,7 +113,7 @@ msgstr "Amunt"
 
 #: gui/browser.cpp:84 gui/chooser.cpp:45 gui/cloudconnectionwizard.cpp:67
 #: gui/downloaddlcsdialog.cpp:61 gui/downloadpacksdialog.cpp:272
-#: gui/downloadpacksdialog.cpp:465 gui/editgamedialog.cpp:340
+#: gui/downloadpacksdialog.cpp:465 gui/editgamedialog.cpp:381
 #: gui/editrecorddialog.cpp:66 gui/integrity-dialog.cpp:122
 #: gui/integrity-dialog.cpp:253 gui/filebrowser-dialog.cpp:68
 #: gui/fluidsynth-dialog.cpp:153 gui/massadd.cpp:93 gui/options.cpp:2418
@@ -124,10 +124,10 @@ msgstr "Amunt"
 #: gui/saveload-dialog.cpp:839 gui/saveload-dialog.cpp:1243
 #: gui/shaderbrowser-dialog.cpp:80 gui/themebrowser.cpp:54
 #: gui/unknown-game-dialog.cpp:53 base/main.cpp:608
-#: dists/android.strings.xml.cpp:46 engines/engine.cpp:800
-#: engines/engine.cpp:825 backends/dialogs/gtk/gtk-dialogs.cpp:65
-#: backends/events/default/default-events.cpp:193
-#: backends/events/default/default-events.cpp:217
+#: dists/android.strings.xml.cpp:43 engines/engine.cpp:872
+#: engines/engine.cpp:897 backends/dialogs/gtk/gtk-dialogs.cpp:65
+#: backends/events/default/default-events.cpp:207
+#: backends/events/default/default-events.cpp:231
 #: backends/platform/android/options.cpp:293
 #: backends/platform/wii/options.cpp:47 engines/asylum/asylum.cpp:204
 #: engines/buried/saveload.cpp:83 engines/cine/saveload.cpp:857
@@ -334,7 +334,7 @@ msgstr "Un altre Emmagatzematge està actiu ara mateix. Voleu interrompre'l?"
 #: gui/fluidsynth-dialog.cpp:210 gui/launcher.cpp:428 gui/launcher.cpp:457
 #: gui/launcher.cpp:534 gui/launcher.cpp:1970 gui/options.cpp:3498
 #: gui/options.cpp:3872 base/main.cpp:608
-#: backends/events/default/default-events.cpp:193 engines/buried/buried.cpp:598
+#: backends/events/default/default-events.cpp:207 engines/buried/buried.cpp:598
 #: engines/chamber/metaengine.cpp:95 engines/director/events.cpp:122
 #: engines/director/lingo/xlibs/j/jitdraw3.cpp:139
 #: engines/efh/metaengine.cpp:362 engines/grim/grim.cpp:366
@@ -376,15 +376,14 @@ msgstr "Espereu fins que l'Emmagatzematge actual acabi i torneu a provar-ho."
 msgid "JSON code contents are malformed."
 msgstr "El contingut del codi JSON està mal format."
 
-#: gui/cloudconnectionwizard.cpp:585 gui/editgamedialog.cpp:341
+#: gui/cloudconnectionwizard.cpp:585 gui/editgamedialog.cpp:382
 #: gui/editrecorddialog.cpp:67 gui/integrity-dialog.cpp:260
 #: gui/fluidsynth-dialog.cpp:154 gui/massadd.cpp:90 gui/message.cpp:156
 #: gui/message.cpp:160 gui/message.cpp:231 gui/message.cpp:270
 #: gui/message.cpp:274 gui/options.cpp:2420 gui/predictivedialog.cpp:69
 #: gui/saveload-dialog.cpp:1244 base/main.cpp:675 base/main.cpp:700
-#: dists/android.strings.xml.cpp:33 engines/engine.cpp:846
-#: backends/platform/wii/options.cpp:46 engines/buried/buried.cpp:622
-#: engines/buried/saveload.cpp:83
+#: engines/engine.cpp:918 backends/platform/wii/options.cpp:46
+#: engines/buried/buried.cpp:622 engines/buried/saveload.cpp:83
 #: engines/director/lingo/xlibs/j/jitdraw3.cpp:123
 #: engines/drascula/saveload.cpp:51 engines/grim/inputdialog.cpp:83
 #: engines/parallaction/saveload.cpp:270 engines/sci/engine/kgraphics.cpp:76
@@ -441,7 +440,7 @@ msgid "Select directory where to download game data"
 msgstr "Seleccioneu el directori on baixar les dades del joc"
 
 #: gui/downloaddialog.cpp:49 gui/dump-all-dialogs.cpp:117
-#: gui/dump-all-dialogs.cpp:142 gui/editgamedialog.cpp:586 gui/launcher.cpp:321
+#: gui/dump-all-dialogs.cpp:142 gui/editgamedialog.cpp:639 gui/launcher.cpp:321
 msgid "Select directory with game data"
 msgstr "Seleccioneu el directori amb les dades del joc"
 
@@ -583,183 +582,228 @@ msgstr "paquets de shaders"
 msgid "Pick the game:"
 msgstr "Seleccioneu el joc:"
 
-#: gui/editgamedialog.cpp:140 engines/dialogs.cpp:309
+#: gui/editgamedialog.cpp:142 engines/dialogs.cpp:309
 msgid "Game"
 msgstr "Joc"
 
-#: gui/editgamedialog.cpp:164 gui/options.cpp:2075 gui/options.cpp:2256
+#: gui/editgamedialog.cpp:166 gui/options.cpp:2075 gui/options.cpp:2256
 msgid "GFX"
 msgstr "GFX"
 
-#: gui/editgamedialog.cpp:164 gui/options.cpp:2075 gui/options.cpp:2256
+#: gui/editgamedialog.cpp:166 gui/options.cpp:2075 gui/options.cpp:2256
 #: backends/graphics/atari/atari-graphics.cpp:1056
 #: backends/graphics/sdl/sdl-graphics.cpp:491
 msgid "Graphics"
 msgstr "Gràfics"
 
-#: gui/editgamedialog.cpp:170
+#: gui/editgamedialog.cpp:172
 msgid "Override global graphic settings"
 msgstr "Fés canvis sobre les opcions globals de gràfics"
 
-#: gui/editgamedialog.cpp:172
+#: gui/editgamedialog.cpp:174
 msgctxt "lowres"
 msgid "Override global graphic settings"
 msgstr "Canvia les opcions gràfiques"
 
-#: gui/editgamedialog.cpp:185 gui/options.cpp:2290 engines/dialogs.cpp:354
+#: gui/editgamedialog.cpp:187 gui/options.cpp:2290 engines/dialogs.cpp:354
 msgid "Keymaps"
 msgstr "Assignacions de teclat"
 
-#: gui/editgamedialog.cpp:197 gui/options.cpp:2302 engines/dialogs.cpp:366
+#: gui/editgamedialog.cpp:199 gui/options.cpp:2302 engines/dialogs.cpp:366
 msgid "Backend"
 msgstr "de fondo"
 
-#: gui/editgamedialog.cpp:204
+#: gui/editgamedialog.cpp:206
 msgid "Override global backend settings"
 msgstr "Fés canvis sobre les opcions globals d'àudio"
 
-#: gui/editgamedialog.cpp:206
+#: gui/editgamedialog.cpp:208
 msgctxt "lowres"
 msgid "Override global backend settings"
 msgstr "Fés canvis sobre les opcions globals d'àudio"
 
-#: gui/editgamedialog.cpp:220 gui/options.cpp:2320 engines/dialogs.cpp:329
+#: gui/editgamedialog.cpp:222 gui/options.cpp:2320 engines/dialogs.cpp:329
 msgid "Audio"
 msgstr "Àudio"
 
-#: gui/editgamedialog.cpp:223
+#: gui/editgamedialog.cpp:225
 msgid "Override global audio settings"
 msgstr "Fés canvis sobre les opcions globals d'àudio"
 
-#: gui/editgamedialog.cpp:225
+#: gui/editgamedialog.cpp:227
 msgctxt "lowres"
 msgid "Override global audio settings"
 msgstr "Canvia les opcions d'àudio"
 
-#: gui/editgamedialog.cpp:234 gui/options.cpp:2325
+#: gui/editgamedialog.cpp:236 gui/options.cpp:2325
 msgid "Volume"
 msgstr "Volum"
 
-#: gui/editgamedialog.cpp:236 gui/options.cpp:2327
+#: gui/editgamedialog.cpp:238 gui/options.cpp:2327
 msgctxt "lowres"
 msgid "Volume"
 msgstr "Volum"
 
-#: gui/editgamedialog.cpp:239
+#: gui/editgamedialog.cpp:241
 msgid "Override global volume settings"
 msgstr "Fés canvis sobre les opcions globals de volum"
 
-#: gui/editgamedialog.cpp:241
+#: gui/editgamedialog.cpp:243
 msgctxt "lowres"
 msgid "Override global volume settings"
 msgstr "Fes canvis sobre les opcions globals de volum"
 
-#: gui/editgamedialog.cpp:252 gui/options.cpp:2335
+#: gui/editgamedialog.cpp:254 gui/options.cpp:2335
 msgid "MIDI"
 msgstr "MIDI"
 
-#: gui/editgamedialog.cpp:255
+#: gui/editgamedialog.cpp:257
 msgid "Override global MIDI settings"
 msgstr "Fes canvis sobre les opcions globals de MIDI"
 
-#: gui/editgamedialog.cpp:257
+#: gui/editgamedialog.cpp:259
 msgctxt "lowres"
 msgid "Override global MIDI settings"
 msgstr "Canvia les opcions de MIDI"
 
-#: gui/editgamedialog.cpp:267 gui/options.cpp:2341
+#: gui/editgamedialog.cpp:269 gui/options.cpp:2341
 msgid "MT-32"
 msgstr "MT-32"
 
-#: gui/editgamedialog.cpp:270
+#: gui/editgamedialog.cpp:272
 msgid "Override global MT-32 settings"
 msgstr "Fes canvis sobre les opcions globals de MT-32"
 
-#: gui/editgamedialog.cpp:272
+#: gui/editgamedialog.cpp:274
 msgctxt "lowres"
 msgid "Override global MT-32 settings"
 msgstr "Canvia les opcions de MT-32"
 
-#: gui/editgamedialog.cpp:281 gui/options.cpp:2348
+#: gui/editgamedialog.cpp:283 gui/options.cpp:2348
 msgid "Paths"
 msgstr "Camins"
 
-#: gui/editgamedialog.cpp:283 gui/options.cpp:2350
+#: gui/editgamedialog.cpp:285 gui/options.cpp:2350
 msgctxt "lowres"
 msgid "Paths"
 msgstr "Camins"
 
-#: gui/editgamedialog.cpp:291
+#: gui/editgamedialog.cpp:293
 msgid "Check Integrity"
 msgstr "Comprova la integritat"
 
-#: gui/editgamedialog.cpp:291
+#: gui/editgamedialog.cpp:293
 msgid "Perform integrity check for all game files"
 msgstr "Realitza la comprovació d'integritat per a tots els fitxers de joc"
 
-#: gui/editgamedialog.cpp:296
+#: gui/editgamedialog.cpp:298
 msgid "Game Path:"
 msgstr "Camí del joc:"
 
-#: gui/editgamedialog.cpp:298
+#: gui/editgamedialog.cpp:300
 msgctxt "lowres"
 msgid "Game Path:"
 msgstr "Camí joc:"
 
-#: gui/editgamedialog.cpp:303 gui/options.cpp:2557
+#: gui/editgamedialog.cpp:305 gui/options.cpp:2557
 msgid "Extra Path:"
 msgstr "Camí extra:"
 
-#: gui/editgamedialog.cpp:303 gui/editgamedialog.cpp:305
-#: gui/editgamedialog.cpp:306
+#: gui/editgamedialog.cpp:305 gui/editgamedialog.cpp:307
+#: gui/editgamedialog.cpp:308
 msgid "Specifies path to additional data used by the game"
 msgstr "Indica el camí de dades addicionals utilitzades pel joc"
 
-#: gui/editgamedialog.cpp:305 gui/options.cpp:2559
+#: gui/editgamedialog.cpp:307 gui/options.cpp:2559
 msgctxt "lowres"
 msgid "Extra Path:"
 msgstr "Camí extra:"
 
-#: gui/editgamedialog.cpp:306 gui/options.cpp:2532 gui/options.cpp:2560
+#: gui/editgamedialog.cpp:308 gui/options.cpp:2532 gui/options.cpp:2560
 #: gui/options.cpp:2569 gui/options.cpp:2857
 #: backends/platform/libretro/src/libretro-options-widget.cpp:277
 msgctxt "path"
 msgid "None"
 msgstr "Cap"
 
-#: gui/editgamedialog.cpp:312 gui/options.cpp:2521
+#: gui/editgamedialog.cpp:314 gui/options.cpp:2521
 msgid "Save Path:"
 msgstr "Camí de partides:"
 
-#: gui/editgamedialog.cpp:312 gui/editgamedialog.cpp:314
-#: gui/editgamedialog.cpp:315 gui/options.cpp:2521 gui/options.cpp:2523
+#: gui/editgamedialog.cpp:314 gui/editgamedialog.cpp:316
+#: gui/editgamedialog.cpp:317 gui/options.cpp:2521 gui/options.cpp:2523
 msgid "Specifies where your saved games are put"
 msgstr "Indica on es desaran les partides"
 
-#: gui/editgamedialog.cpp:314 gui/options.cpp:2523
+#: gui/editgamedialog.cpp:316 gui/options.cpp:2523
 msgctxt "lowres"
 msgid "Save Path:"
 msgstr "Partides desades:"
 
-#: gui/editgamedialog.cpp:315 gui/options.cpp:1844 gui/options.cpp:2524
+#: gui/editgamedialog.cpp:317 gui/options.cpp:1844 gui/options.cpp:2524
 #: backends/platform/wii/options.cpp:55
 msgid "Default"
 msgstr "Per defecte"
 
-#: gui/editgamedialog.cpp:326 engines/dialogs.cpp:385
+#: gui/editgamedialog.cpp:324
+msgctxt "lowres"
+msgid "Misc"
+msgstr "Misc"
+
+#: gui/editgamedialog.cpp:324 gui/fluidsynth-dialog.cpp:139
+#: gui/options.cpp:2368
+msgid "Misc"
+msgstr "Misc"
+
+#: gui/editgamedialog.cpp:333
+msgid "Enable hotspot display"
+msgstr "Habilita la visualització de zones interactives"
+
+#: gui/editgamedialog.cpp:334
+msgid "Enable visual markers and labels for interactive objects"
+msgstr ""
+"Habilita els marcadors visuals i les etiquetes per als objectes interactius"
+
+#: gui/editgamedialog.cpp:339
+msgid "Hotspot marker:"
+msgstr "Marcador de punt d'interès:"
+
+#: gui/editgamedialog.cpp:341
+msgid "Point"
+msgstr "Punt"
+
+#. I18N: Hardware key on controller
+#: gui/editgamedialog.cpp:342 backends/platform/sdl/ps3/ps3.cpp:46
+#: backends/platform/sdl/psp2/psp2.cpp:47 engines/dragons/metaengine.cpp:182
+msgid "Square"
+msgstr "Quadrat"
+
+#: gui/editgamedialog.cpp:343
+msgid "Crosshair"
+msgstr "Punt de mira"
+
+#: gui/editgamedialog.cpp:352
+msgid "Show hotspot labels"
+msgstr "Mostra les etiquetes de les zones interactives"
+
+#: gui/editgamedialog.cpp:353
+msgid "Display text labels next to hotspot markers"
+msgstr "Mostra etiquetes de text al costat dels marcadors de punts d'interès"
+
+#: gui/editgamedialog.cpp:367 engines/dialogs.cpp:385
 msgid "Achievements"
 msgstr "Fites"
 
-#: gui/editgamedialog.cpp:330 engines/dialogs.cpp:389
+#: gui/editgamedialog.cpp:371 engines/dialogs.cpp:389
 msgid "Statistics"
 msgstr "Estadístiques"
 
-#: gui/editgamedialog.cpp:347
+#: gui/editgamedialog.cpp:388
 msgid "ID:"
 msgstr "Identificador:"
 
-#: gui/editgamedialog.cpp:347 gui/editgamedialog.cpp:349
-#: gui/editgamedialog.cpp:350
+#: gui/editgamedialog.cpp:388 gui/editgamedialog.cpp:390
+#: gui/editgamedialog.cpp:391
 msgid ""
 "Short game identifier used for referring to saved games and running the game "
 "from the command line"
@@ -767,38 +811,38 @@ msgstr ""
 "Identificador de joc curt utilitzat per referir-se a les partides i per "
 "executar el joc des de la línia d'ordres"
 
-#: gui/editgamedialog.cpp:349
+#: gui/editgamedialog.cpp:390
 msgctxt "lowres"
 msgid "ID:"
 msgstr "ID:"
 
-#: gui/editgamedialog.cpp:354 gui/editrecorddialog.cpp:58
+#: gui/editgamedialog.cpp:395 gui/editrecorddialog.cpp:58
 msgid "Name:"
 msgstr "Nom:"
 
-#: gui/editgamedialog.cpp:354 gui/editgamedialog.cpp:356
-#: gui/editgamedialog.cpp:357
+#: gui/editgamedialog.cpp:395 gui/editgamedialog.cpp:397
+#: gui/editgamedialog.cpp:398
 msgid "Full title of the game"
 msgstr "Títol complet del joc"
 
-#: gui/editgamedialog.cpp:356
+#: gui/editgamedialog.cpp:397
 msgctxt "lowres"
 msgid "Name:"
 msgstr "Nom:"
 
-#: gui/editgamedialog.cpp:363 engines/mohawk/dialogs.cpp:158
+#: gui/editgamedialog.cpp:404 engines/mohawk/dialogs.cpp:158
 #: engines/mohawk/dialogs.cpp:377
 msgid "Language:"
 msgstr "Llengua:"
 
-#: gui/editgamedialog.cpp:363 gui/editgamedialog.cpp:364
+#: gui/editgamedialog.cpp:404 gui/editgamedialog.cpp:405
 msgid ""
 "Language of the game. This will not turn your Spanish game version into "
 "English"
 msgstr ""
 "Llengua del joc. Això no convertirà la versió en català del joc a l'anglès"
 
-#: gui/editgamedialog.cpp:365 gui/editgamedialog.cpp:380 gui/options.cpp:1613
+#: gui/editgamedialog.cpp:406 gui/editgamedialog.cpp:421 gui/options.cpp:1613
 #: gui/options.cpp:1627 gui/options.cpp:1644 gui/options.cpp:1658
 #: gui/options.cpp:1675 gui/options.cpp:1713 gui/options.cpp:1729
 #: gui/options.cpp:2144 gui/options.cpp:2602 gui/options.cpp:2683
@@ -815,39 +859,39 @@ msgstr ""
 msgid "<default>"
 msgstr "<per defecte>"
 
-#: gui/editgamedialog.cpp:376
+#: gui/editgamedialog.cpp:417
 msgid "Platform:"
 msgstr "Plataforma:"
 
-#: gui/editgamedialog.cpp:376 gui/editgamedialog.cpp:378
-#: gui/editgamedialog.cpp:379
+#: gui/editgamedialog.cpp:417 gui/editgamedialog.cpp:419
+#: gui/editgamedialog.cpp:420
 msgid "Platform the game was originally designed for"
 msgstr "Plataforma per la que el joc es va dissenyar originalment"
 
-#: gui/editgamedialog.cpp:378
+#: gui/editgamedialog.cpp:419
 msgctxt "lowres"
 msgid "Platform:"
 msgstr "Platafor.:"
 
-#: gui/editgamedialog.cpp:566 gui/options.cpp:3426
+#: gui/editgamedialog.cpp:619 gui/options.cpp:3426
 msgid "Select SoundFont"
 msgstr "Seleccioneu el fitxer SoundFont"
 
-#: gui/editgamedialog.cpp:605
+#: gui/editgamedialog.cpp:658
 msgid "Select additional game directory"
 msgstr "Seleccioneu el directori addicional del joc"
 
-#: gui/editgamedialog.cpp:618 gui/options.cpp:3274
+#: gui/editgamedialog.cpp:671 gui/options.cpp:3274
 msgid "Select directory for saved games"
 msgstr "Seleccioneu el directori de les partides desades"
 
-#: gui/editgamedialog.cpp:625 gui/options.cpp:3281
+#: gui/editgamedialog.cpp:678 gui/options.cpp:3281
 msgid "The chosen directory cannot be written to. Please select another one."
 msgstr ""
 "No es pot escriure al directori seleccionat. Si us plau, escolliu-ne un "
 "altre."
 
-#: gui/editgamedialog.cpp:630
+#: gui/editgamedialog.cpp:683
 msgid ""
 "Saved games sync feature doesn't work with non-default directories. If you "
 "want your saved games to sync, use default directory."
@@ -856,7 +900,7 @@ msgstr ""
 "directoris que no siguin per defecte. Si voleu sincronitzar les vostres "
 "partides desades, utilitzeu un directori per defecte."
 
-#: gui/editgamedialog.cpp:664
+#: gui/editgamedialog.cpp:717
 msgid "This game ID is already taken. Please choose another one."
 msgstr ""
 "Aquest identificador de joc ja està en ús. Si us plau, trieu-ne un altre."
@@ -996,10 +1040,6 @@ msgstr "Sinus"
 msgid "Triangle"
 msgstr "Triangle"
 
-#: gui/fluidsynth-dialog.cpp:139 gui/options.cpp:2368
-msgid "Misc"
-msgstr "Misc"
-
 #: gui/fluidsynth-dialog.cpp:141
 msgid "Interpolation:"
 msgstr "Interpolació:"
@@ -1052,7 +1092,7 @@ msgstr "interfície gràfica d'usuari"
 msgid "Interact"
 msgstr "Interaccionar"
 
-#: gui/gui-manager.cpp:174 engines/metaengine.cpp:137
+#: gui/gui-manager.cpp:174 engines/metaengine.cpp:138
 #: engines/awe/metaengine.cpp:57 engines/bagel/metaengine.cpp:66
 #: engines/crab/input/input.cpp:95 engines/crab/input/input.cpp:145
 #: engines/dragons/metaengine.cpp:158 engines/freescape/movement.cpp:35
@@ -1073,7 +1113,7 @@ msgstr "Interaccionar"
 msgid "Up"
 msgstr "Amunt"
 
-#: gui/gui-manager.cpp:180 engines/metaengine.cpp:143
+#: gui/gui-manager.cpp:180 engines/metaengine.cpp:144
 #: engines/awe/metaengine.cpp:58 engines/bagel/metaengine.cpp:67
 #: engines/crab/input/input.cpp:101 engines/crab/input/input.cpp:151
 #: engines/dragons/metaengine.cpp:164 engines/freescape/movement.cpp:44
@@ -1094,7 +1134,7 @@ msgstr "Amunt"
 msgid "Down"
 msgstr "Avall"
 
-#: gui/gui-manager.cpp:186 engines/metaengine.cpp:149
+#: gui/gui-manager.cpp:186 engines/metaengine.cpp:150
 #: engines/awe/metaengine.cpp:59 engines/bagel/metaengine.cpp:68
 #: engines/crab/input/input.cpp:107 engines/crab/input/input.cpp:157
 #: engines/dragons/metaengine.cpp:170 engines/glk/dialogs.cpp:371
@@ -1114,7 +1154,7 @@ msgstr "Avall"
 msgid "Left"
 msgstr "Esquerra"
 
-#: gui/gui-manager.cpp:192 engines/metaengine.cpp:155
+#: gui/gui-manager.cpp:192 engines/metaengine.cpp:156
 #: engines/awe/metaengine.cpp:60 engines/bagel/metaengine.cpp:69
 #: engines/crab/input/input.cpp:113 engines/crab/input/input.cpp:163
 #: engines/dragons/metaengine.cpp:176 engines/glk/dialogs.cpp:373
@@ -1525,7 +1565,7 @@ msgid "ScummVM could not find any game in the specified directory!"
 msgstr "ScummVM no ha pogut trobar cap joc al directori especificat!"
 
 #. I18N: Unknown game variant
-#: gui/launcher.cpp:742 engines/engine.cpp:1244
+#: gui/launcher.cpp:742 engines/engine.cpp:1316
 msgid "Unknown variant"
 msgstr "Variant desconeguda"
 
@@ -2612,7 +2652,7 @@ msgstr ""
 "\n"
 "I més..."
 
-#: gui/options.cpp:2975 engines/engine.cpp:647
+#: gui/options.cpp:2975 engines/engine.cpp:652
 #: engines/access/metaengine.cpp:319 engines/drascula/metaengine.cpp:255
 #: engines/queen/metaengine.cpp:269 engines/sherlock/metaengine.cpp:410
 #: engines/ultima/nuvie/metaengine.cpp:71
@@ -2773,7 +2813,7 @@ msgstr "Enregistrar o reproduïr vídeos de partida"
 
 #: gui/recorderdialog.cpp:71 gui/recorderdialog.cpp:211
 #: gui/saveload-dialog.cpp:460 gui/saveload-dialog.cpp:540
-#: dists/android.strings.xml.cpp:47 engines/engine.cpp:641
+#: dists/android.strings.xml.cpp:44 engines/engine.cpp:646
 msgid "Delete"
 msgstr "Suprimeix"
 
@@ -3293,9 +3333,9 @@ msgstr "ScummVM (depurar)"
 msgid "Graphic adventure game engine"
 msgstr "Motor de jocs d'aventura gràfica"
 
-#: dists/android.strings.xml.cpp:34
-#: backends/events/default/default-events.cpp:217
-#: backends/events/default/default-events.cpp:358
+#: dists/android.strings.xml.cpp:33
+#: backends/events/default/default-events.cpp:231
+#: backends/events/default/default-events.cpp:372
 #: engines/adl/metaengine.cpp:352 engines/buried/metaengine.cpp:154
 #: engines/chamber/metaengine.cpp:88 engines/colony/intro.cpp:156
 #: engines/colony/intro.cpp:1243 engines/drascula/metaengine.cpp:304
@@ -3318,114 +3358,99 @@ msgstr "Motor de jocs d'aventura gràfica"
 msgid "Quit"
 msgstr "Surt"
 
-#: dists/android.strings.xml.cpp:35
+#: dists/android.strings.xml.cpp:34
 msgid "Log File Error"
 msgstr "Error en el fitxer de registre"
 
-#: dists/android.strings.xml.cpp:36
+#: dists/android.strings.xml.cpp:35
 msgid "Unable to read ScummVM log file or create a new one!"
 msgstr ""
 "No s'ha pogut llegir el fitxer de registre de ScummVM o crear-ne un de nou!"
 
-#: dists/android.strings.xml.cpp:37
+#: dists/android.strings.xml.cpp:36
 msgid "Config File Error"
 msgstr "Error en el fitxer de configuració"
 
-#: dists/android.strings.xml.cpp:38
+#: dists/android.strings.xml.cpp:37
 msgid "Unable to read ScummVM config file or create a new one!"
 msgstr ""
 "No s'ha pogut llegir el fitxer de configuració de ScummVM o crear-ne un de "
 "nou!"
 
-#: dists/android.strings.xml.cpp:39
+#: dists/android.strings.xml.cpp:38
 msgid "Save Path Error"
 msgstr "Error en el camí de les partides desades"
 
-#: dists/android.strings.xml.cpp:40
+#: dists/android.strings.xml.cpp:39
 msgid "Unable to create or access default save path!"
 msgstr ""
 "No s'ha pogut crear o accedir a la ruta predeterminada de les partides "
 "desades!"
 
-#: dists/android.strings.xml.cpp:41
+#: dists/android.strings.xml.cpp:40
 msgid "Icons Path Error"
 msgstr "Error en el camí de les icones"
 
-#: dists/android.strings.xml.cpp:42
+#: dists/android.strings.xml.cpp:41
 msgid "Unable to create or access default icons and shaders path!"
 msgstr ""
 "No s'han pogut crear o accedir a la ruta predeterminada de les icones i els "
 "shaders!"
 
-#: dists/android.strings.xml.cpp:43
-msgid ""
-"Unable to access the globally set save path! Please revert to default from "
-"ScummVM Options"
-msgstr ""
-"No es pot accedir a la ruta de desament establerta globalment! Torneu al "
-"valor predeterminat des de les opcions de ScummVM"
-
-#: dists/android.strings.xml.cpp:44
-msgid "Toggle virtual keyboard"
-msgstr "Commuta el teclat virtual"
-
-#: dists/android.strings.xml.cpp:45 engines/scumm/help.cpp:82
+#: dists/android.strings.xml.cpp:42 engines/scumm/help.cpp:82
 #: engines/scumm/help.cpp:86 engines/scumm/help.cpp:88
 #: engines/scumm/help.cpp:97 engines/scumm/help.cpp:101
 #: engines/scumm/help.cpp:102 engines/scumm/help.cpp:103
 msgid "Alt"
 msgstr "Alt"
 
-#: dists/android.strings.xml.cpp:48
+#: dists/android.strings.xml.cpp:45
 #: backends/platform/libretro/src/libretro-options-widget.cpp:255
 msgid "Done"
 msgstr "Fet"
 
-#: dists/android.strings.xml.cpp:49
+#: dists/android.strings.xml.cpp:46
 msgid "Mode change"
 msgstr "Canvi de mode"
 
-#: dists/android.strings.xml.cpp:50 engines/titanic/metaengine.cpp:211
+#: dists/android.strings.xml.cpp:47 engines/titanic/metaengine.cpp:211
 msgid "Shift"
 msgstr "Majúscules"
 
-#: dists/android.strings.xml.cpp:51 engines/dragons/metaengine.cpp:152
+#: dists/android.strings.xml.cpp:48 engines/dragons/metaengine.cpp:152
 #: engines/scumm/help.cpp:88 engines/scumm/help.cpp:91
 #: engines/ultima/ultima4/metaengine.cpp:53
 msgid "Enter"
 msgstr "Intro"
 
-#: dists/android.strings.xml.cpp:52
+#: dists/android.strings.xml.cpp:49
 msgid "Close popup"
 msgstr "Tanca la finestra emergent"
 
-#: dists/android.strings.xml.cpp:53
+#: dists/android.strings.xml.cpp:50
 msgid ""
-"Please select the *root* of your external (physical) SD card. This is "
-"required for ScummVM to access this path: "
+"Local network access permission was denied: Web server won't be reachable"
 msgstr ""
-"Seleccioneu l'arrel de la targeta SD externa (física). És necessari perquè "
-"ScummVM accedeixi a aquest camí: "
+"S'ha denegat el permís d'accés a la xarxa local: el servidor web no serà "
+"accessible"
 
-#: dists/android.strings.xml.cpp:54
-msgid "Storage Access Framework Permissions for ScummVM were revoked!"
-msgstr ""
-"S'han revocat els permisos del framework d'accés a l'emmagatzematge per a "
-"ScummVM!"
+#: dists/android.strings.xml.cpp:51
+msgid "ScummVM Web server"
+msgstr "Servidor web ScummVM"
 
-#: dists/android.strings.xml.cpp:55
+#: dists/android.strings.xml.cpp:52
 msgid "Configuration file could not be parsed"
 msgstr "No s'ha pogut analitzar el fitxer de configuració"
 
-#: dists/android.strings.xml.cpp:56
+#: dists/android.strings.xml.cpp:53
 msgid "Run a game"
 msgstr "Executa una partida"
 
-#: dists/android.strings.xml.cpp:57
+#: dists/android.strings.xml.cpp:54
 msgid "Search a game"
 msgstr "Cerca una partida"
 
-#: dists/android.strings.xml.cpp:58
+#: dists/android.strings.xml.cpp:55
 msgid ""
 "No games (yet)\n"
 "Open ScummVM and add your games here."
@@ -3433,15 +3458,15 @@ msgstr ""
 "Sense jocs (encara)\n"
 "Obriu ScummVM i afegiu els vostres jocs aquí."
 
-#: dists/android.strings.xml.cpp:59
+#: dists/android.strings.xml.cpp:56
 msgid "Game icon"
 msgstr "Icona del joc"
 
-#: dists/android.strings.xml.cpp:60
+#: dists/android.strings.xml.cpp:57
 msgid "Shortcut label"
 msgstr "Etiqueta de la drecera"
 
-#: dists/android.strings.xml.cpp:61
+#: dists/android.strings.xml.cpp:58
 msgid "Shortcut icon"
 msgstr "Icona de drecera"
 
@@ -3584,46 +3609,46 @@ msgstr "~D~'acord"
 msgid "~C~ancel"
 msgstr "~C~ancel·la"
 
-#: engines/engine.cpp:372
+#: engines/engine.cpp:377
 #, c-format
 msgid "Could not switch to resolution '%dx%d'."
 msgstr "No s'ha pogut canviar al mode de vídeo: '%dx%d'."
 
-#: engines/engine.cpp:380
+#: engines/engine.cpp:385
 msgid "Could not initialize color format."
 msgstr "No s'ha pogut iniciar el format de color."
 
-#: engines/engine.cpp:388
+#: engines/engine.cpp:393
 #, c-format
 msgid "Could not switch to video mode '%s'."
 msgstr "No s'ha pogut canviar al mode de vídeo: '%s'."
 
-#: engines/engine.cpp:396
+#: engines/engine.cpp:401
 #, c-format
 msgid "Could not switch to stretch mode '%s'."
 msgstr "No s'ha pogut canviar al mode de vídeo: '%s'."
 
-#: engines/engine.cpp:403
+#: engines/engine.cpp:408
 msgid "Could not apply aspect ratio setting."
 msgstr "No s'ha pogut aplicar la configuració de la relació d'aspecte."
 
-#: engines/engine.cpp:408
+#: engines/engine.cpp:413
 msgid "Could not apply fullscreen setting."
 msgstr "No s'ha pogut aplicar l'ajust de pantalla completa."
 
-#: engines/engine.cpp:413
+#: engines/engine.cpp:418
 msgid "Could not apply filtering setting."
 msgstr "No s'ha pogut aplicar la configuració de filtratge."
 
-#: engines/engine.cpp:418
+#: engines/engine.cpp:423
 msgid "Could not apply shader setting."
 msgstr "No s'ha pogut aplicar la configuració del «shader»."
 
-#: engines/engine.cpp:528
+#: engines/engine.cpp:533
 msgid "Error"
 msgstr "Error"
 
-#: engines/engine.cpp:591
+#: engines/engine.cpp:596
 msgid ""
 "You appear to be playing this game directly\n"
 "from the CD. This is known to cause problems,\n"
@@ -3637,7 +3662,7 @@ msgstr ""
 "els fitxers de dades al vostre disc dur.\n"
 "Consulteu la documentació (àudio CD) per a més detalls."
 
-#: engines/engine.cpp:614
+#: engines/engine.cpp:619
 msgid ""
 "This game has audio tracks on its CD. These\n"
 "tracks need to be ripped from the CD using\n"
@@ -3651,11 +3676,11 @@ msgstr ""
 "poder escoltar la música del joc.\n"
 "Consulteu la documentació (àudio CD) per a més detalls."
 
-#: engines/engine.cpp:642
+#: engines/engine.cpp:647
 msgid "Skip autosave"
 msgstr "Omet el desament automàtic"
 
-#: engines/engine.cpp:644
+#: engines/engine.cpp:649
 #, c-format
 msgid ""
 "WARNING: The autosave slot contains a saved game named %s, and an autosave "
@@ -3671,21 +3696,21 @@ msgstr ""
 "Alternativament, podeu ometre el desament automàtic (es tornarà a preguntar "
 "en 5 minuts)."
 
-#: engines/engine.cpp:654
+#: engines/engine.cpp:659
 msgid "ERROR: Could not copy the savegame to a new slot"
 msgstr "ERROR: No s'ha pogut copiar la partida desada a una ranura nova"
 
-#: engines/engine.cpp:681 engines/savestate.cpp:103
+#: engines/engine.cpp:686 engines/savestate.cpp:103
 #: backends/platform/ios7/ios7_osys_main.cpp:269 engines/mm/xeen/saves.cpp:293
 #: engines/sky/metaengine.cpp:218
 msgid "Autosave"
 msgstr "Desament automàtic"
 
-#: engines/engine.cpp:689
+#: engines/engine.cpp:694
 msgid "Error occurred making autosave"
 msgstr "S'ha produït un error en desar automàticament"
 
-#: engines/engine.cpp:772
+#: engines/engine.cpp:844
 #, c-format
 msgid ""
 "Failed to load saved game (%s)! Please consult the README for basic "
@@ -3695,15 +3720,15 @@ msgstr ""
 "per a la informació bàsica i les instruccions sobre com obtenir més "
 "assistència."
 
-#: engines/engine.cpp:796
+#: engines/engine.cpp:868
 msgid "WARNING: "
 msgstr "ADVERTÈNCIA: "
 
-#: engines/engine.cpp:796
+#: engines/engine.cpp:868
 msgid " Shall we still run the game?"
 msgstr " Encara s'ha d'executar el joc?"
 
-#: engines/engine.cpp:797
+#: engines/engine.cpp:869
 msgid ""
 "WARNING: The game you are about to start is not yet fully supported by "
 "ScummVM. As such, it is likely to be unstable, and any saved game you make "
@@ -3713,12 +3738,12 @@ msgstr ""
 "pel ScummVM. Com a tal, probablement serà inestable, i pot ser que les "
 "partides que deseu no funcionin en versions futures de ScummVM."
 
-#: engines/engine.cpp:800 engines/engine.cpp:825
+#: engines/engine.cpp:872 engines/engine.cpp:897
 #: engines/wintermute/wintermute.cpp:174
 msgid "Start anyway"
 msgstr "Inicia de totes maneres"
 
-#: engines/engine.cpp:819
+#: engines/engine.cpp:891
 #, c-format
 msgid ""
 "WARNING: the game you are about to start contains the add-on \"%s\" which is "
@@ -3730,14 +3755,17 @@ msgstr ""
 "inestable, i pot ser que les partides que deseu no funcionin en versions "
 "futures de ScummVM."
 
-#: engines/engine.cpp:845
+#: engines/engine.cpp:917
 msgid ""
 "WARNING: The game you are about to start is newly supported and is in "
 "testing mode.\n"
 "If you encounter any bugs or oddities, please report them to our bugtracker."
 msgstr ""
+"AVÍS: El joc que esteu a punt d'iniciar és compatible recentment i està en "
+"mode de proves.\n"
+"Si trobeu algun error o estranyesa, informeu-ne al nostre gestor d'errors."
 
-#: engines/engine.cpp:861
+#: engines/engine.cpp:933
 #, c-format
 msgid ""
 "The game \"%s\" you are trying to add is an add-on for \"%s\" that cannot be "
@@ -3748,11 +3776,11 @@ msgstr ""
 "executar independentment. Si us plau, copieu el contingut del complement en "
 "un subdirectori del joc base i inicieu el joc base."
 
-#: engines/engine.cpp:878
+#: engines/engine.cpp:950
 msgid "This game is not supported."
 msgstr "Aquest joc no és compatible."
 
-#: engines/engine.cpp:878
+#: engines/engine.cpp:950
 msgid ""
 "This game is not supported for the following reason:\n"
 "\n"
@@ -3760,15 +3788,15 @@ msgstr ""
 "Aquest joc no és compatible per la següent raó:\n"
 "\n"
 
-#: engines/engine.cpp:1024
+#: engines/engine.cpp:1096
 msgid "Loading game is currently unavailable"
 msgstr "Actualment no es pot carregar la partida"
 
-#: engines/engine.cpp:1053
+#: engines/engine.cpp:1125
 msgid "Saving game is currently unavailable"
 msgstr "Actualment no es pot desar la partida"
 
-#: engines/engine.cpp:1222
+#: engines/engine.cpp:1294
 #, c-format
 msgid ""
 "The directory '%s' looks like an add-on for the game '%s', but ScummVM could "
@@ -3777,7 +3805,7 @@ msgstr ""
 "El directori '%s' sembla un complement per al joc '%s', però ScummVM no ha "
 "pogut trobar cap complement que coincideixi."
 
-#: engines/engine.cpp:1250
+#: engines/engine.cpp:1322
 #, c-format
 msgid "Directory '%s' matches several add-ons, please pick one."
 msgstr ""
@@ -3801,16 +3829,16 @@ msgstr ""
 msgid "Matched game IDs for the %s engine:"
 msgstr "IDs de joc disponibles per al motor %s:"
 
-#: engines/metaengine.cpp:39
+#: engines/metaengine.cpp:40
 msgid "Game not implemented"
 msgstr "Joc no implementat"
 
-#: engines/metaengine.cpp:75 engines/saga/metaengine.cpp:267
+#: engines/metaengine.cpp:76 engines/saga/metaengine.cpp:267
 #: engines/scumm/metaengine.cpp:1074
 msgid "Default game keymappings"
 msgstr "Assignació de tecles per defecte del joc"
 
-#: engines/metaengine.cpp:82 backends/platform/maemo/maemo.cpp:161
+#: engines/metaengine.cpp:83 backends/platform/maemo/maemo.cpp:161
 #: engines/agos/metaengine.cpp:158 engines/asylum/metaengine.cpp:159
 #: engines/bbvs/metaengine.cpp:99 engines/cge/metaengine.cpp:203
 #: engines/cge2/metaengine.cpp:216 engines/cine/metaengine.cpp:277
@@ -3826,7 +3854,7 @@ msgstr "Assignació de tecles per defecte del joc"
 #: engines/sludge/keymapper_tables.h:561 engines/sludge/keymapper_tables.h:580
 #: engines/stark/metaengine.cpp:189 engines/sword1/metaengine.cpp:271
 #: engines/tinsel/metaengine.cpp:246 engines/toon/metaengine.cpp:86
-#: engines/touche/metaengine.cpp:122 engines/trecision/metaengine.cpp:125
+#: engines/touche/metaengine.cpp:123 engines/trecision/metaengine.cpp:125
 #: engines/tsage/metaengine.cpp:178 engines/tucker/metaengine.cpp:172
 #: engines/ultima/ultima0/metaengine.cpp:180
 #: engines/ultima/ultima4/metaengine.cpp:227
@@ -3836,7 +3864,7 @@ msgstr "Assignació de tecles per defecte del joc"
 msgid "Left click"
 msgstr "Clic esquerre"
 
-#: engines/metaengine.cpp:88 backends/platform/maemo/maemo.cpp:165
+#: engines/metaengine.cpp:89 backends/platform/maemo/maemo.cpp:165
 #: engines/mtropolis/metaengine.cpp:173 engines/saga/metaengine.cpp:284
 #: engines/wintermute/keymapper_tables.h:256
 #: engines/wintermute/keymapper_tables.h:300
@@ -3844,7 +3872,7 @@ msgstr "Clic esquerre"
 msgid "Middle click"
 msgstr "Clic central"
 
-#: engines/metaengine.cpp:93 backends/platform/maemo/maemo.cpp:169
+#: engines/metaengine.cpp:94 backends/platform/maemo/maemo.cpp:169
 #: engines/agos/metaengine.cpp:164 engines/asylum/metaengine.cpp:165
 #: engines/bbvs/metaengine.cpp:105 engines/cge/metaengine.cpp:209
 #: engines/cge2/metaengine.cpp:222 engines/cine/metaengine.cpp:283
@@ -3859,7 +3887,7 @@ msgstr "Clic central"
 #: engines/saga/metaengine.cpp:289 engines/sludge/keymapper_tables.h:567
 #: engines/sludge/keymapper_tables.h:586 engines/stark/metaengine.cpp:195
 #: engines/sword1/metaengine.cpp:277 engines/tinsel/metaengine.cpp:252
-#: engines/toon/metaengine.cpp:92 engines/touche/metaengine.cpp:128
+#: engines/toon/metaengine.cpp:92 engines/touche/metaengine.cpp:129
 #: engines/trecision/metaengine.cpp:131 engines/tsage/metaengine.cpp:184
 #: engines/tucker/metaengine.cpp:178 engines/ultima/ultima0/metaengine.cpp:186
 #: engines/ultima/ultima4/metaengine.cpp:233
@@ -3870,7 +3898,7 @@ msgid "Right click"
 msgstr "Clic dret"
 
 #. I18N: Action in In Cold Blood
-#: engines/metaengine.cpp:99 engines/agos/metaengine.cpp:178
+#: engines/metaengine.cpp:100 engines/agos/metaengine.cpp:178
 #: engines/buried/metaengine.cpp:167 engines/crab/input/input.cpp:261
 #: engines/cruise/metaengine.cpp:217 engines/dm/metaengine.cpp:126
 #: engines/grim/grim.cpp:550 engines/hdb/metaengine.cpp:258
@@ -3888,14 +3916,14 @@ msgstr "Clic dret"
 msgid "Pause"
 msgstr "Pausa"
 
-#: engines/metaengine.cpp:105 engines/parallaction/metaengine.cpp:163
+#: engines/metaengine.cpp:106 engines/parallaction/metaengine.cpp:163
 #: engines/ultima/ultima8/metaengine.cpp:47
 msgid "Game menu"
 msgstr "Menú del joc"
 
 #. I18N: Skipping cutscene plaback
 #. I18N: Skipping cutscene playback
-#: engines/metaengine.cpp:112 engines/access/metaengine.cpp:246
+#: engines/metaengine.cpp:113 engines/access/metaengine.cpp:246
 #: engines/composer/metaengine.cpp:126 engines/drascula/metaengine.cpp:224
 #: engines/efh/metaengine.cpp:379 engines/freescape/movement.cpp:93
 #: engines/grim/grim.cpp:533 engines/grim/grim.cpp:633
@@ -3912,30 +3940,35 @@ msgstr "Menú del joc"
 msgid "Skip"
 msgstr "Salta"
 
-#: engines/metaengine.cpp:119 engines/sky/metaengine.cpp:121
+#: engines/metaengine.cpp:120 engines/sky/metaengine.cpp:121
 #: engines/supernova/metaengine.cpp:315
 msgid "Skip line"
 msgstr "Salta la línia"
 
-#: engines/metaengine.cpp:126
+#: engines/metaengine.cpp:127
 msgid "Predictive input dialog"
 msgstr "Diàleg d'entrada predictiu"
 
 #. I18N: This keymap works within the KIA Save Game screen
 #. and allows confirming popup dialog prompts (eg. for save game deletion or overwriting)
 #. and also submitting a new save game name, or choosing an existing save game for overwriting.
-#: engines/metaengine.cpp:131 engines/bladerunner/metaengine.cpp:273
+#: engines/metaengine.cpp:132 engines/bladerunner/metaengine.cpp:273
 #: engines/griffon/metaengine.cpp:115 engines/grim/grim.cpp:539
 #: engines/grim/grim.cpp:639 engines/sky/metaengine.cpp:101
 #: engines/wintermute/keymapper_tables.h:54
 msgid "Confirm"
 msgstr "Confirma"
 
-#: engines/metaengine.cpp:434
+#: engines/metaengine.cpp:162 engines/touche/metaengine.cpp:135
+#: engines/twp/metaengine.cpp:176
+msgid "Show hotspots"
+msgstr "Mostra punts d'interès"
+
+#: engines/metaengine.cpp:440
 msgid "Autosave on"
 msgstr "Desament automàtic activat"
 
-#: engines/metaengine.cpp:434
+#: engines/metaengine.cpp:440
 msgid "Autosave off"
 msgstr "Desament automàtic desactivat"
 
@@ -3986,43 +4019,43 @@ msgstr "RetroWave OPL3"
 
 #: audio/fmopl.cpp:133
 msgid "[nFM] NokturnFM2 (OPL2)"
-msgstr ""
+msgstr "[nFM] NokturnFM2 (OPL2)"
 
 #: audio/fmopl.cpp:134
 msgid "[nFM] NokturnFM3 (OPL3)"
-msgstr ""
+msgstr "[nFM] NokturnFM3 (OPL3)"
 
 #: audio/fmopl.cpp:135
 msgid "[nFM] RetroWave USB OPL3 Express (OPL3)"
-msgstr ""
+msgstr "[nFM] RetroWave USB OPL3 Express (OPL3)"
 
 #: audio/fmopl.cpp:136
 msgid "[nFM] Serdaco OPL2LPT (OPL2)"
-msgstr ""
+msgstr "[nFM] Serdaco OPL2LPT (OPL2)"
 
 #: audio/fmopl.cpp:137
 msgid "[nFM] Serdaco OPL3LPT (OPL3)"
-msgstr ""
+msgstr "[nFM] Serdaco OPL3LPT (OPL3)"
 
 #: audio/fmopl.cpp:138
 msgid "[nFM] Cheerful Electronics OPL2 Audio Board (OPL2)"
-msgstr ""
+msgstr "[nFM] Cheerful Electronics OPL2 Audio Board (OPL2)"
 
 #: audio/fmopl.cpp:139
 msgid "[nFM] Cheerful Electronics OPL3 Duo! (2xOPL3)"
-msgstr ""
+msgstr "[nFM] Cheerful Electronics OPL3 Duo! (2xOPL3)"
 
 #: audio/fmopl.cpp:140
 msgid "[nFM] ST Bus ISA / VME SoundBlaster"
-msgstr ""
+msgstr "[nFM] ST Bus ISA / VME SoundBlaster"
 
 #: audio/fmopl.cpp:141
 msgid "[nFM] NatFeats / NULL"
-msgstr ""
+msgstr "[nFM] NatFeats / NULL"
 
 #: audio/fmopl.cpp:142
 msgid "[nFM] Nuked-OPL3 softsynth (OPL3)"
-msgstr ""
+msgstr "[nFM] Nuked-OPL3 softsynth (OPL3)"
 
 #: audio/mididrv.cpp:232
 #, c-format
@@ -4165,7 +4198,7 @@ msgstr "Descàrrega completada."
 msgid "Download failed."
 msgstr "La descàrrega ha fallat."
 
-#: backends/events/default/default-events.cpp:193
+#: backends/events/default/default-events.cpp:207
 msgid ""
 "Do you really want to return to the Launcher?\n"
 "Any unsaved progress will be lost."
@@ -4173,7 +4206,7 @@ msgstr ""
 "Segur que voleu tornar al llançador?\n"
 "Es perdrà qualsevol progrés sense desar."
 
-#: backends/events/default/default-events.cpp:217
+#: backends/events/default/default-events.cpp:231
 msgid ""
 "Do you really want to quit?\n"
 "Any unsaved progress will be lost."
@@ -4181,25 +4214,25 @@ msgstr ""
 "Segur que voleu sortir?\n"
 "Es perdrà qualsevol progrés sense desar."
 
-#: backends/events/default/default-events.cpp:332
+#: backends/events/default/default-events.cpp:346
 msgid "Global"
 msgstr "Global"
 
-#: backends/events/default/default-events.cpp:335
+#: backends/events/default/default-events.cpp:349
 #: engines/twine/metaengine.cpp:302
 msgid "Global Main Menu"
 msgstr "Menú principal global"
 
-#: backends/events/default/default-events.cpp:345
+#: backends/events/default/default-events.cpp:359
 msgid "Display keyboard"
 msgstr "Mostra el teclat"
 
-#: backends/events/default/default-events.cpp:352
+#: backends/events/default/default-events.cpp:366
 #: engines/ngi/metaengine.cpp:149
 msgid "Toggle mute"
 msgstr "Commuta el silenci"
 
-#: backends/events/default/default-events.cpp:380
+#: backends/events/default/default-events.cpp:394
 msgid "Open Debugger"
 msgstr "Obre el depurador"
 
@@ -4716,7 +4749,7 @@ msgstr "No es pot pujar a un fitxer!"
 msgid "Back to the files manager"
 msgstr "Torna al gestor de fitxers"
 
-#: backends/networking/sdl_net/localwebserver.cpp:129
+#: backends/networking/sdl_net/localwebserver.cpp:133
 msgid ""
 "Failed to start local webserver.\n"
 "Check whether selected port is not used by another application and try again."
@@ -5412,6 +5445,27 @@ msgid ""
 "| `CMD + RIGHT`     | END               \n"
 "\n"
 msgstr ""
+"## Ús del teclat\n"
+"Els teclats externs són compatibles i des d'iOS 13.4 la majoria de les "
+"tecles especials, p. ex. tecles de funció, Inici i Final, estan mapejades.\n"
+"Per a teclats externs que no disposen de tecles especials, p. ex. l'Apple "
+"Magic Keyboard per a iPads, les tecles especials es poden activar utilitzant "
+"les següents combinacions de tecles:\n"
+"\n"
+"\n"
+"| Combinació de tecles     | Acció            \n"
+"| ------------------|-------------------\n"
+"| `CMD + 1`         | F1                \n"
+"| `CMD + 2`         | F2                \n"
+"| `...`             | ...               \n"
+"| `CMD + 0`         | F10               \n"
+"| `CMD + SHIFT + 1` | F11               \n"
+"| `CMD + SHIFT + 2` | F12               \n"
+"| `CMD + UP`        | PÀG AMUNT           \n"
+"| `CMD + DOWN`      | PÀG AVALL         \n"
+"| `CMD + LEFT`      | INICI              \n"
+"| `CMD + RIGHT`     | FINAL               \n"
+"\n"
 
 #: backends/platform/ios7/ios7_osys_misc.mm:336
 msgid ""
@@ -5558,6 +5612,21 @@ msgid ""
 "\n"
 "The core also supports dedicated per game **hook** plain text files with **."
 msgstr ""
+"## Llistes de reproducció Libretro per al nucli de ScummVM\n"
+"Les llistes de reproducció utilitzades en els frontals del Libretro (p. ex. "
+"el Retroarch) són llistes de text pla utilitzades per llançar directament un "
+"joc amb un nucli específic des de la interfície d'usuari. Aquestes llistes "
+"estan estructurades per passar al nucli el camí d'un fitxer de contingut "
+"específic a carregar (p. ex. ROM).\n"
+"\n"
+"El nucli de ScummVM pot acceptar com a contingut el camí proporcionat per la "
+"llista de reproducció a qualsevol dels fitxers dins d'una carpeta de joc "
+"vàlida, el sistema de detecció intentarà detectar automàticament el joc des "
+"de la carpeta pare del fitxer de contingut i executar el joc amb les opcions "
+"de ScummVM predeterminades.\n"
+"\n"
+"El nucli també admet fitxers de text sense format amb **hook (enllaços)** "
+"dedicats per a cada joc utilitzant **."
 
 #: backends/platform/maemo/maemo.cpp:157
 msgid "Click Mode"
@@ -5763,12 +5832,6 @@ msgstr "Creu"
 msgid "Circle"
 msgstr "Cercle"
 
-#. I18N: Hardware key on controller
-#: backends/platform/sdl/ps3/ps3.cpp:46 backends/platform/sdl/psp2/psp2.cpp:47
-#: engines/dragons/metaengine.cpp:182
-msgid "Square"
-msgstr "Quadrat"
-
 #: backends/platform/sdl/ps3/ps3.cpp:51
 msgid "PS"
 msgstr "PS"
@@ -5925,11 +5988,11 @@ msgstr "Comprova si hi ha actualitzacions..."
 
 #: engines/access/metaengine.cpp:82
 msgid "Use 'high definition' OGG music"
-msgstr ""
+msgstr "Utilitza la música en format OGG d'alta definició"
 
 #: engines/access/metaengine.cpp:83
 msgid "Use the OGG audio from the re-release instead of original MIDI tracks"
-msgstr ""
+msgstr "Usa l'àudio OGG de la reedició en lloc de les pistes MIDI originals"
 
 #: engines/access/metaengine.cpp:236 engines/alcachofa/metaengine.cpp:94
 #: engines/bbvs/metaengine.cpp:92 engines/buried/metaengine.cpp:133
@@ -6509,7 +6572,7 @@ msgstr "AGOS principal"
 #: engines/sludge/keymapper_tables.h:33 engines/stark/metaengine.cpp:185
 #: engines/sword1/metaengine.cpp:267 engines/tinsel/metaengine.cpp:241
 #: engines/toon/metaengine.cpp:82 engines/tot/metaengine.cpp:103
-#: engines/touche/metaengine.cpp:119 engines/trecision/metaengine.cpp:121
+#: engines/touche/metaengine.cpp:120 engines/trecision/metaengine.cpp:121
 #: engines/tsage/metaengine.cpp:170 engines/tucker/metaengine.cpp:168
 msgid "Game keymappings"
 msgstr "Assignació de tecles del joc"
@@ -6543,7 +6606,7 @@ msgstr "Commuta els efectes de so"
 #. I18N: Speeds up the game to twice its normal speed
 #: engines/agos/metaengine.cpp:204 engines/queen/metaengine.cpp:192
 #: engines/sky/metaengine.cpp:131 engines/teenagent/metaengine.cpp:239
-#: engines/touche/metaengine.cpp:167
+#: engines/touche/metaengine.cpp:173
 msgid "Toggle fast mode"
 msgstr "Commuta el mode ràpid"
 
@@ -7222,7 +7285,7 @@ msgstr "Salta la seqüència de video"
 #: engines/sludge/keymapper_tables.h:452 engines/sludge/keymapper_tables.h:484
 #: engines/sludge/keymapper_tables.h:535 engines/teenagent/metaengine.cpp:213
 #: engines/tetraedge/metaengine.cpp:98 engines/toltecs/metaengine.cpp:228
-#: engines/touche/metaengine.cpp:141
+#: engines/touche/metaengine.cpp:147
 msgid "Skip dialog"
 msgstr "Omet el diàleg"
 
@@ -8320,16 +8383,20 @@ msgstr "Amaga els quadres de ressaltat"
 #: engines/eem/metaengine.cpp:39
 msgid "Hide the boxes that highlight searchable clue locations."
 msgstr ""
+"Oculta els quadres que realcen les ubicacions de les pistes que es poden "
+"cercar."
 
 #: engines/eem/metaengine.cpp:49
 msgid "Better fit for dialog balloons"
-msgstr ""
+msgstr "Millor ajust per als globus de diàleg"
 
 #: engines/eem/metaengine.cpp:50
 msgid ""
 "Pick a smaller speech-bubble graphic when the wrapped text doesn't need the "
 "original size."
 msgstr ""
+"Trieu un gràfic de la bombolla de veu més petit quan el text ajustat no "
+"necessiti la mida original."
 
 #: engines/eem/metaengine.cpp:61
 msgid "Skip repeated cases"
@@ -8338,6 +8405,8 @@ msgstr "Omet els casos repetits"
 #: engines/eem/metaengine.cpp:62
 msgid "Skip all Book 2 cases and jump to Book 3 once Book 1 is complete."
 msgstr ""
+"Salta tots els casos del Llibre 2 i ves al Llibre 3 un cop estigui complet "
+"el Llibre 1."
 
 #: engines/eem/metaengine.cpp:72 engines/hypno/metaengine.cpp:81
 msgid "Enable restored content"
@@ -8348,6 +8417,8 @@ msgid ""
 "Restore floppy release extras in the CD version, including pre-scrapbook "
 "conversations and first-try badges."
 msgstr ""
+"Restaura els extres de la versió de disquets a la versió de CD, incloses les "
+"converses prèvies a l'àlbum de retalls i les insígnies de primers intents."
 
 #: engines/efh/metaengine.cpp:235
 msgid "Select option 1"
@@ -8630,7 +8701,7 @@ msgstr "Sons pregravats"
 #: engines/freescape/metaengine.cpp:42
 msgid "Use high-quality pre-recorded sounds instead of pc speaker emulation"
 msgstr ""
-"Usa sons pregravats d'alta qualitat en lloc de l'emulació de l'altaveu del PC"
+"Usa sons pregravats d'alta qualitat en lloc de l'emulació de l'altaveu del pc"
 
 #: engines/freescape/metaengine.cpp:52
 msgid "Extended timer"
@@ -9095,16 +9166,16 @@ msgstr "Enllaç:"
 
 #: engines/glk/dialogs.cpp:256
 msgid "Color for URLs if they appear in-game"
-msgstr ""
+msgstr "Color per als URL si apareixen dins del joc"
 
 #. I18N: "More..." is a prompt in text windows, which appears when the text exceeds the window size
 #: engines/glk/dialogs.cpp:264
 msgid "More:"
-msgstr ""
+msgstr "Més:"
 
 #: engines/glk/dialogs.cpp:265
 msgid "Color for the \"More...\" markers in the text"
-msgstr ""
+msgstr "Color per als marcadors \"Més...\" del text"
 
 #: engines/glk/dialogs.cpp:272
 msgid "Typography"
@@ -9334,49 +9405,52 @@ msgstr "Interlineat:"
 #: engines/glk/dialogs.cpp:354
 msgid "Vertical distance between text rows. Valid inputs - 12, 16, 22 etc."
 msgstr ""
+"Distància vertical entre files de text. Entrades vàlides: 12, 16, 22, etc."
 
 #. I18N: This is a setting for baseline, which is the invisible horizontal line on which text sits
 #: engines/glk/dialogs.cpp:356
 msgid "Baseline:"
-msgstr ""
+msgstr "Línia base:"
 
 #: engines/glk/dialogs.cpp:357
 msgid ""
 "Invisible horizontal line on which text sits. Valid inputs - 8, 16 etc. as "
 "per your font size"
 msgstr ""
+"Línia horitzontal invisible sobre la qual es troba el text. Entrades "
+"vàlides: 8, 16, etc. segons la mida de lletra"
 
 #. I18N: Font size scaling for the monospace text font
 #: engines/glk/dialogs.cpp:360
 msgid "Monosize:"
-msgstr ""
+msgstr "Mida monoespai:"
 
 #: engines/glk/dialogs.cpp:361
 msgid "Font size scaling for the monospace text font"
-msgstr ""
+msgstr "Escalat de la mida de lletra per al tipus de lletra de text monoespai"
 
 #. I18N: Font size scaling for the proportional text font
 #: engines/glk/dialogs.cpp:363
 msgid "Propsize:"
-msgstr ""
+msgstr "Mida proporcional:"
 
 #: engines/glk/dialogs.cpp:364
 msgid "Font size scaling for the proportional text font"
-msgstr ""
+msgstr "Escalat de la mida de lletra per al tipus de lletra proporcional"
 
 #. I18N: This is a section for settings related to the "More..." prompt in text windows
 #: engines/glk/dialogs.cpp:367
 msgid "More"
-msgstr ""
+msgstr "Més"
 
 #. I18N: This is a setting for alignment of the "More..." prompt in text windows
 #: engines/glk/dialogs.cpp:369
 msgid "Align:"
-msgstr ""
+msgstr "Alineació:"
 
 #: engines/glk/dialogs.cpp:370
 msgid "Alignment of the \"More...\" marker on the window"
-msgstr ""
+msgstr "Alineació del marcador \"Més...\" a la finestra"
 
 #: engines/glk/dialogs.cpp:375
 msgid "Font:"
@@ -9384,7 +9458,7 @@ msgstr "Font:"
 
 #: engines/glk/dialogs.cpp:375
 msgid "Font for the \"More...\" marker"
-msgstr ""
+msgstr "Tipus de lletra per al marcador \"Més...\""
 
 #: engines/glk/glulx/glulx.cpp:81
 msgid "This is too short to be a valid Glulx file."
@@ -9712,6 +9786,8 @@ msgid ""
 "When disabled, the startup movie player follows the original GORE=NO "
 "censorship path."
 msgstr ""
+"Quan està desactivat, el reproductor de pel·lícules d'inici segueix la "
+"censura original GORE=NO."
 
 #: engines/harvester/metaengine.cpp:44
 msgid "Show CD change prompts"
@@ -9722,6 +9798,8 @@ msgid ""
 "Display the original CD swap image and wait for a left click when the script "
 "requests disc 2 or 3."
 msgstr ""
+"Mostra la imatge d'intercanvi de CD original i espera un clic esquerre quan "
+"l'script sol·liciti els discs 2 o 3."
 
 #: engines/hdb/metaengine.cpp:44 engines/illusions/metaengine.cpp:153
 msgid "Enable cheat mode"
@@ -9808,7 +9886,7 @@ msgstr "Utilitza la interfície Windows"
 
 #: engines/hugo/metaengine.cpp:46
 msgid "Use mouse and toolbar from Windows version"
-msgstr ""
+msgstr "Utilitza el ratolí i la barra d'eines des de la versió de Windows"
 
 #: engines/hugo/metaengine.cpp:148
 msgid "User help"
@@ -9956,7 +10034,7 @@ msgstr "Apunta a la dreta"
 
 #: engines/hypno/metaengine.cpp:170
 msgid "Aim up"
-msgstr ""
+msgstr "Apunta amunt"
 
 #: engines/hypno/metaengine.cpp:175 engines/scumm/metaengine.cpp:1202
 #: engines/scumm/metaengine.cpp:1279
@@ -10227,24 +10305,31 @@ msgid ""
 "- Correct projectile weapon damage (per AD&D 2nd Edition rules)\n"
 "- Elves get +1 to hit with swords and bows (per official game manual)"
 msgstr ""
+"- Elimina els errors d'arrodoniment de guany de PV\n"
+"- Corregeix el dany de l'arma del projectil (per a les regles de la 2a "
+"edició d'AD&D)\n"
+"- Els elfs obtenen +1 per colpejar amb espases i arcs (segons el manual de "
+"joc oficial)"
 
 #: engines/kyra/metaengine.cpp:175
 msgid "Fix Ileria and Beohram NPCs"
-msgstr ""
+msgstr "Corregeix els NPCs d'Ileria i Beohram"
 
 #: engines/kyra/metaengine.cpp:176
 msgid "Make Ileria a female and Beohram a paladin"
-msgstr ""
+msgstr "Tracta a Ileria com una dona i a Beohram com un paladí"
 
 #: engines/kyra/metaengine.cpp:187
 msgid "Enhanced thrown weapon reload"
-msgstr ""
+msgstr "Recàrrega millorada d'armes llançables"
 
 #: engines/kyra/metaengine.cpp:188
 msgid ""
 "Thrown weapons (daggers, darts, spears...) get replaced from belt and "
 "backpack inventory slots, with thrown weapons only"
 msgstr ""
+"Les armes llançables (dagues, dards, llances...) es substitueixen de les "
+"ranures d'inventari del cinturó i la motxilla, només amb armes llançables"
 
 #: engines/kyra/metaengine.cpp:275
 msgid "Lands of Lore support is not compiled in"
@@ -10649,13 +10734,13 @@ msgid "Cycle game speed"
 msgstr "Alterna velocitats del joc"
 
 #: engines/macs2/metaengine.cpp:80 engines/sherlock/metaengine.cpp:846
-#: engines/touche/metaengine.cpp:147
+#: engines/touche/metaengine.cpp:153
 msgid "Open options menu"
 msgstr "Obre el menú d'opcions"
 
 #: engines/macs2/metaengine.cpp:85
 msgid "Help / map"
-msgstr ""
+msgstr "Ajuda / mapa"
 
 #: engines/made/detection_tables.h:446 engines/made/detection_tables.h:463
 msgid "The game is using unsupported engine"
@@ -11234,6 +11319,7 @@ msgstr "Desa automàticament en els punts de progrés"
 #: engines/mtropolis/metaengine.cpp:76
 msgid "Automatically saves the game after completing puzzles and chapters."
 msgstr ""
+"Desa automàticament el joc després de completar trencaclosques i capítols."
 
 #: engines/mtropolis/metaengine.cpp:86
 msgid "Enable short transitions"
@@ -11243,10 +11329,12 @@ msgstr "Activa transicions curtes"
 msgid ""
 "Enables transitions that are set to maximum rate instead of skipping them."
 msgstr ""
+"Habilita que les transicions es passin a la velocitat màxima en lloc "
+"d'ometre-les."
 
 #: engines/mtropolis/metaengine.cpp:97
 msgid "Enable subtitles for important sound effects"
-msgstr ""
+msgstr "Habilita els subtítols per a efectes de so importants"
 
 #: engines/mtropolis/metaengine.cpp:98
 msgid ""
@@ -14517,25 +14605,25 @@ msgstr "Desa i carrega partida"
 msgid "Main menu / Exit"
 msgstr "Menú principal / Surt"
 
-#: engines/touche/metaengine.cpp:135
+#: engines/touche/metaengine.cpp:141
 msgid "Skip sequence / open quit dialog"
 msgstr ""
 
 #. I18N: The actor walking pace is increased
-#: engines/touche/metaengine.cpp:154
+#: engines/touche/metaengine.cpp:160
 msgid "Enable fast walk"
 msgstr "Habilita el caminar ràpid"
 
 #. I18N: The actor walking pace is decreased
-#: engines/touche/metaengine.cpp:161
+#: engines/touche/metaengine.cpp:167
 msgid "Disable fast walk"
 msgstr "Desactiva el caminar ràpid"
 
-#: engines/touche/metaengine.cpp:173
+#: engines/touche/metaengine.cpp:179
 msgid "Toggle between voice / text / text and voice"
 msgstr "Commuta entre veu / text / text i veu"
 
-#: engines/touche/metaengine.cpp:182
+#: engines/touche/metaengine.cpp:188
 msgid "Press \"Yes\" Key"
 msgstr ""
 
@@ -14904,10 +14992,6 @@ msgstr "Selecciona l'actor següent"
 #: engines/twp/metaengine.cpp:174
 msgid "Select previous actor"
 msgstr "Selecciona l'actor anterior"
-
-#: engines/twp/metaengine.cpp:176
-msgid "Show hotspots"
-msgstr "Mostra punts d'interès"
 
 #: engines/twp/twp.cpp:833
 msgid ""
@@ -16735,6 +16819,28 @@ msgid ""
 "supported. Continue launching game?"
 msgstr ""
 
+#~ msgid ""
+#~ "Unable to access the globally set save path! Please revert to default "
+#~ "from ScummVM Options"
+#~ msgstr ""
+#~ "No es pot accedir a la ruta de desament establerta globalment! Torneu al "
+#~ "valor predeterminat des de les opcions de ScummVM"
+
+#~ msgid "Toggle virtual keyboard"
+#~ msgstr "Commuta el teclat virtual"
+
+#~ msgid ""
+#~ "Please select the *root* of your external (physical) SD card. This is "
+#~ "required for ScummVM to access this path: "
+#~ msgstr ""
+#~ "Seleccioneu l'arrel de la targeta SD externa (física). És necessari "
+#~ "perquè ScummVM accedeixi a aquest camí: "
+
+#~ msgid "Storage Access Framework Permissions for ScummVM were revoked!"
+#~ msgstr ""
+#~ "S'han revocat els permisos del framework d'accés a l'emmagatzematge per a "
+#~ "ScummVM!"
+
 #, fuzzy
 #~| msgid "Move back"
 #~ msgid "Cover / back"
@@ -17340,10 +17446,6 @@ msgstr ""
 
 #~ msgid "Show SAF revoke permissions overlay button"
 #~ msgstr "Mostra el botó de revocació de permisos del SAF"
-
-#~ msgctxt "lowres"
-#~ msgid "Misc"
-#~ msgstr "Misc"
 
 #~ msgid ""
 #~ "Compressed game detected. Please uncompress it as specified in the game "

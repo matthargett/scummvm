@@ -22,18 +22,21 @@
 
 
 #include "engines/engine.h"
+#include "common/archive.h"
 #include "common/system.h"
 #include "common/config-manager.h"
 #include "common/events.h"
 #include "common/savefile.h"
 #include "common/util.h"
 #include "graphics/paletteman.h"
+#include "graphics/thumbnail.h"
 
 #include "audio/mixer.h"
 
 #include "scumm/actor.h"
 #include "scumm/file.h"
 #include "scumm/resource.h"
+#include "scumm/insane/saveload.h"
 #include "scumm/scumm_v7.h"
 #include "scumm/sound.h"
 
@@ -44,6 +47,8 @@
 #include "scumm/smush/rebel/font_rebel2.h"
 
 #include "scumm/insane/rebel2/rebel.h"
+#include "scumm/insane/rebel2/mac_archive.h"
+#include "scumm/insane/rebel2/shared.h"
 
 #include "common/config-manager.h"
 #include "audio/audiostream.h"
@@ -145,8 +150,31 @@ bool isRebel2MenuState(InsaneRebel2::GameState state) {
 	       state == InsaneRebel2::kStateTopPilots;
 }
 
-InsaneRebel2::InsaneRebel2(ScummEngine_v7 *scumm) {
+bool InsaneRebel2::isTouchscreenActive() const {
+	return g_system->hasFeature(OSystem::kFeatureTouchscreen);
+}
+
+// Not a menu, where taps pick items, and not gameplay, where a tap fires.
+bool InsaneRebel2::isSkippableVideoState() const {
+	if (_menuInputActive || isRebel2MenuState(_gameState))
+		return false;
+
+	return _gameState != kStateGameplay || _rebelHandler == 0;
+}
+
+InsaneRebel2::InsaneRebel2(ScummEngine_v7 *scumm) :
+		_release(getRebel2Release(scumm->_game.variant, ConfMan.getBool("rebel2_restored_content"))) {
 	_vm = scumm;
+	if (_release.container) {
+		Common::Archive *archive = createRebel2MacArchive(_vm, _release.container);
+		if (!archive)
+			error("Cannot open Rebel Assault II data bundle '%s'", _release.container);
+		SearchMan.add("rebel2-mac-data", archive, 1);
+	}
+
+	// Rebel Assault II skips ScummEngine::resetScumm(), which normally clears this state.
+	for (int i = 0; i < kScummActionCount; i++)
+		_vm->_actionMap[i] = false;
 
 	_smush_roadrashRip = nullptr;
 	_smush_roadrsh2Rip = nullptr;
@@ -161,8 +189,9 @@ InsaneRebel2::InsaneRebel2(ScummEngine_v7 *scumm) {
 	_smush_bensgoggNut = nullptr;
 
 	const bool highRes = isHiRes();
+	const bool playable = !_release.nonInteractiveVideos;
 
-	_smush_iconsNut = new NutRenderer(_vm, highRes ? "SYSTM/CPITIMHI.NUT" : "SYSTM/CPITIMAG.NUT");
+	_smush_iconsNut = playable ? new NutRenderer(_vm, highRes ? "SYSTM/CPITIMHI.NUT" : "SYSTM/CPITIMAG.NUT") : nullptr;
 	_smush_icons2Nut = nullptr;
 
 	_laserTexture.pixels = nullptr;
@@ -174,14 +203,15 @@ InsaneRebel2::InsaneRebel2(ScummEngine_v7 *scumm) {
 
 	initEdgeTable(nullptr);
 	_rebelDetailMode = 1;
-	_smush_cockpitNut = new NutRenderer(_vm, highRes ? "SYSTM/DIHIFONT.NUT" : "SYSTM/DISPFONT.NUT");
+	_smush_cockpitNut = playable ? new NutRenderer(_vm, highRes ? "SYSTM/DIHIFONT.NUT" : "SYSTM/DISPFONT.NUT") : nullptr;
 
-	_rebelMsgFont = makeRebel2Font(_vm, "SYSTM/DIHIFONT.NUT");
+	_rebelMsgFont = playable ? makeRebel2Font(_vm, "SYSTM/DIHIFONT.NUT") : nullptr;
 
-	_smush_talkfontNut = makeRebel2Font(_vm, highRes ? "SYSTM/TKHIFONT.NUT" : "SYSTM/TALKFONT.NUT");
-	_smush_smalfontNut = makeRebel2Font(_vm, highRes ? "SYSTM/SMHIFONT.NUT" : "SYSTM/SMALFONT.NUT");
-	_smush_titlefontNut = makeRebel2Font(_vm, highRes ? "SYSTM/TIHIFONT.NUT" : "SYSTM/TITLFONT.NUT");
-	_smush_povfontNut = makeRebel2Font(_vm, highRes ? "SYSTM/POHIFONT.NUT" : "SYSTM/POVFONT.NUT");
+	// Non-interactive demos load their movie fonts through the SMUSH player.
+	_smush_talkfontNut = playable ? makeRebel2Font(_vm, _release.getFontFile(0, highRes)) : nullptr;
+	_smush_smalfontNut = playable ? makeRebel2Font(_vm, _release.getFontFile(1, highRes)) : nullptr;
+	_smush_titlefontNut = playable ? makeRebel2Font(_vm, _release.getFontFile(2, highRes)) : nullptr;
+	_smush_povfontNut = playable ? makeRebel2Font(_vm, _release.getFontFile(3, highRes)) : nullptr;
 
 	_pauseOverlayActive = false;
 	memset(_savedPausePalette, 0, sizeof(_savedPausePalette));
@@ -230,6 +260,8 @@ InsaneRebel2::InsaneRebel2(ScummEngine_v7 *scumm) {
 	_rebelAutoPlay = false;
 	_rebelWaveState = 0;
 	_rebelPhaseState = 0;
+	_totalKills = 0;
+	_totalMisses = 0;
 
 	_rebelAutopilot = 0;
 	_rebelDamageLevel = 0;
@@ -428,6 +460,7 @@ InsaneRebel2::InsaneRebel2(ScummEngine_v7 *scumm) {
 	_flyControlMode = 0;
 	_shipFiring = false;
 	_prevMouseButtons = 0;
+	_rapidFireCounter = 0;
 	_shipDirectionH = 2;
 	_shipDirectionV = 3;
 	_shipDirectionIndex = 2 * 7 + 3;
@@ -472,7 +505,8 @@ InsaneRebel2::InsaneRebel2(ScummEngine_v7 *scumm) {
 		_sfxData[i] = nullptr;
 		_sfxSize[i] = 0;
 	}
-	loadSfx();
+	if (playable)
+		loadSfx();
 
 	for (i = 0; i < kRA2NumAuxSfx; i++) {
 		_auxSfxData[i] = (byte *)calloc(kRA2AuxBufSize, 1);
@@ -488,7 +522,7 @@ InsaneRebel2::InsaneRebel2(ScummEngine_v7 *scumm) {
 	_menuRepeatDelay = 0;
 	_menuSelectionConfirmed = false;
 	for (i = 0; i < 16; i++) {
-		_levelUnlocked[i] = (i == 0);
+		_levelUnlocked[i] = (i + 1 == _release.levels[0]);
 	}
 
 	_chapterSelection = 0;
@@ -500,23 +534,22 @@ InsaneRebel2::InsaneRebel2(ScummEngine_v7 *scumm) {
 	_noDamage = ConfMan.getBool("rebel2_no_damage");
 	_rebelYodaMode = ConfMan.getBool("rebel2_yoda_mode");
 
-	for (i = 0; i < 16; i++) {
-		_chapterUnlocked[i] = _debugUnlockAll || (i == 0);
-	}
-
 	_previewOffsetX = -90;
 	_previewOffsetY = 75;
 
 	_numPilots = 0;
 	_activePilot = 0;
+	_pilotLoadRequested = false;
 	for (i = 0; i < kMaxPilots; i++) {
 		_pilots[i].init();
 	}
-	loadPilots();
+	if (playable)
+		loadPilots();
+	updateChapterUnlocks();
 
 	_levelSelection = 0;
 	_levelItemCount = _numPilots + 4;
-	_selectedLevel = 1;
+	_selectedLevel = _release.levels[0];
 	_difficultySelection = 2;
 	_pilotMenuMode = kPilotModeSelect;
 	_pilotNameInput = "";
@@ -536,7 +569,8 @@ InsaneRebel2::InsaneRebel2(ScummEngine_v7 *scumm) {
 	// "subtitles" key, which the text-render paths gate on.
 	_optTextEnabled = ConfMan.getBool("subtitles");
 	_optControlsFlipped = false;
-	_optRapidFire = false;
+	// Unlike the original, this defaults to on.
+	_optRapidFire = ConfMan.hasKey("rebel2_rapid_fire") ? ConfMan.getBool("rebel2_rapid_fire") : true;
 	_optVolumeLevel = _vm->_mixer->getVolumeForSoundType(Audio::Mixer::kMusicSoundType) / 2;
 
 	_menuInputActive = false;
@@ -570,6 +604,7 @@ InsaneRebel2::InsaneRebel2(ScummEngine_v7 *scumm) {
 InsaneRebel2::~InsaneRebel2() {
 	restoreIOSGamepadController();
 	setVirtualKeyboardVisible(false);
+	_savedPauseScreen.free();
 
 	_vm->_system->getEventManager()->getEventDispatcher()->unregisterObserver(this);
 
@@ -606,6 +641,9 @@ InsaneRebel2::~InsaneRebel2() {
 		free(_rebelEmbeddedHud[i].pixels);
 		_rebelEmbeddedHud[i].pixels = nullptr;
 	}
+
+	if (_release.container)
+		SearchMan.remove("rebel2-mac-data");
 }
 
 bool InsaneRebel2::isHiRes() const {
@@ -616,10 +654,7 @@ void InsaneRebel2::openGameplayMainMenu(SmushPlayer *splayer) {
 	if (!splayer)
 		return;
 
-	if (_pauseOverlayActive) {
-		_vm->_system->getPaletteManager()->setPalette(_savedPausePalette, 0, 256);
-		_pauseOverlayActive = false;
-	}
+	hidePauseOverlay();
 
 	if (!splayer->_paused)
 		splayer->pause();
@@ -761,6 +796,14 @@ bool InsaneRebel2::notifyEvent(const Common::Event &event) {
 	if (_vm->isPaused())
 		return false;
 
+	if (isTouchscreenActive() && event.type == Common::EVENT_LBUTTONDOWN &&
+			isSkippableVideoState() &&
+			_touchTapDetector.addTap(event.mouse.x, event.mouse.y, _vm->_system->getMillis())) {
+		debugC(DEBUG_INSANE, "Double tap - skipping video");
+		_vm->_smushVideoShouldFinish = true;
+		return true;
+	}
+
 	if (_rebelYodaMode && event.type == Common::EVENT_KEYDOWN && !event.kbdRepeat && event.kbd.hasFlags(Common::KBD_ALT)) {
 		switch (event.kbd.keycode) {
 		case Common::KEYCODE_m:
@@ -801,7 +844,7 @@ bool InsaneRebel2::notifyEvent(const Common::Event &event) {
 					event.mouse.y >= kRA2GameplayMouseMaxY * mouseScale - kRA2Handler7MouseSettleEdgeMargin * mouseScale;
 
 				if (largeAbsoluteJump && smallRelativeMove && nearWindowEdge) {
-					const Common::Point recenter = getGameplayAimPoint();
+					const Common::Point recenter = getGameplayPointerPos();
 					_gameplayMouseSettleUntil = now + kRA2Handler7MouseSettleExtendMs;
 					warpGameplayMouseNow(recenter.x, recenter.y);
 
@@ -936,10 +979,7 @@ bool InsaneRebel2::notifyEvent(const Common::Event &event) {
 
 		if (pressed && splayer && splayer->_paused && _gameState == kStateGameplay) {
 			debugC(DEBUG_INSANE, "Joystick action while paused - unpausing");
-			if (_pauseOverlayActive) {
-				_vm->_system->getPaletteManager()->setPalette(_savedPausePalette, 0, 256);
-				_pauseOverlayActive = false;
-			}
+			hidePauseOverlay();
 			splayer->unpause();
 			return true;
 		}
@@ -1065,10 +1105,7 @@ bool InsaneRebel2::notifyEvent(const Common::Event &event) {
 
 		if (splayer && splayer->_paused && _gameState == kStateGameplay) {
 			debugC(DEBUG_INSANE, "Key pressed while paused - unpausing");
-			if (_pauseOverlayActive) {
-				_vm->_system->getPaletteManager()->setPalette(_savedPausePalette, 0, 256);
-				_pauseOverlayActive = false;
-			}
+			hidePauseOverlay();
 			splayer->unpause();
 			if (event.kbd.keycode == Common::KEYCODE_ESCAPE && _rebelHandler != 0) {
 				debugC(DEBUG_INSANE, "ESC during pause - opening global menu");
@@ -1080,7 +1117,10 @@ bool InsaneRebel2::notifyEvent(const Common::Event &event) {
 		switch (event.kbd.keycode) {
 		case Common::KEYCODE_ESCAPE:
 			if (splayer) {
-				if (_gameState == kStateGameplay && _rebelHandler != 0) {
+				// _gameplaySectionActive also covers a gameplay video's startup, before
+				// its first IACT sets _rebelHandler; otherwise ESC there skips the segment
+				// (e.g. spamming ESC after a Level 6 phase-2 death skipped phase 2).
+				if (_gameState == kStateGameplay && (_rebelHandler != 0 || _gameplaySectionActive)) {
 					debugC(DEBUG_INSANE, "ESC pressed during gameplay - opening global menu");
 					openGameplayMainMenu(splayer);
 				} else {
@@ -1302,16 +1342,19 @@ int InsaneRebel2::getDifficultyRow() const {
 }
 
 InsaneRebel2::LevelDifficultyParams InsaneRebel2::getDifficultyParams() const {
-	return kDifficultyTable[CLIP(_difficulty, 0, 5)][getDifficultyRow()];
+	const int difficulty = CLIP(_difficulty, 0, 5);
+	const int levelType = getDifficultyRow();
+	const LevelDifficultyParams *params = _release.getDifficultyOverride(difficulty, levelType);
+	return params ? *params : kDifficultyTable[difficulty][levelType];
 }
 
 bool InsaneRebel2::applyPlayerDamage(int damage) {
 	if (_noDamage || _rebelAutoPlay || damage <= 0)
 		return false;
 
+	// Uncapped like the original: a cap here would let the every-16th-frame
+	// recovery tick undo a fatal blow landing on such a frame.
 	_playerDamage += damage;
-	if (_playerDamage > 255)
-		_playerDamage = 255;
 
 	return true;
 }
@@ -1374,6 +1417,15 @@ bool InsaneRebel2::loadPilots() {
 		if (!sf)
 			break; // Slots are contiguous
 
+		SaveStateMetaInfos infos;
+		// Early pilot files have no SCUMM envelope.
+		const bool legacy = sf->readUint32BE() == kPilotSaveMagic;
+		sf->seek(0);
+		if (!legacy && !readInsaneSavegameHeader(sf, nullptr, infos)) {
+			delete sf;
+			break;
+		}
+
 		uint32 magic = sf->readUint32BE();
 		if (magic != kPilotSaveMagic) {
 			delete sf;
@@ -1417,6 +1469,16 @@ bool InsaneRebel2::savePilots() {
 			continue;
 		}
 
+		// The pilot name doubles as the save description in the load screen.
+		Common::String desc(_pilots[i].name);
+		if (desc.empty())
+			desc = Common::String::format("Pilot %d", i + 1);
+		if (!writeInsaneSavegameHeader(sf, desc, _vm->getTotalPlayTime())) {
+			delete sf;
+			ok = false;
+			continue;
+		}
+
 		sf->writeUint32BE(kPilotSaveMagic);
 		sf->writeUint16LE(kPilotSaveVersion);
 
@@ -1433,6 +1495,7 @@ bool InsaneRebel2::savePilots() {
 			sf->writeSint16LE(p.rating[j]);
 
 		sf->finalize();
+		ok = !sf->err() && ok;
 		delete sf;
 	}
 
@@ -1450,7 +1513,7 @@ int InsaneRebel2::createNewPilot() {
 		return -1;
 
 	int idx = _numPilots;
-	_pilots[idx].init();
+	_pilots[idx].init(_release.levels[0], _release.unlockAvailableLevels ? 3 : 4);
 	_numPilots++;
 	return idx;
 }
@@ -1490,14 +1553,93 @@ void InsaneRebel2::updatePilotProgress(int levelIndex, int32 score, int32 lives,
 		return;
 	if (levelIndex < 0 || levelIndex >= kNumLevels)
 		return;
+	if (!_release.isChapterAvailable(levelIndex + 1))
+		return;
 
 	PilotData &pilot = _pilots[_activePilot];
+
+	// Entry `levelIndex` holds the state the next level starts from; damage
+	// below 0xFF means it was already reached, so a replay has nothing to add.
+	if (pilot.damage[levelIndex] < 0xFF) {
+		debugC(DEBUG_INSANE, "RA2: level %d replayed, keeping score %d/lives %d over %d/%d",
+			levelIndex, pilot.score[levelIndex], pilot.lives[levelIndex], score, lives);
+		return;
+	}
+
 	pilot.score[levelIndex] = score;
 	pilot.lives[levelIndex] = lives;
 	pilot.damage[levelIndex] = damage;
 	pilot.rating[levelIndex] = rating;
 
 	savePilots();
+}
+
+bool InsaneRebel2::selectPilot(int index) {
+	if (index < 0 || index >= _numPilots)
+		return false;
+
+	_activePilot = index;
+	_difficulty = _pilots[_activePilot].difficulty;
+
+	updateChapterUnlocks();
+
+	return true;
+}
+
+Common::Error InsaneRebel2::loadGameState(int slot, bool startupLoad) {
+	// Re-read so a slot written by another session is picked up.
+	loadPilots();
+
+	if (!selectPilot(slot)) {
+		warning("RA2: slot %d does not hold a pilot", slot);
+		return Common::kReadingFailed;
+	}
+
+	_pilotLoadRequested = true;
+
+	// Unwind the running menu video so runGame() reaches the chapter selection.
+	if (!startupLoad) {
+		_menuSelectionConfirmed = false;
+		_vm->_smushVideoShouldFinish = true;
+	}
+
+	debugC(DEBUG_INSANE, "RA2: loaded pilot '%s' from slot %d (difficulty %d)",
+		_pilots[_activePilot].name, slot, _difficulty);
+	return Common::kNoError;
+}
+
+Common::Point InsaneRebel2::getTargetHitHalfExtents(const enemy &target) const {
+	// snapDistance is the aim assist; turret levels clamp the half-size to
+	// specialDamage/2 first.
+	const LevelDifficultyParams params = getDifficultyParams();
+
+	int halfW = target.rect.width() / 2;
+	int halfH = target.rect.height() / 2;
+
+	if (_rebelHandler == 0x26 && params.specialDamage > 0) {
+		halfW = MIN<int>(halfW, params.specialDamage / 2);
+		halfH = MIN<int>(halfH, params.specialDamage / 2);
+	}
+
+	halfW += params.snapDistance;
+	halfH += params.snapDistance;
+
+	if (_rebelHandler == 25 && target.type == 100) {
+		halfW *= 2;
+		halfH *= 2;
+	}
+
+	return Common::Point(halfW, halfH);
+}
+
+bool InsaneRebel2::isTargetUnderAim(const enemy &target, const Common::Point &aim) const {
+	const Common::Point half = getTargetHitHalfExtents(target);
+	const int centerX = target.rect.left + target.rect.width() / 2;
+	const int centerY = target.rect.top + target.rect.height() / 2;
+
+	// Half-open, as in the original: c - h <= p < c + h.
+	return aim.x >= centerX - half.x && aim.x < centerX + half.x &&
+	       aim.y >= centerY - half.y && aim.y < centerY + half.y;
 }
 
 int32 InsaneRebel2::processMouse() {
@@ -1511,6 +1653,7 @@ int32 InsaneRebel2::processMouse() {
 
 	bool leftPressed = (currentButtons & 1) != 0;
 	bool leftWasPressed = (_prevMouseButtons & 1) != 0;
+	const bool leftEdge = leftPressed && !leftWasPressed;
 	bool rightPressed = (currentButtons & 2) != 0;
 	bool rightWasPressed = (_prevMouseButtons & 2) != 0;
 
@@ -1520,7 +1663,7 @@ int32 InsaneRebel2::processMouse() {
 		if (rightPressed && !rightWasPressed) {
 			_rebelControlMode |= 2;
 		}
-		if (leftPressed && !leftWasPressed) {
+		if (leftEdge) {
 			_rebelControlMode |= 1;
 		}
 	} else {
@@ -1542,7 +1685,8 @@ int32 InsaneRebel2::processMouse() {
 	if (autoFire)
 		_rebelControlMode |= 1;
 
-	bool triggerShot = ((_rebelHandler == 25) ? (leftPressed && !leftWasPressed) : leftPressed) || autoFire;
+	const bool triggerShot = updateRebel2Fire(leftPressed, leftWasPressed,
+			!_rebelAutoPlay && _optRapidFire, autoFire, _rapidFireCounter);
 	if (_rebelHandler == 8) {
 		_shipFiring = triggerShot && canShoot;
 	}
@@ -1574,25 +1718,22 @@ int32 InsaneRebel2::processMouse() {
 
 		Common::List<enemy>::iterator it;
 		for (it = _enemies.begin(); it != _enemies.end(); ++it) {
-			debugC(DEBUG_INSANE, "  Enemy ID=%d active=%d destroyed=%d rect=(%d,%d)-(%d,%d) contains=%d",
+			debugC(DEBUG_INSANE, "  Enemy ID=%d active=%d destroyed=%d rect=(%d,%d)-(%d,%d) hit=%d",
 				it->id, it->active, it->destroyed,
 				it->rect.left, it->rect.top, it->rect.right, it->rect.bottom,
-				it->rect.contains(worldMousePos));
+				isTargetUnderAim(*it, worldMousePos));
 
-			if (it->active && it->rect.contains(worldMousePos)) {
+			if (it->active && isTargetUnderAim(*it, worldMousePos)) {
 				it->active = false;
 				it->destroyed = true;
 				debugC(DEBUG_INSANE, "HIT enemy ID=%d type=%d at (%d,%d) - Rect: (%d,%d)-(%d,%d)",
 					it->id, it->type, mousePos.x, mousePos.y,
 					it->rect.left, it->rect.top, it->rect.right, it->rect.bottom);
 
-				int explosionHalfWidth = it->rect.width() / 2;
-				if (_rebelHandler == 25) {
-					LevelDifficultyParams dparams = getDifficultyParams();
-					explosionHalfWidth += dparams.snapDistance;
-					if (it->type == 100)
-						explosionHalfWidth *= 2;
-				}
+				// Only handler 25 reuses its padded hit box as the blast size.
+				int explosionHalfWidth = (_rebelHandler == 25)
+					? getTargetHitHalfExtents(*it).x
+					: it->rect.width() / 2;
 
 				if (_rebelHandler != 8 && _rebelHandler != 25) {
 					spawnExplosion((it->rect.left + it->rect.right) / 2,
@@ -1707,6 +1848,18 @@ Common::Point InsaneRebel2::getRebelAutoPlayAimPoint() {
 	return target;
 }
 
+// Raw pointer space, what _vm->_mouse stores and warpGameplayMouseNow() expects.
+// getGameplayAimPoint() mirrors Y on top of this when the controls are flipped.
+Common::Point InsaneRebel2::getGameplayPointerPos() {
+	int x = _vm->_mouse.x;
+	int y = _vm->_mouse.y;
+	if (isHiRes()) {
+		x /= 2;
+		y /= 2;
+	}
+	return Common::Point(CLIP<int>(x, 0, 319), CLIP<int>(y, 0, 199));
+}
+
 Common::Point InsaneRebel2::getGameplayAimPoint() {
 	if (_rebelAutoPlay && _gameState == kStateGameplay && !_menuInputActive)
 		return getRebelAutoPlayAimPoint();
@@ -1765,7 +1918,7 @@ void InsaneRebel2::updateGameplayAimFromGamepad() {
 			return;
 
 		if (axisX || axisY || _gamepadAimActive) {
-			const Common::Point aimPos = getGameplayAimPoint();
+			const Common::Point aimPos = getGameplayPointerPos();
 			const int centerX = 160;
 			const int centerY = 100;
 			int targetX;
@@ -1825,10 +1978,11 @@ void InsaneRebel2::updateGameplayAimFromGamepad() {
 
 	_gamepadAimActive = true;
 
-	Common::Point aimPos = getGameplayAimPoint();
+	// Must read the space it writes, or a flipped Y oscillates every frame.
+	Common::Point pointerPos = getGameplayPointerPos();
 	const int scale = isHiRes() ? 2 : 1;
-	_vm->_mouse.x = (int16)(CLIP<int>(aimPos.x + deltaX, 0, 319) * scale);
-	_vm->_mouse.y = (int16)(CLIP<int>(aimPos.y + deltaY, 0, 199) * scale);
+	_vm->_mouse.x = (int16)(CLIP<int>(pointerPos.x + deltaX, 0, 319) * scale);
+	_vm->_mouse.y = (int16)(CLIP<int>(pointerPos.y + deltaY, 0, 199) * scale);
 }
 
 bool InsaneRebel2::isBitSet(int n) {

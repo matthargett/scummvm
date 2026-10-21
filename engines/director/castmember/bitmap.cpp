@@ -33,9 +33,11 @@
 #include "director/director.h"
 #include "director/cast.h"
 #include "director/images.h"
+#include "director/channel.h"
 #include "director/movie.h"
 #include "director/picture.h"
 #include "director/score.h"
+#include "director/sprite.h"
 #include "director/types.h"
 #include "director/window.h"
 #include "director/castmember/bitmap.h"
@@ -827,7 +829,11 @@ void BitmapCastMember::load() {
 
 	// dumpFile("LoadedBitmap", _castId, MKTAG('B', 'I', 'T', 'D'), (byte *)img->getSurface()->getPixels(), img->getSurface()->h * img->getSurface()->w);
 
+	// setPicture() marks us dirty so the renderer refreshes, but loading
+	// itself is not a runtime change: restore the change-tracking state
+	bool wasChanged = _isChanged;
 	setPicture(*img, true);
+	_isChanged = wasChanged;
 
 	if (ConfMan.getBool("dump_scripts")) {
 
@@ -1096,10 +1102,24 @@ void BitmapCastMember::setField(int field, const Datum &d) {
 			// This is a random PICT from somewhere,
 			// set the external flag so we remap the palette.
 			_external = true;
-			// Remove the canvas-space transformation
-			_regX -= _initialRect.left;
-			_regY -= _initialRect.top;
+			// Recenter the registration point on the new image, rounded to nearest.
 			_initialRect = Common::Rect(_picture->_surface.w, _picture->_surface.h);
+			_regX = (_picture->_surface.w + 1) / 2;
+			_regY = (_picture->_surface.h + 1) / 2;
+
+			// The castId is unchanged, so resize the sprites showing this cast.
+			Movie *movie = g_director->getCurrentMovie();
+			Score *score = movie ? movie->getScore() : nullptr;
+			if (score) {
+				for (uint i = 0; i < score->_channels.size(); i++) {
+					Channel *ch = score->_channels[i];
+					if (ch && ch->_sprite && ch->_sprite->_cast == this && !ch->_sprite->_stretch) {
+						ch->_sprite->_width = _initialRect.width();
+						ch->_sprite->_height = _initialRect.height();
+						ch->setDirty();
+					}
+				}
+			}
 		} else {
 			warning("BitmapCastMember::setField(): Wrong Datum type %d for kThePicture (or nullptr)", d.type);
 		}
@@ -1135,6 +1155,11 @@ uint32 BitmapCastMember::getCastDataSize() {
 	return dataSize;
 }
 
+bool BitmapCastMember::canWriteCastData() {
+	// writeCastData() only knows the D4/D5 layout
+	return _cast->_version >= kFileVer400 && _cast->_version < kFileVer600;
+}
+
 void BitmapCastMember::writeCastData(Common::SeekableWriteStream *writeStream) {
 	writeStream->writeUint16BE(_pitch);
 
@@ -1143,8 +1168,6 @@ void BitmapCastMember::writeCastData(Common::SeekableWriteStream *writeStream) {
 
 	writeStream->writeUint16BE(_regY);
 	writeStream->writeUint16BE(_regX);
-
-	warning("BitmapCastMember::writeCastData(): TODO process D6+");
 
 	if (_bitsPerPixel != 0) {
 		writeStream->writeByte(0);		// Skip one byte (not stored)
@@ -1193,23 +1216,10 @@ uint32 BitmapCastMember::writeBITDResource(Common::SeekableWriteStream *writeStr
 	}
 
 	// No compression for now
-	// pixels.size() == bytes needed
 	Graphics::Surface pixels;
 	Graphics::PixelFormat format;
-
-	if (_bitsPerPixel >> 3) {
-		format.bytesPerPixel = _bitsPerPixel >> 3;
-		pixels.create(_picture->_surface.w, _picture->_surface.h, format);
-	} else {
-		format.bytesPerPixel = 1;
-		pixels.create(_pitch, _picture->_surface.h, format);
-	}
-
-	offset = 0;
-
-	if (_bitsPerPixel == 8 && _picture->_surface.w < (int)(_pitch * _picture->_surface.h / _picture->_surface.h)) {
-		offset = (_pitch - _picture->_surface.w) % 2;
-	}
+	format.bytesPerPixel = 1;
+	pixels.create(_pitch, _picture->_surface.h, format);
 
 	debugC(5, kDebugSaving, "BitmapCastMember::writeBITDResource: Saving 'BITD' Resource: bitsPerPixel: %d, castId: %d", _bitsPerPixel, _castId);
 	for (int y = 0; y < _picture->_surface.h; y++) {
@@ -1241,7 +1251,7 @@ uint32 BitmapCastMember::writeBITDResource(Common::SeekableWriteStream *writeStr
 				break;
 
 			case 8:
-				*(ptr + (y * offset)) = *((byte *)_picture->_surface.getBasePtr(x, y));
+				*ptr = *((byte *)_picture->_surface.getBasePtr(x, y));
 				ptr++; x++;
 				break;
 
@@ -1273,6 +1283,7 @@ uint32 BitmapCastMember::writeBITDResource(Common::SeekableWriteStream *writeStr
 	if (debugChannelSet(7, kDebugSaving)) {
 		dumpFile("BitmapData", _castId, MKTAG('B', 'I', 'T', 'D'), (byte *)pixels.getPixels(), _picture->_surface.h * _pitch);
 	}
+	pixels.free();
 	return 0;
 }
 

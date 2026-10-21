@@ -25,12 +25,13 @@
 #include "mediastation/actor.h"
 #include "mediastation/audio.h"
 #include "mediastation/datafile.h"
+#include "mediastation/clients.h"
 #include "mediastation/mediascript/scriptvalue.h"
 #include "mediastation/mediascript/scriptconstants.h"
 
 namespace MediaStation {
 
-class SoundActor : public Actor, public ChannelClient, public SoundClient {
+class SoundActor : public Actor, public ChannelClient, public SoundClient, public ImtDeviceUser {
 public:
 	SoundActor() : Actor(kActorTypeSound), _sequence(this) {};
 	~SoundActor();
@@ -39,10 +40,16 @@ public:
 	virtual ScriptValue callMethod(BuiltInMethod methodId, Common::Array<ScriptValue> &args) override;
 	virtual void readChunk(Chunk &chunk) override;
 	virtual bool isActive() const override { return _playState == kSoundPlayStatePlaying; }
+	virtual bool giveUpDevice() override;
 
 	virtual void onEvent(const ActorEvent &event) override;
 	virtual void timerEvent(const TimerEvent &event) override;
 	virtual void soundPlayStateChanged(SoundPlayState state, SoundStopReason why) override;
+
+	void start();
+	void stop();
+	void pause();
+	void resume(bool restart);
 
 private:
 	ImtStreamFeed *_streamFeed = nullptr;
@@ -50,11 +57,6 @@ private:
 	bool _discardAfterUse = false;
 	SoundPlayState _playState = kSoundPlayStateStopped;
 	AudioSequence _sequence;
-
-	void start();
-	void stop();
-	void pause();
-	void resume(bool restart);
 
 	void openStream();
 };

@@ -172,7 +172,7 @@ void CGARenderer::blitToScreen(int16 dx, int16 dy, int16 w, int16 h) {
 	if (!mainSurface) {
 		mainSurface = new Graphics::Surface();
 	}
-	if (g_vm->_renderMode == Common::kRenderCGA) {
+	if (g_vm->_renderMode != Common::kRenderHercG && g_vm->_renderMode != Common::kRenderHercA) {
 		if (mainSurface->w != g_vm->_screenW) {
 			mainSurface->free();
 			mainSurface->create(g_vm->_screenW, g_vm->_screenH, Graphics::PixelFormat::createFormatCLUT8());
@@ -226,14 +226,8 @@ void CGARenderer::blitToScreen(int16 dx, int16 dy, int16 w, int16 h) {
 	int16 startY = dy;
 	int16 endY = dy + h;
 
-	if (endY > 200)
-		endY = 200;
-
 	int16 startX_bytes = dx / 4;
 	int16 endX_bytes = (dx + w + 3) / 4;
-
-	if (endX_bytes > 80)
-		endX_bytes = 80;
 
 	for (int y = startY; y < endY; y++) {
 		uint16 bank = (y % 2) * 8192;
@@ -1667,7 +1661,6 @@ void cga_ZoomInplace(zoom_t *params, byte tw, byte th, byte *source, byte *targe
 
 		/*right partial pixel*/
 		target[ofs] = (source[ofs] & ~(0xFF << (sc * 2))) | (pix << (sc * 2));
-		ofs++;
 		params->fw++;
 
 		/*ofs -= params->fw;*/

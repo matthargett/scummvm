@@ -135,11 +135,19 @@ void MenuMan::initConstants() {
 		2   /* FUSE */
 	};
 
-	_boxActionArea1ActionMenu = Box(224, 319, 77, 97); // @ G0501_s_Graphic560_Box_ActionArea1ActionMenu
-	_boxActionArea2ActionMenu = Box(224, 319, 77, 109); // @ G0500_s_Graphic560_Box_ActionArea2ActionsMenu
-	_boxActionArea3ActionMenu = Box(224, 319, 77, 121); // @ G0499_s_Graphic560_Box_ActionArea3ActionsMenu
-	_boxActionArea = Box(224, 319, 77, 121); // @ G0001_s_Graphic562_Box_ActionArea
-	_boxSpellArea = Box(224, 319, 42, 74);
+	if (_vm->getPlatform() == Common::kPlatformDOS) {
+		_boxActionArea1ActionMenu = Box(233, 319, 77, 97);
+		_boxActionArea2ActionMenu = Box(233, 319, 77, 109);
+		_boxActionArea3ActionMenu = Box(233, 319, 77, 121);
+		_boxActionArea = Box(233, 319, 77, 121);
+		_boxSpellArea = Box(233, 319, 42, 74);
+	} else {
+		_boxActionArea1ActionMenu = Box(224, 319, 77, 97);
+		_boxActionArea2ActionMenu = Box(224, 319, 77, 109);
+		_boxActionArea3ActionMenu = Box(224, 319, 77, 121);
+		_boxActionArea = Box(224, 319, 77, 121);
+		_boxSpellArea = Box(224, 319, 42, 74);
+	}
 
 	for (int i = 0; i < 44; i++) {
 		_actionSkillIndex[i] = actionSkillIndex[i];
@@ -207,11 +215,14 @@ void MenuMan::drawActionIcon(ChampionIndex championIndex) {
 	IconIndice iconIndex;
 	if (thing == _vm->_thingNone) {
 		iconIndex = kDMIconIndiceActionEmptyHand;
-	} else if (dungeon._objectInfos[dungeon.getObjectInfoIndex(thing)]._actionSetIndex) {
-		iconIndex = _vm->_objectMan->getIconIndex(thing);
 	} else {
-		dm.fillBitmap(bitmapIcon, kDMColorCyan, 16, 16);
-		goto T0386006;
+		int16 infoIndex = dungeon.getObjectInfoIndex(thing);
+		if (infoIndex >= 0 && infoIndex < 180 && dungeon._objectInfos[infoIndex]._actionSetIndex) {
+			iconIndex = _vm->_objectMan->getIconIndex(thing);
+		} else {
+			dm.fillBitmap(bitmapIcon, kDMColorCyan, 16, 16);
+			goto T0386006;
+		}
 	}
 	_vm->_objectMan->extractIconFromBitmap(iconIndex, bitmapIcon);
 	dm.blitToBitmapShrinkWithPalChange(bitmapIcon, bitmapIcon, 16, 16, 16, 16, palChangesActionAreaObjectIcon);
@@ -359,6 +370,26 @@ void MenuMan::drawSpellAreaControls(ChampionIndex champIndex) {
 	int16 champHP2 = championMan._champions[2]._currHealth;
 	int16 champHP3 = championMan._champions[3]._currHealth;
 	_vm->_eventMan->showMouse();
+	if (_vm->getPlatform() == Common::kPlatformDOS) {
+		Box zoneBox;
+		if (_vm->_displayMan->getZoneBox(kDMZoneSpellAreaSetMagicCaster, 0, zoneBox))
+			_vm->_displayMan->fillScreenBox(zoneBox, kDMColorBlack);
+
+		int16 tabZoneIndex = (champIndex * 5) + kDMZoneSpellAreaMagicCasterTab;
+		for (int16 cIdx = 0; cIdx < 4; cIdx++) {
+			if (championMan._champions[cIdx]._currHealth && (championMan._partyChampionCount > cIdx)) {
+				Box highlightBox;
+				if (_vm->_displayMan->getZoneBox(tabZoneIndex + cIdx, 0, highlightBox))
+					_vm->_eventMan->highlightScreenBox(highlightBox._rect.left, highlightBox._rect.right, highlightBox._rect.top, highlightBox._rect.bottom);
+			}
+		}
+
+		Box nameBox;
+		if (_vm->_displayMan->getZoneBox(tabZoneIndex + 4, 0, nameBox))
+			_vm->_textMan->printToLogicalScreen(nameBox._rect.left + 2, nameBox._rect.bottom - 1, kDMColorBlack, kDMColorCyan, champ->_name);
+		_vm->_eventMan->hideMouse();
+		return;
+	}
 	_vm->_displayMan->fillScreenBox(boxSpellAreaControls, kDMColorBlack);
 
 	switch (champIndex) {
@@ -430,6 +461,8 @@ void MenuMan::buildSpellAreaLine(int16 spellAreaBitmapLine) {
 
 	char spellSymbolString[2] = {'\0', '\0'};
 	Champion *magicChampion = &championMan._champions[championMan._magicCasterChampionIndex];
+	// Clear the buffer before reusing to avoid ghost artifacts
+	memset(_bitmapSpellAreaLine, 0, 96 * 12);
 	if (spellAreaBitmapLine == kDMSpellAreaAvailableSymbols) {
 		_vm->_displayMan->_useByteBoxCoordinates = false;
 		_vm->_displayMan->blitToBitmap(_bitmapSpellAreaLines, _bitmapSpellAreaLine, boxSpellAreaLine, 0, 12, k48_byteWidth, k48_byteWidth, kDMColorNoTransparency, 36, 12);
@@ -465,6 +498,8 @@ void MenuMan::setMagicCasterAndDrawSpellArea(ChampionIndex champIndex) {
 
 	if (championMan._magicCasterChampionIndex == kDMChampionNone) {
 		_vm->_eventMan->showMouse();
+		if (_vm->getPlatform() == Common::kPlatformDOS)
+			_vm->_displayMan->getZoneBox(kDMZoneSpellArea, kDMGraphicIdxMenuSpellAreaBackground, _boxSpellArea);
 		_vm->_displayMan->blitToScreen(_vm->_displayMan->getNativeBitmapOrGraphic(kDMGraphicIdxMenuSpellAreaBackground), &_boxSpellArea, k48_byteWidth, kDMColorNoTransparency, 33);
 		_vm->_eventMan->hideMouse();
 	}
@@ -477,6 +512,18 @@ void MenuMan::setMagicCasterAndDrawSpellArea(ChampionIndex champIndex) {
 		return;
 	}
 	championMan._magicCasterChampionIndex = champIndex;
+	if (_vm->getPlatform() == Common::kPlatformDOS) {
+		Champion *champ = &championMan._champions[champIndex];
+		_vm->_displayMan->getZoneBox(kDMZoneSpellArea, kDMGraphicIdxMenuSpellAreaBackground, _boxSpellArea);
+		_vm->_displayMan->blitToScreen(_vm->_displayMan->getNativeBitmapOrGraphic(kDMGraphicIdxMenuSpellAreaBackground), &_boxSpellArea, k48_byteWidth, kDMColorNoTransparency, 33);
+		_vm->_eventMan->showMouse();
+		drawSpellAreaControls(champIndex);
+		drawAvailableSymbols(champ->_symbolStep);
+		drawChampionSymbols(champ);
+		_vm->_eventMan->hideMouse();
+		return;
+	}
+
 	buildSpellAreaLine(kDMSpellAreaAvailableSymbols);
 	_vm->_eventMan->showMouse();
 	drawSpellAreaControls(champIndex);
@@ -592,7 +639,7 @@ int16 MenuMan::getChampionSpellCastResult(uint16 champIndex) {
 		championMan.isProjectileSpellCast(champIndex, Thing(curSpell->getType() + _vm->_thingFirstExplosion.toUint16()), CLIP((powerSymbolOrdinal + 2) * (4 + (skillLevel << 1)), 21, 255), 0);
 		break;
 	case kDMSpellKindOther: {
-		TimelineEvent newEvent;
+		TimelineEvent newEvent = {};
 		newEvent._priority = 0;
 		uint16 spellPower = (powerSymbolOrdinal + 1) << 2;
 		uint16 ticks;
@@ -830,7 +877,7 @@ Potion *MenuMan::getEmptyFlaskInHand(Champion *champ, Thing *potionThing) {
 }
 
 void MenuMan::createEvent70_light(int16 lightPower, int16 ticks) {
-	TimelineEvent newEvent;
+	TimelineEvent newEvent = {};
 	newEvent._type = kDMEventTypeLight;
 	newEvent._Bu._lightPower = lightPower;
 	newEvent._mapTime = _vm->setMapAndTime(_vm->_dungeonMan->_partyMapIndex, _vm->_gameTime + ticks);
@@ -854,7 +901,7 @@ bool MenuMan::isPartySpellOrFireShieldSuccessful(Champion *champ, bool spellShie
 	}
 	ChampionMan &championMan = *_vm->_championMan;
 
-	TimelineEvent newEvent;
+	TimelineEvent newEvent = {};
 	newEvent._Bu._defense = ticks >> 5;
 	if (spellShield) {
 		newEvent._type = kDMEventTypeSpellShield;
@@ -882,10 +929,11 @@ void MenuMan::drawAvailableSymbols(uint16 symbolStep) {
 	displayBuffer[1] = '\0';
 	char curCharacter = 96 + 6 * symbolStep;
 	int16 textPosX = 225;
+	Color bgColor = (_vm->getPlatform() == Common::kPlatformDOS) ? kDMColorNoTransparency : kDMColorBlack;
 	for (uint16 L1214_ui_Counter = 0; L1214_ui_Counter < 6; L1214_ui_Counter++) {
 		displayBuffer[0] = curCharacter++;
 		textPosX += 14;
-		_vm->_textMan->printToLogicalScreen(textPosX, 58, kDMColorCyan, kDMColorBlack, displayBuffer);
+		_vm->_textMan->printToLogicalScreen(textPosX, 58, kDMColorCyan, bgColor, displayBuffer);
 	}
 }
 
@@ -894,6 +942,7 @@ void MenuMan::drawChampionSymbols(Champion *champ) {
 	int16 textPosX = 232;
 	char displayBuffer[2];
 	displayBuffer[1] = '\0';
+	Color bgColor = (_vm->getPlatform() == Common::kPlatformDOS) ? kDMColorNoTransparency : kDMColorBlack;
 
 	for (uint16 symbolIndex = 0; symbolIndex < 4; symbolIndex++) {
 		if (symbolIndex >= symbolCount)
@@ -902,7 +951,7 @@ void MenuMan::drawChampionSymbols(Champion *champ) {
 			displayBuffer[0] = champ->_symbols[symbolIndex];
 
 		textPosX += 9;
-		_vm->_textMan->printToLogicalScreen(textPosX, 70, kDMColorCyan, kDMColorBlack, displayBuffer);
+		_vm->_textMan->printToLogicalScreen(textPosX, 70, kDMColorCyan, bgColor, displayBuffer);
 	}
 }
 
@@ -1300,7 +1349,7 @@ bool MenuMan::isActionPerformed(uint16 champIndex, int16 actionIndex) {
 		break;
 	case kDMActionWindow: {
 		int16 windowTicks = _vm->getRandomNumber(championMan.getSkillLevel(champIndex, actionSkillIndex) + 8) + 5;
-		TimelineEvent newEvent;
+		TimelineEvent newEvent = {};
 		newEvent._priority = 0;
 		newEvent._type = kDMEventTypeThievesEye;
 		newEvent._mapTime = _vm->setMapAndTime(dungeon._partyMapIndex, _vm->_gameTime + windowTicks);
@@ -1631,7 +1680,7 @@ void MenuMan::printMessageAfterReplacements(const char *str) {
 
 			*curCharacter = '\0';
 			size_t ln = Common::strlcat(outputString, replacementString, sizeof(outputString));
-			if (ln >= sizeof(outputString)) {
+			if (ln >= sizeof(outputString) - 1) {
 				error("Not enough space in outputString");
 			}
 			curCharacter = outputString + ln;
@@ -1702,13 +1751,15 @@ void MenuMan::processCommands116To119_setActingChampion(uint16 champIndex) {
 
 	DungeonMan &dungeon = *_vm->_dungeonMan;
 
-	uint16 actionSetIndex;
+	uint16 actionSetIndex = 0;
 	Thing slotActionThing = curChampion->_slots[kDMSlotActionHand];
 
 	if (slotActionThing == _vm->_thingNone)
 		actionSetIndex = 2; /* Actions Punch, Kick and War Cry */
 	else {
-		actionSetIndex = dungeon._objectInfos[dungeon.getObjectInfoIndex(slotActionThing)]._actionSetIndex;
+		int16 infoIndex = dungeon.getObjectInfoIndex(slotActionThing);
+		if (infoIndex >= 0 && infoIndex < 180)
+			actionSetIndex = dungeon._objectInfos[infoIndex]._actionSetIndex;
 		if (actionSetIndex == 0)
 			return;
 	}

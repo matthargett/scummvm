@@ -22,6 +22,7 @@
 #include "harvester/resources.h"
 
 #include "common/debug.h"
+#include "common/ptr.h"
 #include "common/stream.h"
 #include "harvester/detection.h"
 #include "harvester/xfile_archive.h"
@@ -204,16 +205,15 @@ bool ResourceManager::ensureDiscMounted(int discNumber) {
 			continue;
 		}
 
-		XFileArchive *archive = new XFileArchive();
+		Common::ScopedPtr<XFileArchive> archive(new XFileArchive());
 		if (!archive->open(indexPath, dataPath)) {
 			debugC(1, kDebugResources,
 				"Harvester: failed to mount disc %d set %c from %s + %s",
 				discNumber, spec.archiveSetId, indexPath.c_str(), dataPath.c_str());
-			delete archive;
 			continue;
 		}
 
-		mountArchive(buildDiscArchiveName(discNumber, spec.archiveSetId), archive, spec.priority, true);
+		mountArchive(buildDiscArchiveName(discNumber, spec.archiveSetId), archive.release(), spec.priority, true);
 		debugC(1, kDebugResources,
 			"Harvester: mounted disc %d set %c from %s + %s",
 			discNumber, spec.archiveSetId, indexPath.c_str(), dataPath.c_str());
@@ -319,12 +319,11 @@ Common::SeekableReadStream *ResourceManager::openFile(const Common::String &path
 		}
 	} else {
 		const Common::Path memberPath(normalized, '/');
-		stream = openFromMountedArchives(memberPath);
-		if (!stream) {
-			const Common::String loosePath = resolveDiscLooseResourcePath(_currentDisc, normalized);
-			if (!loosePath.empty())
-				stream = SearchMan.createReadStreamForMember(Common::Path(loosePath, '/'));
-		}
+		const Common::String loosePath = resolveDiscLooseResourcePath(_currentDisc, normalized);
+		if (!loosePath.empty())
+			stream = SearchMan.createReadStreamForMember(Common::Path(loosePath, '/'));
+		if (!stream)
+			stream = openFromMountedArchives(memberPath);
 	}
 
 	debugC(3, kDebugResources, "Harvester: openFile(disc=%d, '%s' -> '%s') %s",

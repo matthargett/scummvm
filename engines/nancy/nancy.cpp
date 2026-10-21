@@ -26,6 +26,9 @@
 #include "common/memstream.h"
 #include "common/compression/installshield_cab.h"
 #include "common/serializer.h"
+#include "common/translation.h"
+
+#include "gui/message.h"
 
 #include "engines/nancy/nancy.h"
 #include "engines/nancy/resource.h"
@@ -39,6 +42,10 @@
 
 #include "engines/nancy/action/conversation.h"
 
+#ifdef ENABLE_NANCY_V4
+#include "engines/nancy/script/api.h"
+#endif
+
 #include "engines/nancy/state/logo.h"
 #include "engines/nancy/state/scene.h"
 #include "engines/nancy/state/help.h"
@@ -46,6 +53,7 @@
 #include "engines/nancy/state/credits.h"
 #include "engines/nancy/state/mainmenu.h"
 #include "engines/nancy/state/setupmenu.h"
+#include "engines/nancy/state/designselect.h"
 #include "engines/nancy/state/loadsave.h"
 #include "engines/nancy/state/savedialog.h"
 
@@ -84,6 +92,7 @@ NancyEngine::~NancyEngine() {
 	destroyState(NancyState::kScene);
 	destroyState(NancyState::kMainMenu);
 	destroyState(NancyState::kSetup);
+	destroyState(NancyState::kDesignSelect);
 	destroyState(NancyState::kLoadSave);
 	destroyState(NancyState::kSaveDialog);
 
@@ -220,6 +229,177 @@ const EngineData *NancyEngine::getEngineData(const Common::String &name) const {
 	return nullptr;
 }
 
+Common::String NancyEngine::getPlayerCharacterDesign(uint characterIndex) const {
+	if (characterIndex < kMaxPlayerCharacters && !_playerCharacterDesigns[characterIndex].empty()) {
+		return _playerCharacterDesigns[characterIndex];
+	}
+
+	const PCUI *pcui = GetEngineData(PCUI);
+	if (pcui && characterIndex < pcui->characters.size()) {
+		return pcui->characters[characterIndex].defaultImageName;
+	}
+
+	return Common::String();
+}
+
+void NancyEngine::setPlayerCharacterDesign(uint characterIndex, const Common::String &designName) {
+	if (characterIndex < kMaxPlayerCharacters) {
+		_playerCharacterDesigns[characterIndex] = designName;
+	}
+}
+
+bool NancyEngine::playerCharacterNeedsReload(uint characterIndex) const {
+	const Common::String treeName = getPlayerCharacterDesign(characterIndex);
+	return !treeName.empty() && (treeName != _playerCharacterTree || characterIndex != _playerCharacter);
+}
+
+bool NancyEngine::setPlayerCharacter(uint characterIndex) {
+	const PCUI *pcui = GetEngineData(PCUI);
+	if (!pcui || characterIndex >= pcui->characters.size() || characterIndex >= kMaxPlayerCharacters) {
+		warning("Invalid player character %u", characterIndex);
+		return false;
+	}
+
+	const Common::String treeName = getPlayerCharacterDesign(characterIndex);
+	if (treeName.empty()) {
+		return false;
+	}
+
+	// A switch to the character who is already active still has work to do when
+	// their design has changed underneath them
+	if (!playerCharacterNeedsReload(characterIndex)) {
+		return false;
+	}
+
+	// Every character ships their own copy of the popup UI resources, so the
+	// incoming character's tree has to outrank the ones already loaded
+	if (_resource->readCifTree(treeName, "dat", 1)) {
+		// Nancy17 has the UI itself in the tree of the character the game starts
+		// with, which the others fall back on. It still has to outrank the main
+		// tree: both have a file called "convo".
+		const int basePriority = getGameType() >= kGameTypeNancy17 ? 2 : 1;
+
+		if (!_playerCharacterTree.empty()) {
+			_resource->setCifTreePriority(_playerCharacterTree, basePriority);
+		}
+
+		_resource->setCifTreePriority(treeName, basePriority + 1);
+	}
+
+#ifdef ENABLE_NANCY_V4
+	if (getGameType() >= kGameTypeNancy19) {
+		// The character's own data is a script, which only names a few files
+		ScriptBootData *boot = (ScriptBootData *)_engineData.getValOrDefault("ScriptBootData", nullptr);
+		assert(boot);
+
+		Script::BootTables tables;
+		tables.boot = boot;
+		tables.playerIndex = characterIndex;
+
+		const Common::String scriptName = treeName + (getGameType() >= kGameTypeNancy20 ? "_BOOT_SC" : "_boot");
+		if (!Script::runBootScript(scriptName.c_str(), tables)) {
+			error("Failed to load boot script for player character %s", treeName.c_str());
+		}
+
+		if (characterIndex < boot->players.size() && !boot->players[characterIndex].autotextName.empty()) {
+			addAutotext(boot->players[characterIndex].autotextName);
+		}
+
+		_playerCharacter = characterIndex;
+		_playerCharacterTree = treeName;
+
+		return true;
+	}
+#endif
+
+	// The UI description chunks live in the character's own boot IFF, e.g.
+	// PUI_CRE_NANCY_DEFAULT_BOOT (PUI_ICE_NANCY_DEFAULT_BOOT in Nancy16)
+	IFF *iff = _resource->loadIFF(Common::Path(treeName + "_boot"));
+	if (!iff) {
+		if (_playerCharacterDesigns[characterIndex].empty()) {
+			// The character's default look is part of any working installation
+			error("Failed to load boot script for player character %s", treeName.c_str());
+		}
+
+		// A design named by a save that this installation doesn't have
+		warning("Missing player character design %s, falling back to the default", treeName.c_str());
+		_playerCharacterDesigns[characterIndex].clear();
+		return setPlayerCharacter(characterIndex);
+	}
+
+	Common::SeekableReadStream *chunkStream = nullptr;
+	#define LOAD_PLAYER_CHAR(t)	if (chunkStream = iff->getChunkStream(#t), chunkStream) {	\
+									delete _engineData.getValOrDefault(#t, nullptr);			\
+									_engineData.setVal(#t, new t(chunkStream));				\
+									delete chunkStream;										\
+								}
+
+	// Nancy16 moved the popup UI descriptions out into one IFF per widget
+	// (named by the PCUI and PUIH chunks), leaving only these behind
+	if (getGameType() <= kGameTypeNancy15) {
+		LOAD_PLAYER_CHAR(TASK)
+		LOAD_PLAYER_CHAR(UIIV)
+		LOAD_PLAYER_CHAR(UICO)
+		LOAD_PLAYER_CHAR(UICL)
+		LOAD_PLAYER_CHAR(UIBW)
+		LOAD_PLAYER_CHAR(UINB)
+		LOAD_PLAYER_CHAR(SCTB)
+		LOAD_PLAYER_CHAR(PUIV)	// Player-UI random-sound bank ("can't" responses)
+	} else {
+		LOAD_PLAYER_CHAR(TSKL)	// Task list sounds
+	}
+
+	LOAD_PLAYER_CHAR(UIRC)
+	LOAD_PLAYER_CHAR(UICM)
+	LOAD_PLAYER_CHAR(PUIH)	// Player-UI header (theme name + swatch image)
+
+	#undef LOAD_PLAYER_CHAR
+
+	delete iff;
+
+	// Nancy17 characters can bring their own UI texts, which join the autotext
+	const PUIH *puih = GetEngineData(PUIH);
+	if (puih && !puih->textsName.empty()) {
+		addAutotext(puih->textsName);
+	}
+
+	_playerCharacter = characterIndex;
+	_playerCharacterTree = treeName;
+
+	return true;
+}
+
+void NancyEngine::addAutotext(const Common::Path &name) {
+	CVTX *autotext = (CVTX *)_engineData.getValOrDefault("AUTOTEXT", nullptr);
+
+#ifdef ENABLE_NANCY_V4
+	if (autotext && getGameType() >= kGameTypeNancy19) {
+		Script::BootTables tables;
+		tables.texts = autotext;
+		Script::runBootScript(name.toString().c_str(), tables);
+		return;
+	}
+#endif
+
+	IFF *iff = _resource->loadIFF(name);
+	if (!autotext || !iff) {
+		delete iff;
+		return;
+	}
+
+	Common::SeekableReadStream *chunkStream = iff->getChunkStream("CVTX");
+	if (chunkStream) {
+		CVTX texts(chunkStream);
+		for (auto &text : texts.texts) {
+			autotext->texts.setVal(text._key, text._value);
+		}
+
+		delete chunkStream;
+	}
+
+	delete iff;
+}
+
 // From Nancy12 the event flags are split into two ranges: 1000 generic engine
 // flags (labels 1000-1999) followed by the game-specific flags (labels from 2000),
 // whose names are listed in the EVNT chunk.
@@ -242,6 +422,12 @@ static const GenericEventFlagCategory kGenericEventFlagCategories[] = {
 	{ 1559, 1658, "Empty" }
 };
 
+// Nancy15 widened the Generic and Timer blocks and dropped the other categories
+static const GenericEventFlagCategory kGenericEventFlagCategoriesNancy15[] = {
+	{ 1010, 1060, "Generic" },
+	{ 1100, 1120, "Timer" }
+};
+
 const Common::String NancyEngine::getEventFlagName(uint flagID) const {
 	if (getGameType() <= kGameTypeNancy11) {
 		// All flag names are stored in the executable
@@ -262,8 +448,15 @@ const Common::String NancyEngine::getEventFlagName(uint flagID) const {
 		return (flagID < flagNames.size()) ? flagNames[flagID] : "";
 	}
 
-	for (uint i = 0; i < ARRAYSIZE(kGenericEventFlagCategories); ++i) {
-		const GenericEventFlagCategory &category = kGenericEventFlagCategories[i];
+	const GenericEventFlagCategory *categories = kGenericEventFlagCategories;
+	uint numCategories = ARRAYSIZE(kGenericEventFlagCategories);
+	if (getGameType() >= kGameTypeNancy15) {
+		categories = kGenericEventFlagCategoriesNancy15;
+		numCategories = ARRAYSIZE(kGenericEventFlagCategoriesNancy15);
+	}
+
+	for (uint i = 0; i < numCategories; ++i) {
+		const GenericEventFlagCategory &category = categories[i];
 		if (flagID >= category.firstLabel && flagID <= category.lastLabel) {
 			return Common::String::format("%s%u", category.name, flagID - category.firstLabel);
 		}
@@ -466,20 +659,25 @@ void NancyEngine::bootGameEngine() {
 	SearchMan.addSubDirectoryMatching(gameDataDir, "cdsound");
 	SearchMan.addSubDirectoryMatching(gameDataDir, "hdvideo");
 	SearchMan.addSubDirectoryMatching(gameDataDir, "cdvideo");
+	SearchMan.addSubDirectoryMatching(gameDataDir, "sound");	// Nancy16+
+	SearchMan.addSubDirectoryMatching(gameDataDir, "video");	// Nancy16+
 	SearchMan.addSubDirectoryMatching(gameDataDir, "iff");
 	SearchMan.addSubDirectoryMatching(gameDataDir, "art");
 	SearchMan.addSubDirectoryMatching(gameDataDir, "font");
 
 	// Load archive if running a compressed variant
-	if (isCompressed()) {
-		Common::Archive *cabinet = Common::makeInstallShieldArchive("data");
-		if (cabinet) {
-			SearchMan.add("data1.cab", cabinet);
-		}
+	Common::Archive *cabinet = Common::makeInstallShieldArchive("data");
+	if (cabinet) {
+		SearchMan.add("data1.cab", cabinet);
 	}
 
 	_resource->readCifTree("ciftree", "dat", 1);
 	_resource->readCifTree("promotree", "dat", 1);
+
+	// Nancy15+ keeps its popup UI resources in one CIF tree per player character
+	// (PUI_CRE_Nancy_Default, PUI_CRE_Frank_Default, PUI_CRE_Joe_Default, ...).
+	// Those are loaded on demand by setPlayerCharacter(), once the PCUI chunk
+	// that names them is available.
 
 	// Read the static data. Up to Nancy11 it lives in nancy.dat; from Nancy12
 	// onwards the game ships it in its own data files, so the engine only needs
@@ -493,16 +691,24 @@ void NancyEngine::bootGameEngine() {
 	// Setup mixer
 	syncSoundSettings();
 
+#ifdef ENABLE_NANCY_V4
+	if (getGameType() >= kGameTypeNancy19) {
+		bootScriptedGameEngine();
+		return;
+	}
+#endif
+
 	IFF *iff = _resource->loadIFF("boot");
 	if (!iff)
 		error("Failed to load boot script");
 
 	// Load BOOT chunks data
 	Common::SeekableReadStream *chunkStream = nullptr;
-	#define LOAD_BOOT_L(t, s)	if (chunkStream = iff->getChunkStream(s), chunkStream) {	\
-									_engineData.setVal(s, new t(chunkStream));				\
-									delete chunkStream;										\
-								}
+	#define LOAD_BOOT_L2(t, s, k)	if (chunkStream = iff->getChunkStream(s), chunkStream) {	\
+										_engineData.setVal(k, new t(chunkStream));				\
+										delete chunkStream;										\
+									}
+	#define LOAD_BOOT_L(t, s) LOAD_BOOT_L2(t, s, s)
 	#define LOAD_BOOT(t) LOAD_BOOT_L(t, #t)
 
 	#define LOAD_CHUNK(n, t, s, k)	iff = _resource->loadIFF(n);								\
@@ -516,7 +722,23 @@ void NancyEngine::bootGameEngine() {
 
 	LOAD_BOOT_L(ImageChunk, "OB0")
 	LOAD_BOOT_L(ImageChunk, "FR0")
-	LOAD_BOOT_L(ImageChunk, "LG0")
+
+	if (getGameType() <= kGameTypeNancy15) {
+		LOAD_BOOT_L(ImageChunk, "LG0")
+	} else {
+		// Nancy16 has a list of logo screens, starting with the HeR logo, which used
+		// to be in PLGO
+		for (uint i = 0; ; ++i) {
+			Common::String name = Common::String::format("LG%u", i);
+			chunkStream = iff->getChunkStream(name);
+			if (!chunkStream) {
+				break;
+			}
+
+			_engineData.setVal(name, new LogoScreen(chunkStream));
+			delete chunkStream;
+		}
+	}
 
 	// One weird version of nancy3 has a partner logo implemented the same way as the other image chunks
 	LOAD_BOOT_L(ImageChunk, "PLG0")
@@ -530,11 +752,27 @@ void NancyEngine::bootGameEngine() {
 	LOAD_BOOT(VIEW)
 	LOAD_BOOT(PCAL)
 	LOAD_BOOT(INV)
+
+	if (getGameType() >= kGameTypeNancy15) {
+		// Nancy15 stores the number of inventory items in the INV chunk, so the
+		// hardcoded count is only a fallback for the chunks read before this one
+		const INV *invData = (const INV *)getEngineData("INV");
+		if (invData && invData->itemDescriptions.size()) {
+			_staticData.numItems = invData->itemDescriptions.size();
+		}
+	}
+
 	LOAD_BOOT(TBOX)
 	LOAD_BOOT(HELP)
 	LOAD_BOOT(CRED)
 	LOAD_BOOT(MENU)
-	LOAD_BOOT(LOAD)
+
+	// Nancy16 reused the LOAD chunk name for a small block of savegame naming data;
+	// the save/load screen layout moved to the LOADGAME/SAVEGAME IFFs of the new UI
+	if (getGameType() <= kGameTypeNancy15) {
+		LOAD_BOOT(LOAD)
+	}
+
 	LOAD_BOOT(SET)
 	LOAD_BOOT(SDLG)
 	LOAD_BOOT(MAP)
@@ -571,15 +809,27 @@ void NancyEngine::bootGameEngine() {
 	LOAD_BOOT(MMIX)	// Music mix table (location code -> music tracks)
 
 	// Nancy 14
-	// LOAD_BOOT(UICM)
+	LOAD_BOOT(UICM)	// Camera UI
 
 	// Nancy 15+
-	// TASK, UIRC, UIIV, UICO, UICM, UICL,
-	// UIBW, UINB, SCTB, CURT, TMOD chunks have
-	// been removed
-	// LOAD_BOOT(LVLN)
-	// LOAD_BOOT(PCUI)
-	// LOAD_BOOT(LDSN)
+	// The EVNT, UICO, SCTB, TASK, UIRC, UIIV, UICM, UICL, UIBW, UINB chunks, plus two new ones
+	// (PUIH, PUIV) have been moved from the BOOT chunk to different per-character chunks,
+	// based on names specified in the PCUI chunk.
+	// For now, we load Nancy's chunk at boot below, from PUI_CRE_NANCY_DEFAULT_BOOT
+	LOAD_BOOT(LVLN)	// Level name table (scene-prefix code -> display name)
+	LOAD_BOOT(PCUI)	// Player-character selector (Nancy / Frank / Joe)
+	LOAD_BOOT(LDSN)	// Player-character "Design Select" screen layout
+
+	// Nancy 17
+	// LVLN and MMIX have been merged into the new ENVS chunk, and PCAL and CRED are gone.
+	// The inventory items are back in the game data, in a file of their own.
+	LOAD_BOOT(ENVS)	// Environment table (location code -> name, ambient sounds, music tracks)
+
+	// Nancy 16
+	// Only BSUM, PCUI, LVLN, PCAL, LGx, LOAD, CURS, VIEW and MMIX are left in BOOT.
+	// The LDSN chunk has been removed along with the player-character switcher, and
+	// everything else has moved into the per-character CIF tree, where the popup UI
+	// is now described by one IFF per widget instead of a chunk per widget.
 
 	_cursor->init(iff->getChunkStream("CURS"));
 
@@ -591,7 +841,13 @@ void NancyEngine::bootGameEngine() {
 		IFF *fontIFF = _resource->loadIFF("font");
 		if (!fontIFF)
 			error("Failed to load font IFF");
-		_graphics->loadFonts(fontIFF->getChunkStream("FONT"));
+
+		if (getGameType() >= kGameTypeNancy16) {
+			_graphics->loadSystemFonts(*fontIFF);
+		} else {
+			_graphics->loadFonts(fontIFF->getChunkStream("FONT"));
+		}
+
 		delete fontIFF;
 	}
 
@@ -602,6 +858,32 @@ void NancyEngine::bootGameEngine() {
 
 	delete iff;
 
+	// Load convo texts and autotext. This has to happen before a player character's
+	// tree gets added: Nancy16's has a UI file with the same name as the convo texts.
+	auto *bsum = GetEngineData(BSUM);
+	if (bsum && !bsum->conversationTextsFilename.empty() && !bsum->autotextFilename.empty()) {
+		LOAD_CHUNK(bsum->conversationTextsFilename.toString().c_str(), CVTX, "CVTX", "CONVO")
+		LOAD_CHUNK(bsum->autotextFilename.toString().c_str(), CVTX, "CVTX", "AUTOTEXT")
+	}
+
+	if (bsum && !bsum->inventoryFilename.empty()) {
+		LOAD_CHUNK(bsum->inventoryFilename.toString().c_str(), INVD, "INVD", "INVD")
+	}
+
+	if (getGameType() >= kGameTypeNancy15) {
+		// The default player character is Nancy, who always occupies the first PCUI slot.
+		// Nancy17 names the starting character instead
+		uint startCharacter = 0;
+		const PCUI *pcui = GetEngineData(PCUI);
+		for (uint i = 0; pcui && i < pcui->characters.size(); ++i) {
+			if (!pcui->startCharacterName.empty() && pcui->characters[i].name.equalsIgnoreCase(pcui->startCharacterName)) {
+				startCharacter = i;
+			}
+		}
+
+		setPlayerCharacter(startCharacter);
+	}
+
 	if (getGameType() >= kGameTypeNancy12) {
 		LOAD_CHUNK("FLAGS", EVNT, "EVNT", "EVNT")
 
@@ -610,20 +892,121 @@ void NancyEngine::bootGameEngine() {
 		// game data instead of relying on the hardcoded value
 		auto *evnt = (const EVNT *)getEngineData("EVNT");
 		if (evnt) {
-			_staticData.numEventFlags = (uint16)(kNumGenericEventFlags + evnt->eventFlagNames.size());
+			_staticData.numEventFlags = (uint16)(kNumGenericEventFlags + evnt->numRecords);
 		}
 	}
 
-	// Load convo texts and autotext
-	auto *bsum = GetEngineData(BSUM);
-	if (bsum && !bsum->conversationTextsFilename.empty() && !bsum->autotextFilename.empty()) {
-		LOAD_CHUNK(bsum->conversationTextsFilename.toString().c_str(), CVTX, "CVTX", "CONVO")
-		LOAD_CHUNK(bsum->autotextFilename.toString().c_str(), CVTX, "CVTX", "AUTOTEXT")
-	}
-
+	#undef LOAD_BOOT_L2
 	#undef LOAD_BOOT_L
 	#undef LOAD_BOOT
 }
+
+#ifdef ENABLE_NANCY_V4
+static void runRequiredBootScript(const char *name, const Script::BootTables &tables) {
+	// Nancy20 ends the names of all scripts in "_SC"
+	Common::String scriptName = name;
+	if (g_nancy->getGameType() >= kGameTypeNancy20) {
+		scriptName += "_SC";
+	}
+
+	if (!Script::runBootScript(scriptName.c_str(), tables)) {
+		error("Failed to load boot script %s", scriptName.c_str());
+	}
+}
+
+void NancyEngine::bootScriptedGameEngine() {
+	// Nancy19 has no boot IFF. What its chunks used to hold is spread over a
+	// handful of Lua scripts, which fill the same tables.
+	EVNT *flags = new EVNT();
+	INVD *inventory = new INVD();
+	ENVS *environments = new ENVS();
+	PCUI *players = new PCUI();
+	VIEW *viewport = new VIEW();
+	CVTX *autotext = new CVTX();
+	CVTX *convo = new CVTX();
+	BSUM *bootSummary = new BSUM();
+	ScriptBootData *boot = new ScriptBootData();
+
+	_engineData.setVal("EVNT", flags);
+	_engineData.setVal("INVD", inventory);
+	_engineData.setVal("ENVS", environments);
+	_engineData.setVal("PCUI", players);
+	_engineData.setVal("VIEW", viewport);
+	_engineData.setVal("AUTOTEXT", autotext);
+	_engineData.setVal("CONVO", convo);
+	_engineData.setVal("BSUM", bootSummary);
+	_engineData.setVal("ScriptBootData", boot);
+
+	// The order matters: the cursors of the inventory go by item
+	Script::BootTables fontTables;
+	fontTables.boot = boot;
+	runRequiredBootScript("Font", fontTables);
+
+	Script::BootTables flagTables;
+	flagTables.flags = flags;
+	runRequiredBootScript("Flags", flagTables);
+
+	Script::BootTables inventoryTables;
+	inventoryTables.inventory = inventory;
+	inventoryTables.boot = boot;
+	runRequiredBootScript("Inventory", inventoryTables);
+	runRequiredBootScript("Cursors", inventoryTables);
+
+	Script::BootTables textTables;
+	if (getGameType() <= kGameTypeNancy19) {
+		textTables.texts = autotext;
+		runRequiredBootScript("Autotext", textTables);
+
+		textTables.texts = convo;
+		runRequiredBootScript("Convo", textTables);
+	}
+
+	Script::BootTables bootTables;
+	bootTables.boot = boot;
+	bootTables.players = players;
+	bootTables.environments = environments;
+	bootTables.viewport = viewport;
+	runRequiredBootScript("Boot", bootTables);
+
+	// Nancy20 names its files of texts in the boot script, and keeps the
+	// lines of the conversations together with the other texts
+	textTables.texts = autotext;
+	for (const Common::String &name : boot->textFileNames) {
+		if (!Script::runBootScript(name.c_str(), textTables)) {
+			error("Failed to load text file %s", name.c_str());
+		}
+	}
+
+	_staticData.numItems = inventory->items.size();
+	_staticData.numEventFlags = (uint16)(kNumGenericEventFlags + flags->numRecords);
+
+	// Saved games get matched against the name of the game
+	const Common::String &saveName = boot->saveFolderName.empty() ? boot->defaultSaveName : boot->saveFolderName;
+	Common::strlcpy((char *)bootSummary->header, saveName.c_str(), sizeof(bootSummary->header));
+	bootSummary->firstScene.sceneID = 0;
+
+	// The clock of the game runs a little faster than a real one
+	if (boot->playerTimeScale > 0.0) {
+		bootSummary->playerTimeMinuteLength = (uint16)(60000.0 / boot->playerTimeScale);
+	}
+
+	_cursor->init(*boot);
+
+	_graphics->init();
+	_graphics->loadSystemFonts(*boot);
+
+	_sound->initSoundChannels();
+
+	uint startCharacter = 0;
+	for (uint i = 0; i < players->characters.size(); ++i) {
+		if (players->characters[i].name.equalsIgnoreCase(players->startCharacterName)) {
+			startCharacter = i;
+		}
+	}
+
+	setPlayerCharacter(startCharacter);
+}
+#endif
 
 State::State *NancyEngine::getStateObject(NancyState::NancyState state) const {
 	switch (state) {
@@ -635,6 +1018,8 @@ State::State *NancyEngine::getStateObject(NancyState::NancyState state) const {
 		return &State::Map::instance();
 	case NancyState::kSetup:
 		return &State::SetupMenu::instance();
+	case NancyState::kDesignSelect:
+		return &State::DesignSelect::instance();
 	case NancyState::kHelp:
 		return &State::Help::instance();
 	case NancyState::kScene:
@@ -685,6 +1070,12 @@ void NancyEngine::destroyState(NancyState::NancyState state) const {
 	case NancyState::kSetup:
 		if (State::SetupMenu::hasInstance()) {
 			State::SetupMenu::instance().destroy();
+		}
+
+		break;
+	case NancyState::kDesignSelect:
+		if (State::DesignSelect::hasInstance()) {
+			State::DesignSelect::instance().destroy();
 		}
 		break;
 	case NancyState::kLoadSave:
@@ -773,8 +1164,13 @@ void NancyEngine::populateStaticData() {
 		break;
 	case kGameTypeNancy14:
 	case kGameTypeNancy15:
-		_staticData.numItems = 50;
-		_staticData.numCursorTypes = 44;
+	case kGameTypeNancy16:
+	case kGameTypeNancy17:
+	case kGameTypeNancy18:
+		// Nancy16 and Nancy17 have 40 items, but their cursor table still has room for 49,
+		// and so does the one of Nancy18
+		_staticData.numItems = 49;
+		_staticData.numCursorTypes = 45;
 		break;
 	default:
 		_staticData.numItems = 50;
@@ -782,11 +1178,12 @@ void NancyEngine::populateStaticData() {
 		break;
 	}
 
-	// Generic event flags occupy labels 1010-1040 (indices 10-40), and the
+	// Generic event flags occupy labels 1010-1040 (indices 10-40), or 1010-1060
+	// (indices 10-60) in Nancy15, and are cleared on every scene change. The
 	// won-game flag is label 1042 (index 42). numEventFlags is computed from the
 	// EVNT chunk later in bootGameEngine; this is just a fallback if it is absent.
 	_staticData.numEventFlags = kNumGenericEventFlags;
-	_staticData.genericEventFlags.resize(31);
+	_staticData.genericEventFlags.resize(getGameType() >= kGameTypeNancy15 ? 51 : 31);
 	for (uint i = 0; i < _staticData.genericEventFlags.size(); ++i) {
 		_staticData.genericEventFlags[i] = 10 + i;
 	}
@@ -800,14 +1197,33 @@ void NancyEngine::populateStaticData() {
 	sci.speechChannels = { 12, 13, 30 };
 	sci.musicChannels = { 0, 1, 2, 3, 19, 26, 27, 29 };
 	sci.sfxChannels = { 4, 5, 6, 7, 8, 9, 10, 11, 17, 18, 20, 21, 22, 23, 24, 25, 31 };
+
+	if (getGameType() >= kGameTypeNancy19) {
+		// The scripts of Nancy19 call the channels by name, and number them by
+		// kind: six for music, eight for ambience, ten for effects and six for
+		// voices. No channel belongs to a scene anymore; the scripts stop what
+		// they don't want to keep.
+		sci.numChannels = 30;
+		sci.numSceneSpecificChannels = 0;
+		sci.musicChannels = { 0, 1, 2, 3, 4, 5 };
+		sci.sfxChannels = { 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23 };
+		sci.speechChannels = { 24, 25, 26, 27, 28, 29 };
+	}
 }
 
 Common::Error NancyEngine::synchronize(Common::Serializer &ser) {
-	auto *bootSummary = GetEngineData(BSUM);
+	auto *bootSummary = GetEngineData(BSUM)
 	assert(bootSummary);
 
 	// Sync boot summary header, which includes full game title
 	ser.syncVersion(kSavegameVersion);
+
+	if (ser.getVersion() > kSavegameVersion) {
+		GUI::MessageDialog dialog(_s("Saved game was created with a newer version of ScummVM. Unable to load."));
+		dialog.runModal();
+		return Common::kUnknownError;
+	}
+
 	ser.matchBytes((const char *)bootSummary->header, 90);
 
 	// Sync scene and action records
@@ -815,10 +1231,6 @@ Common::Error NancyEngine::synchronize(Common::Serializer &ser) {
 	NancySceneState.getActionManager().synchronize(ser);
 
 	return Common::kNoError;
-}
-
-bool NancyEngine::isCompressed() {
-	return getGameFlags() & GF_COMPRESSED;
 }
 
 } // End of namespace Nancy

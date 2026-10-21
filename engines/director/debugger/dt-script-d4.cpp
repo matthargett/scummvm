@@ -44,6 +44,15 @@ public:
 			if (head->sp.ctx)
 				_isScriptInDebug = (head->sp.ctx->_id == script.id.member) && (*head->sp.name == script.handlerId);
 		}
+		// find the statement containing the pc from the previous render's offsets
+		if (_script.pc != 0) {
+			for (uint off : _script.startOffsets) {
+				if (off <= _script.pc && (!_markPcValid || off > _markPc)) {
+					_markPc = off;
+					_markPcValid = true;
+				}
+			}
+		}
 		_script.startOffsets.clear();
 	}
 
@@ -355,7 +364,7 @@ public:
 
 		ImGui::Text(".");
 		ImGui::SameLine();
-		ImGui::Text(node.name.c_str());
+		ImGui::Text("%s", node.name.c_str());
 		ImGui::SameLine();
 		ImGui::Text("(");
 		ImGui::SameLine();
@@ -453,7 +462,7 @@ public:
 
 	virtual void visit(const LingoDec::MemberExprNode &node) override {
 		bool hasCastID = node.castID && !(node.castID->type == LingoDec::kLiteralNode && node.castID->getValue()->type == LingoDec::kDatumInt && node.castID->getValue()->i == 0);
-		ImGui::Text(node.type.c_str());
+		ImGui::Text("%s", node.type.c_str());
 		ImGui::SameLine();
 		ImGui::Text(" ");
 		ImGui::SameLine();
@@ -534,7 +543,7 @@ public:
 	virtual void visit(const LingoDec::ThePropExprNode &node) override {
 		ImGui::TextColored(ImColor(_state->theme->keyword_color), "the ");
 		ImGui::SameLine();
-		ImGui::Text(node.prop.c_str());
+		ImGui::Text("%s", node.prop.c_str());
 		ImGui::SameLine();
 		ImGui::TextColored(ImColor(_state->theme->keyword_color), " of ");
 		ImGui::SameLine();
@@ -570,7 +579,7 @@ public:
 	virtual void visit(const LingoDec::SoundCmdStmtNode &node) override {
 		write(node._startOffset, "sound ", _state->theme->keyword_color);
 		ImGui::SameLine();
-		ImGui::Text(node.cmd.c_str());
+		ImGui::Text("%s", node.cmd.c_str());
 		ImGui::SameLine();
 		ImGui::Text(" ");
 		ImGui::SameLine();
@@ -712,7 +721,7 @@ public:
 
 		ImGui::Text(".");
 		ImGui::SameLine();
-		ImGui::Text(node.prop.c_str());
+		ImGui::Text("%s", node.prop.c_str());
 		ImGui::SameLine();
 		ImGui::Text("[");
 		ImGui::SameLine();
@@ -861,7 +870,7 @@ private:
 			ImGui::SameLine();
 			return;
 		case LingoDec::kDatumVarRef:
-			ImGui::TextColored(_state->theme->var_color, datum.s.c_str());
+			ImGui::TextColored(_state->theme->var_color, "%s", datum.s.c_str());
 			ImGui::SameLine();
 			return;
 		case LingoDec::kDatumString:
@@ -1137,7 +1146,7 @@ private:
 		uint pc = _script.byteOffsets[p];
 		_script.startOffsets.push_back(pc);
 
-		if (_script.pc != 0 && pc >= _script.pc) {
+		if (_script.pc != 0 && (_markPcValid ? pc == _markPc : pc >= _script.pc)) {
 			if (!_currentStatementDisplayed) {
 				showCurrentStatement = true;
 				_currentStatementDisplayed = true;
@@ -1205,7 +1214,7 @@ private:
 		if (showCurrentStatement) {
 			dl->AddQuadFilled(ImVec2(pos.x, pos.y + 4.f), ImVec2(pos.x + 9.f, pos.y + 4.f), ImVec2(pos.x + 9.f, pos.y + 10.f), ImVec2(pos.x, pos.y + 10.f), ImColor(_state->theme->current_statement));
 			dl->AddTriangleFilled(ImVec2(pos.x + 8.f, pos.y), ImVec2(pos.x + 14.f, pos.y + 7.f), ImVec2(pos.x + 8.f, pos.y + 14.f), ImColor(_state->theme->current_statement));
-			if (_state->_dbg._scrollToPC && _scrollTo && g_lingo->_state->callstack.size() != _state->_dbg._callstackSize) {
+			if (_state->_dbg._scrollToPC && _scrollTo) {
 				ImGui::SetScrollHereY(0.5f);
 				_state->_dbg._scrollToPC = false;
 			}
@@ -1254,6 +1263,8 @@ private:
 	bool _currentStatementDisplayed = false;
 	bool _isScriptInDebug = false;
 	int _renderLineID = 1;
+	uint _markPc = 0;
+	bool _markPcValid = false;
 	bool _scrollTo = false;
 };
 

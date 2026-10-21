@@ -28,7 +28,7 @@
 #include "common/rect.h"
 #include "common/str.h"
 #include "harvester/art.h"
-#include "harvester/room_support.h"
+#include "harvester/scene/room_support.h"
 
 namespace Graphics {
 class Screen;
@@ -37,6 +37,7 @@ class Screen;
 namespace Harvester {
 
 class HarvesterEngine;
+struct MenuTextConfig;
 
 struct InventoryVisual {
 	ObjectRecord object;
@@ -62,14 +63,16 @@ public:
 	bool isOpen() const;
 	bool hasSelection() const;
 	const Common::String &getSelectedItemName() const;
+	const IndexedBitmap *getSelectedItemBitmap() const;
 	Common::String resolveSelectedLabel() const;
-	Common::String buildSelectedPrompt(const Common::String &targetLabel) const;
+	Common::String buildSelectedPrompt(const Common::String &targetLabel,
+		const MenuTextConfig &menuTextConfig) const;
 	void selectItem(const Common::String &objectName);
 	bool toggleCombatLoadout(const ObjectRecord &object, int currentLoadout, bool &changed);
 	bool resolveSecondaryAction(const ObjectRecord &object, InventorySecondaryAction &action) const;
 	void setPromptText(const Common::String &promptText);
 	const Common::String &getPromptText() const;
-	Common::String resolveWeekdayLabel() const;
+	Common::String resolveWeekdayLabel(const MenuTextConfig &menuTextConfig) const;
 	const InventoryVisual *findItemAtPoint(const Common::Point &point) const;
 	Common::Rect getPanelBounds() const;
 	void drawOverlay(Graphics::Screen &screen) const;

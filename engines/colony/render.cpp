@@ -43,24 +43,23 @@ const int g_indexTable[4][10] = {
 	{0, 0,  0, 1,  1,  0,  0, -1,  2, 1}
 };
 
-// DOS lsColor table from ROBOCOLR.C  maps color index to rendering attributes.
-// Fields: monochrome (MONOCHROME  Mac B&W dither pattern, matches MacPattern enum),
-//         backColor (BACKCOLOR), fillColor (FILLCOLOR), lineFillColor (LINEFILLCOLOR),
-//         lineColor (LINECOLOR), pattern (PATTERN).
+// DOS lsColor table from ROBOCOLR.C maps color index to rendering attributes.
+// Source column order: MONOCHROME, LINEFILLCOLOR, FILLCOLOR, BACKCOLOR,
+//                      LINECOLOR, PATTERN.
 // DrawPrism uses: polyfill ON → fill with fillColor/backColor/pattern, outline with lineFillColor.
 //                 polyfill OFF → outline only with lineColor.
 // Mac B&W uses: monochrome field for dither pattern (WHITE/LTGRAY/GRAY/DKGRAY/BLACK/CLEAR).
 struct DOSColorEntry {
 	uint8 monochrome;
-	uint8 backColor;
-	uint8 fillColor;
 	uint8 lineFillColor;
+	uint8 fillColor;
+	uint8 backColor;
 	uint8 lineColor;
 	uint8 pattern;
 };
 
 const DOSColorEntry g_dosColors[79] = {
-	//                     MONO BK  FILL LFIL LINE PAT
+	//                     MONO LFIL FILL BK  LINE PAT
 	/* 0  cCLEAR      */ { 5,  0,  0,  0,  0, 1},
 	/* 1  cBLACK      */ { 4,  0,  0,  0,  0, 1},
 	/* 2  cBLUE       */ { 2,  0,  1,  1,  1, 1},
@@ -144,14 +143,14 @@ const DOSColorEntry g_dosColors[79] = {
 
 // Look up the DOS lsColor entry for a given ObjColor index.
 // Returns a fallback entry for out-of-range indices.
-const DOSColorEntry &lookupDOSColor(int colorIdx, int level) {
+DOSColorEntry lookupDOSColor(int colorIdx, int level) {
 	// DOS pcycle for animated reactor/suit: WHITE,LTGRAY,GRAY,DKGRAY,BLACK (bounce)
-	static const DOSColorEntry kHCore1 = {0, 0, 15, 15, 15, 1}; // WHITE
-	static const DOSColorEntry kHCore2 = {1, 8,  8, 15,  8, 3}; // LTGRAY
-	static const DOSColorEntry kHCore3 = {2, 8,  8,  7,  8, 3}; // GRAY
-	static const DOSColorEntry kHCore4 = {3, 0,  8,  8,  8, 1}; // DKGRAY
-	static const DOSColorEntry kCCoreEntry = {0, 0, 15, 15, 15, 1}; // WHITE (cold core)
-	static const DOSColorEntry fallback = {2, 0, 0, 0, 0, 1}; // GRAY monochrome
+	const DOSColorEntry kHCore1 = {0, 0, 15, 15, 15, 1}; // WHITE
+	const DOSColorEntry kHCore2 = {1, 8,  8, 15,  8, 3}; // LTGRAY
+	const DOSColorEntry kHCore3 = {2, 8,  8,  7,  8, 3}; // GRAY
+	const DOSColorEntry kHCore4 = {3, 0,  8,  8,  8, 1}; // DKGRAY
+	const DOSColorEntry kCCoreEntry = {0, 0, 15, 15, 15, 1}; // WHITE (cold core)
+	const DOSColorEntry fallback = {2, 0, 0, 0, 0, 1}; // GRAY monochrome
 
 	if (colorIdx >= 0 && colorIdx < 79)
 		return g_dosColors[colorIdx];
@@ -161,6 +160,7 @@ const DOSColorEntry &lookupDOSColor(int colorIdx, int level) {
 	case kColorHCore3: return kHCore3;
 	case kColorHCore4: return kHCore4;
 	case kColorCCore:  return kCCoreEntry;
+	case kColorMonolith: return g_dosColors[kColorBlack]; // SCREEN.C: cBLACK on DOS
 	case kColorEyeball: return g_dosColors[kColorEye];
 	case kColorEyeIris:
 	case kColorMiniEyeIris:
@@ -178,6 +178,40 @@ const DOSColorEntry &lookupDOSColor(int colorIdx, int level) {
 	case kColorRainbow4: return g_dosColors[5];  // RED
 	default: return fallback;
 	}
+}
+
+// Reproduce the DOS driver's SetFill/FILLPATTERN setup. Patterns 3, 4 and 5
+// are respectively 50%, 25% and 12.5% foreground coverage; pattern 1 is solid.
+void setupDOSFill(Renderer *gfx, uint32 fillColor, uint32 backColor, int pattern) {
+	const byte *stipple = nullptr;
+	switch (pattern) {
+	case 3:
+		stipple = kStippleGray;
+		break;
+	case 4:
+		stipple = kStippleLtGray;
+		break;
+	case 5:
+		stipple = kDOSStipplePattern5;
+		break;
+	default:
+		break;
+	}
+
+	if (stipple) {
+		gfx->setMacColors(fillColor, backColor);
+		gfx->setStippleData(stipple);
+		gfx->setWireframe(true, backColor);
+	} else {
+		gfx->setStippleData(nullptr);
+		gfx->setWireframe(true, fillColor);
+	}
+}
+
+uint32 setupDOSMaterial(Renderer *gfx, int colorIdx, int level) {
+	const DOSColorEntry color = lookupDOSColor(colorIdx, level);
+	setupDOSFill(gfx, color.fillColor, color.backColor, color.pattern);
+	return color.lineFillColor;
 }
 
 // Map ObjColor → Mac B&W dither pattern (from ROBOCOLR.C MONOCHROME field).
@@ -205,6 +239,7 @@ int mapObjColorToMacColor(int colorIdx, int level) {
 	case kColorConsole:   return 79;  // c_console
 	case kColorTV:        return 76;  // c_tv
 	case kColorTVScreen:  return 77;  // c_tvscreen
+	case kColorMonolith:  return 78;  // c_monolith (solid black, fg and bg)
 	case kColorDrawer:    return 96;  // c_vanity
 	case kColorDesk:      return 58;  // c_desk
 	case kColorDeskTop:   return 59;  // c_desktop
@@ -249,7 +284,7 @@ int mapObjColorToMacColor(int colorIdx, int level) {
 	case kColorDroneEye:  return 51;  // c_edrone
 	case kColorSoldierBody: return 52; // c_soldier
 	case kColorSoldierEye: return 53; // c_esoldier
-	case kColorQueenBody: return 43 + CLIP(level - 2, 0, 4); // c_queen1..c_queen5
+	case kColorQueenBody: return 43 + CLIP(level - 2, 0, 5); // c_queen1..c_queenP
 	case kColorQueenEye:  return 49;  // c_equeen
 	case kColorQueenWingRed: return 48; // unused in Mac mode
 	case kColorTopSnoop:  return 56;  // c_snooper1
@@ -287,14 +322,13 @@ void projectCorridorPointClamped(const Common::Rect &screenR, int look, int look
 	const float eyeX = side;
 	const float eyeY = dz * cosPitch + forward * sinPitch;
 	const float eyeZ = dz * sinPitch - forward * cosPitch;
-	const float depth = MAX(-eyeZ, 1.0f);
+	const float depth = MAX(-eyeZ, kProjectionNearClip);
 
-	const float focal = (screenR.height() * 0.5f) / tanf(75.0f * (float)M_PI / 360.0f);
 	const float centerX = screenR.left + screenR.width() * 0.5f;
 	const float centerY = screenR.top + screenR.height() * 0.5f;
 
-	screenX = (int)roundf(centerX + (eyeX * focal / depth));
-	screenY = (int)roundf(centerY - (eyeY * focal / depth));
+	screenX = (int)roundf(centerX + (eyeX * kProjectionFocalLength / depth));
+	screenY = (int)roundf(centerY - (eyeY * kProjectionFocalLength / depth));
 }
 
 bool isSurfaceVisible(const int *surface, int pointCount, const int *screenX, const int *screenY) {
@@ -402,6 +436,30 @@ uint8 ColonyEngine::wallAt(int x, int y) const {
 	return _wall[x][y];
 }
 
+bool ColonyEngine::isVisibleRecessFeature(int x, int y, int direction) const {
+	const uint8 *map = mapFeatureAt(x, y, direction);
+	if (!map)
+		return false;
+	return (map[0] == kWallFeatureUpStairs || map[0] == kWallFeatureDnStairs)
+		&& _visibleCell[x][y] && isWallFeatureFacingCamera(x, y, direction);
+}
+
+// Only remove a wall when drawWallFeatures3D() will replace it with a well.
+// Bit 0x01 spans (x,y-1)/(x,y); bit 0x02 spans (x-1,y)/(x,y).
+bool ColonyEngine::wallSegmentIsOpenWell(int x, int y, uint8 bit) const {
+	if (!isMacColorMode() && _corePower[_coreIndex] == 0)
+		return false;
+
+	if (bit == 0x01)
+		return isVisibleRecessFeature(x, y, kDirSouth) || isVisibleRecessFeature(x, y - 1, kDirNorth);
+	return isVisibleRecessFeature(x, y, kDirWest) || isVisibleRecessFeature(x - 1, y, kDirEast);
+}
+
+bool ColonyEngine::wallSegmentIsRendered(int x, int y, uint8 bit) const {
+	return x >= 0 && x < 32 && y >= 0 && y < 32 &&
+		(_wall[x][y] & bit) && !wallSegmentIsOpenWell(x, y, bit);
+}
+
 const uint8 *ColonyEngine::mapFeatureAt(int x, int y, int direction) const {
 	if (x < 0 || x >= 31 || y < 0 || y >= 31 || direction < 0 || direction >= 5)
 		return nullptr;
@@ -428,15 +486,14 @@ bool projectCorridorPoint(const Common::Rect &screenR, uint8 look, int8 lookY,
 	const float eyeX = side;
 	const float eyeY = dz * cosPitch + forward * sinPitch;
 	const float eyeZ = dz * sinPitch - forward * cosPitch;
-	if (eyeZ >= -1.0f)
+	if (eyeZ >= -kProjectionNearClip)
 		return false;
 
-	const float focal = (screenR.height() * 0.5f) / tanf(75.0f * (float)M_PI / 360.0f);
 	const float centerX = screenR.left + screenR.width() * 0.5f;
 	const float centerY = screenR.top + screenR.height() * 0.5f;
 
-	screenX = (int)roundf(centerX + (eyeX * focal / -eyeZ));
-	screenY = (int)roundf(centerY - (eyeY * focal / -eyeZ));
+	screenX = (int)roundf(centerX + (eyeX * kProjectionFocalLength / -eyeZ));
+	screenY = (int)roundf(centerY - (eyeY * kProjectionFocalLength / -eyeZ));
 	return true;
 }
 
@@ -465,14 +522,14 @@ void ColonyEngine::draw3DPrism(Thing &obj, const PrismPartDef &def, bool useLook
 		transformedX[i] = (float)(rx + obj.where.xloc);
 		transformedY[i] = (float)(ry + obj.where.yloc);
 		transformedZ[i] = (float)(oz - 160);
-		projectCorridorPointClamped(_screenR, _me.look, _me.lookY, _sint, _cost, _me.xloc, _me.yloc,
+		projectCorridorPointClamped(_screenR, _me.look, _me.lookY, _sint, _cost, _renderCamera.x, _renderCamera.y,
 			transformedX[i], transformedY[i], transformedZ[i],
 			projectedX[i], projectedY[i]);
 
 		if (accumulateBounds) {
 			int sx = 0;
 			int sy = 0;
-			if (projectCorridorPoint(_screenR, _me.look, _me.lookY, _sint, _cost, _me.xloc, _me.yloc,
+			if (projectCorridorPoint(_screenR, _me.look, _me.lookY, _sint, _cost, _renderCamera.x, _renderCamera.y,
 				transformedX[i], transformedY[i], transformedZ[i], sx, sy)) {
 				obj.where.xmn = MIN(obj.where.xmn, sx);
 				obj.where.xmx = MAX(obj.where.xmx, sx);
@@ -596,17 +653,14 @@ void ColonyEngine::draw3DPrism(Thing &obj, const PrismPartDef &def, bool useLook
 					_gfx->draw3DPolygon(px, py, pz, count, 0); // black outline
 					_gfx->setStippleData(nullptr);
 				} else {
-					// EGA: per-surface colors from DOS lsColor table.
-					// polyfill ON  → B&W fill (from MONOCHROME field), colored LINECOLOR outline.
+					// EGA: per-surface materials from the DOS lsColor table.
+					// polyfill ON  → FILLCOLOR/BACKCOLOR/PATTERN fill, LINEFILLCOLOR outline.
 					// polyfill OFF → outline only with LINECOLOR.
-					const DOSColorEntry &dc = lookupDOSColor(colorIdx, _level);
+					const DOSColorEntry dc = lookupDOSColor(colorIdx, _level);
 					if (!_wireframe) {
-						// Polyfill mode: B&W fill + colored LINECOLOR outline.
-						// LINECOLOR (not LINEFILLCOLOR)  has proper contrast against B&W fills.
-						if (dc.monochrome == kPatternClear)
-							continue;
-						_gfx->setWireframe(true, 7); // all surfaces white; colored outlines provide distinction
-						_gfx->draw3DPolygon(px, py, pz, count, (uint32)dc.lineColor);
+						const uint32 outlineColor = setupDOSMaterial(_gfx, colorIdx, _level);
+						_gfx->draw3DPolygon(px, py, pz, count, outlineColor);
+						_gfx->setStippleData(nullptr);
 					} else {
 						// Wireframe only: LINECOLOR outline, no fill.
 						_gfx->draw3DPolygon(px, py, pz, count, (uint32)dc.lineColor);
@@ -667,9 +721,26 @@ void ColonyEngine::draw3DLeaf(const Thing &obj, const PrismPartDef &def) {
 	}
 }
 
+// Each vertex stays on its own view ray, so only the depth test moves.
+void ColonyEngine::pullTowardCamera(float *px, float *py, float *pz, int count) const {
+	if (_eyeDepthPull <= 0.0f)
+		return;
+	for (int i = 0; i < count; i++) {
+		const float dx = px[i] - (float)_renderCamera.x;
+		const float dy = py[i] - (float)_renderCamera.y;
+		const float d = sqrtf(dx * dx + dy * dy + pz[i] * pz[i]);
+		if (d <= _eyeDepthPull)
+			continue;
+		const float k = (d - _eyeDepthPull) / d;
+		px[i] = (float)_renderCamera.x + dx * k;
+		py[i] = (float)_renderCamera.y + dy * k;
+		pz[i] *= k;
+	}
+}
+
 void ColonyEngine::draw3DSphere(Thing &obj, int pt0x, int pt0y, int pt0z,
 	int pt1x, int pt1y, int pt1z,
-	uint32 fillColor, uint32 outlineColor, bool accumulateBounds) {
+	uint32 fillColor, uint32 outlineColor, bool accumulateBounds, bool dosFill) {
 	// Original Colony eye/ball primitives store the bottom pole in pt0 and the
 	// sphere center in pt1. The classic renderer builds the oval from the
 	// screen-space delta between those two projected points, so the world-space
@@ -700,19 +771,36 @@ void ColonyEngine::draw3DSphere(Thing &obj, int pt0x, int pt0y, int pt0z,
 	float dx = wx1 - wx0, dy = wy1 - wy0, dz = wz1 - wz0;
 	float radius = sqrtf(dx * dx + dy * dy + dz * dz);
 
-	// Billboard: create a polygon perpendicular to the camera direction.
-	// Camera is at (_me.xloc, _me.yloc, 0).
-	float viewDx = cx - (float)_me.xloc;
-	float viewDy = cy - (float)_me.yloc;
-	float viewLen = sqrtf(viewDx * viewDx + viewDy * viewDy);
+	// Billboard turned to face the camera in 3D. The original drew the ball as a
+	// screen-space oval and never tilted the view; keeping the disc upright in
+	// world Z instead flattens it to a sliver when looking down at a floor egg.
+	// Camera is at (_renderCamera.x, _renderCamera.y, 0).
+	float viewX = cx - (float)_renderCamera.x;
+	float viewY = cy - (float)_renderCamera.y;
+	float viewZ = cz;
+	float viewLen = sqrtf(viewX * viewX + viewY * viewY + viewZ * viewZ);
 	if (viewLen < 0.001f)
 		return;
+	viewX /= viewLen;
+	viewY /= viewLen;
+	viewZ /= viewLen;
 
-	// "right" vector: perpendicular to view in XY plane
-	float rightX = -viewDy / viewLen;
-	float rightY = viewDx / viewLen;
-	// "up" vector: world Z axis
-	float upZ = 1.0f;
+	// right = worldUp x view, collapsing to +X when looking straight down.
+	float rightX = -viewY;
+	float rightY = viewX;
+	float rightLen = sqrtf(rightX * rightX + rightY * rightY);
+	if (rightLen < 0.001f) {
+		rightX = 1.0f;
+		rightY = 0.0f;
+		rightLen = 1.0f;
+	}
+	rightX /= rightLen;
+	rightY /= rightLen;
+
+	// up = view x right; right has no Z component, so two terms drop out.
+	const float upX = -viewZ * rightY;
+	const float upY = viewZ * rightX;
+	const float upZ = viewX * rightY - viewY * rightX;
 
 	// Create 12-sided polygon
 	const int N = 12;
@@ -721,8 +809,8 @@ void ColonyEngine::draw3DSphere(Thing &obj, int pt0x, int pt0y, int pt0z,
 		float a = (float)i * 2.0f * (float)M_PI / (float)N;
 		float cosA = cosf(a);
 		float sinA = sinf(a);
-		px[i] = cx + radius * (cosA * rightX);
-		py[i] = cy + radius * (cosA * rightY);
+		px[i] = cx + radius * (cosA * rightX + sinA * upX);
+		py[i] = cy + radius * (cosA * rightY + sinA * upY);
 		pz[i] = cz + radius * (sinA * upZ);
 	}
 
@@ -730,7 +818,7 @@ void ColonyEngine::draw3DSphere(Thing &obj, int pt0x, int pt0y, int pt0z,
 		for (int i = 0; i < N; i++) {
 			int sx = 0;
 			int sy = 0;
-			if (projectCorridorPoint(_screenR, _me.look, _me.lookY, _sint, _cost, _me.xloc, _me.yloc,
+			if (projectCorridorPoint(_screenR, _me.look, _me.lookY, _sint, _cost, _renderCamera.x, _renderCamera.y,
 				px[i], py[i], pz[i], sx, sy)) {
 				obj.where.xmn = MIN(obj.where.xmn, sx);
 				obj.where.xmx = MAX(obj.where.xmx, sx);
@@ -739,6 +827,8 @@ void ColonyEngine::draw3DSphere(Thing &obj, int pt0x, int pt0y, int pt0z,
 			}
 		}
 	}
+
+	pullTowardCamera(px, py, pz, N);
 
 	if (isMacColorMode()) {
 		// Mac color: map fillColor to Mac color index and use RGB
@@ -759,25 +849,30 @@ void ColonyEngine::draw3DSphere(Thing &obj, int pt0x, int pt0y, int pt0z,
 		_gfx->draw3DPolygon(px, py, pz, N, line);
 		if (stipple)
 			_gfx->setStippleData(nullptr);
-	} else if (lit) {
-		if (isMacRenderMode()) {
-			int pattern = lookupMacPattern((int)fillColor, _level);
-			if (pattern == kPatternClear)
-				pattern = kPatternGray;
-			if (!_wireframe) {
-				_gfx->setWireframe(true, pattern == kPatternBlack ? 0 : 255);
-			}
-			_gfx->setStippleData(kMacStippleData[pattern]);
-			_gfx->draw3DPolygon(px, py, pz, N, lookupDOSColor((int)outlineColor, _level).lineColor);
+	} else if (!isMacRenderMode()) {
+		// DOS eye ovals are independent of the polygon-fill toggle. FillOval()
+		// uses the selected material while FrameOval() uses the caller's pen.
+		const DOSColorEntry fill = lookupDOSColor((int)fillColor, _level);
+		const DOSColorEntry outline = lookupDOSColor((int)outlineColor, _level);
+		if (dosFill)
+			setupDOSFill(_gfx, fill.fillColor, fill.backColor, fill.pattern);
+		else {
 			_gfx->setStippleData(nullptr);
-		} else {
-			const DOSColorEntry &fill = lookupDOSColor((int)fillColor, _level);
-			const DOSColorEntry &outline = lookupDOSColor((int)outlineColor, _level);
-			if (!_wireframe) {
-				_gfx->setWireframe(true, fill.fillColor);
-			}
-			_gfx->draw3DPolygon(px, py, pz, N, outline.lineColor);
+			_gfx->setWireframe(true);
 		}
+		_gfx->draw3DPolygon(px, py, pz, N, outline.lineColor);
+		_gfx->setStippleData(nullptr);
+		if (_wireframe)
+			_gfx->setWireframe(true);
+	} else if (lit) {
+		int pattern = lookupMacPattern((int)fillColor, _level);
+		if (pattern == kPatternClear)
+			pattern = kPatternGray;
+		if (!_wireframe)
+			_gfx->setWireframe(true, pattern == kPatternBlack ? 0 : 255);
+		_gfx->setStippleData(kMacStippleData[pattern]);
+		_gfx->draw3DPolygon(px, py, pz, N, lookupDOSColor((int)outlineColor, _level).lineColor);
+		_gfx->setStippleData(nullptr);
 	} else {
 		// Unlit: black fill, white outline.
 		if (!_wireframe) {
@@ -868,8 +963,61 @@ void ColonyEngine::computeVisibleCells() {
 	}
 }
 
+void ColonyEngine::separateRenderCameraFromWall(int x, int y, uint8 bit, int separation, bool featuresVisible) {
+	if (!wallSegmentIsRendered(x, y, bit))
+		return;
+
+	const bool horizontal = (bit == 0x01);
+	const int along = horizontal ? _me.xloc : _me.yloc;
+	const int start = (horizontal ? x : y) * 256;
+	if (along < start - separation || along > start + 256 + separation)
+		return;
+
+	const bool positiveSide = horizontal ? _me.yindex >= y : _me.xindex >= x;
+	float wall = (horizontal ? y : x) * 256.0f;
+	const int cellX = horizontal || positiveSide ? x : x - 1;
+	const int cellY = !horizontal || positiveSide ? y : y - 1;
+	const int direction = horizontal ? (positiveSide ? kDirSouth : kDirNorth)
+		: (positiveSide ? kDirWest : kDirEast);
+	const uint8 *feature = mapFeatureAt(cellX, cellY, direction);
+	if (featuresVisible && feature && feature[0] != kWallFeatureNone && _visibleCell[cellX][cellY]) {
+		float corners[4][3];
+		getWallFace3D(cellX, cellY, direction, corners);
+		wall = corners[0][horizontal ? 1 : 0];
+	}
+
+	int camera = horizontal ? _renderCamera.y : _renderCamera.x;
+	camera = positiveSide ? MAX(camera, (int)ceilf(wall + separation))
+		: MIN(camera, (int)floorf(wall - separation));
+	if (horizontal)
+		_renderCamera.y = camera;
+	else
+		_renderCamera.x = camera;
+}
+
+void ColonyEngine::computeRenderCamera() {
+	_renderCamera = Common::Point(_me.xloc, _me.yloc);
+
+	// Enclose the near-plane corners for every view angle, including pitch.
+	const float halfWidth = kProjectionNearClip * _screenR.width() * 0.5f / kProjectionFocalLength;
+	const float halfHeight = kProjectionNearClip * _screenR.height() * 0.5f / kProjectionFocalLength;
+	const int separation = (int)ceilf(sqrtf(kProjectionNearClip * kProjectionNearClip +
+		halfWidth * halfWidth + halfHeight * halfHeight));
+	const bool featuresVisible = isMacColorMode() || _corePower[_coreIndex] > 0;
+
+	// Like Freescape, separate only the rendering camera. Touching a wall must
+	// still reach the door, stair and other interaction triggers.
+	for (int y = 0; y < 32; y++) {
+		for (int x = 0; x < 32; x++) {
+			separateRenderCameraFromWall(x, y, 0x01, separation, featuresVisible);
+			separateRenderCameraFromWall(x, y, 0x02, separation, featuresVisible);
+		}
+	}
+}
+
 void ColonyEngine::renderCorridor3D() {
 	computeVisibleCells();
+	computeRenderCamera();
 
 	bool lit = (_corePower[_coreIndex] > 0);
 	bool macMode = isMacRenderMode();
@@ -892,15 +1040,15 @@ void ColonyEngine::renderCorridor3D() {
 			ceilColor = wallFill;
 		}
 	} else {
-		// IBM_DISP.C: lit → BackColor(vWHITE)=15, color_wall=vwall_Light=0 (black lines on white bg)
+		// IBM_DISP.C: lit → BackColor(vWHITE)=7, color_wall=vwall_Light=0 (black lines on white bg)
 		//             dark → BackColor(vBLACK)=0, color_wall=vINTWHITE=15 (white lines on black bg)
-		wallFill = lit ? (macMode ? 255 : 15) : 0;
+		wallFill = lit ? (macMode ? 255 : 7) : 0;
 		wallLine = lit ? 0 : (macMode ? 255 : 15);
 		floorColor = macMode ? (lit ? 255 : 0) : wallFill;
 		ceilColor  = macMode ? (lit ? 255 : 0) : wallFill;
 	}
 
-	_gfx->begin3D(_me.xloc, _me.yloc, 0, _me.look, _me.lookY, _screenR);
+	_gfx->begin3D(_renderCamera.x, _renderCamera.y, 0, _me.look, _me.lookY, _screenR);
 	_gfx->clear(ceilColor);
 
 	uint32 wallColor = wallLine;
@@ -947,11 +1095,11 @@ void ColonyEngine::renderCorridor3D() {
 
 	for (int y = 0; y < 32; y++) {
 		for (int x = 0; x < 32; x++) {
-			uint8 w = _wall[x][y];
-			if (w & 0x01) {
+			// A stair well is a hole: the feature draws the opening itself.
+			if (wallSegmentIsRendered(x, y, 0x01)) {
 				_gfx->draw3DWall(x, y, x + 1, y, wallColor);
 			}
-			if (w & 0x02) {
+			if (wallSegmentIsRendered(x, y, 0x02)) {
 				_gfx->draw3DWall(x, y, x, y + 1, wallColor);
 			}
 		}
@@ -967,9 +1115,9 @@ void ColonyEngine::renderCorridor3D() {
 	// Full depth range  objects beat walls and features at the same distance.
 	_gfx->setDepthRange(0.0f, 1.0f);
 
-	// F7 toggles object fill.
-	// EGA: default is filled (wall background); F7 = outline-only (see-through).
-	// Mac: default is per-surface fill; F7 = "Fast mode" (outline-only).
+	// F8 toggles object fill.
+	// EGA: default is filled (wall background); F8 = outline-only (see-through).
+	// Mac: default is per-surface fill; F8 = "Fast mode" (outline-only).
 	if (_wireframe) {
 		_gfx->setWireframe(true); // No fill = outline-only objects
 	}

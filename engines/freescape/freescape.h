@@ -39,7 +39,7 @@
 #include "freescape/area.h"
 #include "freescape/font.h"
 #include "freescape/gfx.h"
-#include "freescape/language/8bitDetokeniser.h"
+#include "freescape/language/variables.h"
 #include "freescape/objects/entrance.h"
 #include "freescape/objects/geometricobject.h"
 #include "freescape/objects/sensor.h"
@@ -341,6 +341,7 @@ public:
 
 	void parseAmigaAtariHeader(Common::SeekableReadStream *file);
 	Common::SeekableReadStream *decryptFileAmigaAtari(const Common::Path &packed, const Common::Path &unpacker, uint32 unpackArrayOffset);
+	Common::SeekableReadStream *decryptFileAmigaAtari(const Common::Path &packed, Common::SeekableReadStream *unpacker, uint32 unpackArrayOffset);
 	Common::SeekableReadStream *decryptFileAtariVirtualWorlds(const Common::Path &filename);
 
 	// Areas
@@ -393,6 +394,7 @@ public:
 	virtual void initKeymaps(Common::Keymap *engineKeyMap, Common::Keymap *infoScreenKeyMap, const char *target);
 	EventManagerWrapper *_eventManager;
 	void processInput();
+	virtual bool handleInput(const Common::Event &event) { return false; }
 	void resetInput();
 	void stopMovement();
 	void generateDemoInput();
@@ -400,10 +402,11 @@ public:
 	virtual void releasedKey(const int keycode);
 	Common::Point getNormalizedPosition(Common::Point position);
 	virtual bool onScreenControls(Common::Point mouse);
-	void updatePlayerMovement(float deltaTime);
+	virtual void updatePlayerMovement(float deltaTime);
 	void updatePlayerMovementSmooth(float deltaTime);
 	void updatePlayerMovementClassic(float deltaTime);
 	void resolveCollisions(Math::Vector3d newPosition);
+	virtual Math::Vector3d clipPosition(const Math::Vector3d &position) const { return position; }
 	virtual void checkIfStillInArea();
 	void changePlayerHeight(int index);
 	void increaseStepSize();
@@ -476,21 +479,21 @@ public:
 	Math::Vector3d _objExecutingCodeSize;
 	bool _executingGlobalCode;
 	virtual void executeMovementConditions();
-	bool executeObjectConditions(GeometricObject *obj, bool shot, bool collided, bool activated);
+	virtual bool executeObjectConditions(GeometricObject *obj, bool shot, bool collided, bool activated);
 	void executeEntranceConditions(Entrance *entrance);
-	void executeLocalGlobalConditions(bool shot, bool collided, bool timer);
+	virtual void executeLocalGlobalConditions(bool shot, bool collided, bool timer);
+	virtual void updateScripts() {}
 	bool executeCode(FCLInstructionVector &code, bool shot, bool collided, bool timer, bool activated);
 
 	// Instructions
-	bool checkConditional(FCLInstruction &instruction, bool shot, bool collided, bool timer, bool activated);
+	bool checkConditional(const FCLInstruction &instruction, bool shot, bool collided, bool timer, bool activated);
 	bool checkIfGreaterOrEqual(FCLInstruction &instruction);
 	bool checkIfLessOrEqual(FCLInstruction &instruction);
-	void executeExecute(FCLInstruction &instruction);
+	void executeCall(FCLInstruction &instruction);
 	void executeIncrementVariable(FCLInstruction &instruction);
 	void executeDecrementVariable(FCLInstruction &instruction);
 	void executeSetVariable(FCLInstruction &instruction);
 	void executeGoto(FCLInstruction &instruction);
-	void executeIfThenElse(FCLInstruction &instruction);
 	virtual void executeMakeInvisible(FCLInstruction &instruction);
 	void executeMakeVisible(FCLInstruction &instruction);
 	void executeToggleVisibility(FCLInstruction &instruction);
@@ -520,7 +523,7 @@ public:
 	void waitForSounds(Sound::Type type = Sound::kTypeNormal);
 	void stopAllSounds(Sound::Type type = Sound::kTypeNormal);
 	bool isPlayingSound(Sound::Type type = Sound::kTypeNormal);
-	void playSound(int index, bool sync, Sound::Type type = Sound::kTypeNormal);
+	virtual void playSound(int index, bool sync, Sound::Type type = Sound::kTypeNormal);
 	void playWav(const Common::Path &filename);
 	void playMusic(const Common::Path &filename);
 
@@ -531,7 +534,10 @@ public:
 	Sound *loadSpeakerFxZX(Common::SeekableReadStream *file, int sfxTable, int sfxData, int numberSounds);
 	Sound *loadSpeakerFxDrillerZX();
 	Sound *loadSoundsCPC(Common::SeekableReadStream *file, int offsetTone, int sizeTone, int offsetEnvelope, int sizeEnvelope, int offsetSoundDef, int sizeSoundDef);
-	Sound *loadSoundsAmigaDemo(Common::SeekableReadStream *file, int offset, int numSounds, int modOffset);
+	// sampleBank names the external PCM bank, modOffset points at the embedded
+	// module used for one extra sample; both are optional (empty path, -1)
+	Sound *loadSoundsAmiga(Common::SeekableReadStream *file, int offset, int numSounds, const Common::Path &sampleBank, int modOffset);
+	Sound *loadSoundsAtariCastle(Common::SeekableReadStream *file, int offset, int numSounds, int bankOffset);
 
 	int _soundIndexShoot;
 	int _soundIndexCollide;
@@ -571,6 +577,8 @@ public:
 	void flashScreen(int backgroundColor);
 	uint8 _colorNumber;
 	Math::Vector3d _scaleVector;
+	float _fieldOfView;
+	float _viewAspectRatio;
 	float _nearClipPlane;
 	float _farClipPlane;
 
@@ -674,7 +682,8 @@ public:
 	Common::RandomSource *_rnd;
 
 	// C64 specifics
-	byte *decompressC64RLE(byte *buffer, int *size, byte marker);
+	Common::Array<byte> unpackC64Snapshot(const Common::Array<byte> &packed);
+	Common::Array<byte> unpackC64Snapshot(Common::SeekableReadStream *file, const Common::Path &continuation);
 	byte *_extraBuffer;
 };
 
@@ -692,6 +701,7 @@ enum GameReleaseFlags {
 	GF_ATARI_BUDGET = (1 << 10),
 	GF_C64_TAPE = (1 << 11),
 	GF_C64_DISC = (1 << 12),
+	GF_C64_PACKED = (1 << 13),
 };
 
 extern FreescapeEngine *g_freescape;
