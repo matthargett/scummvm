@@ -22,6 +22,7 @@
 #ifndef PLATFORM_PLAYDATE_PICKER_H
 #define PLATFORM_PLAYDATE_PICKER_H
 
+#include "common/array.h"
 #include "common/scummsys.h"
 #include "common/str.h"
 #include "common/str-array.h"
@@ -55,6 +56,9 @@ public:
 /** Registers the active source; nullptr removes it. */
 void setPickerSource(PickerSource *source);
 
+/** Whether a word or phrase is one the list never shows. */
+bool isProfanity(const Common::String &text);
+
 /** The list UI. Used by the Playdate graphics manager and event source only. */
 class WordPicker {
 public:
@@ -85,7 +89,9 @@ private:
 	PickerSource *_source;
 	uint _revision;
 	uint _list;
+	uint _sourceSize;
 	Common::StringArray _words;
+	Common::Array<uint> _indices; // the source's index of each entry shown
 	int _selected;
 	int _scroll;
 	bool _accepting;

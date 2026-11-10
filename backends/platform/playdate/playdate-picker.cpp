@@ -21,6 +21,7 @@
 
 #include "backends/platform/playdate/playdate-picker.h"
 
+#include "common/tokenizer.h"
 #include "common/util.h"
 #include "graphics/fonts/dosfont.h"
 
@@ -30,6 +31,41 @@ static const int kLineHeight = 10;
 static const int kGlyphSize = 8;
 static const int kTextMargin = 3;
 static const uint32 kMarqueeStepMs = 350;
+
+// The games' vocabularies include these; they are kept out of a list that
+// is on screen all the time.
+bool isProfanity(const Common::String &text) {
+	static const char *const kAnywhere[] = { "fuck", "shit" };
+	static const char *const kWords[] = {
+		"ass", "asshole", "bitch", "cock", "cocksucker", "cunt", "dick",
+		"dickhead", "fag", "faggot", "piss", "pussy", "slut", "tits", "whore",
+		"whores"
+	};
+	static const char *const kPhrases[] = { "blow job", "blow me", "jerk off", "suck me" };
+
+	Common::String lower(text);
+	lower.toLowercase();
+	lower.trim();
+
+	for (uint i = 0; i < ARRAYSIZE(kAnywhere); i++) {
+		if (lower.contains(kAnywhere[i]))
+			return true;
+	}
+	for (uint i = 0; i < ARRAYSIZE(kPhrases); i++) {
+		if (lower.contains(kPhrases[i]))
+			return true;
+	}
+
+	Common::StringTokenizer tokenizer(lower, " ");
+	while (!tokenizer.empty()) {
+		const Common::String word = tokenizer.nextToken();
+		for (uint i = 0; i < ARRAYSIZE(kWords); i++) {
+			if (word == kWords[i])
+				return true;
+		}
+	}
+	return false;
+}
 
 void setPickerSource(PickerSource *source) {
 	WordPicker::instance().setSource(source);
@@ -45,13 +81,15 @@ WordPicker &WordPicker::instance() {
 }
 
 WordPicker::WordPicker()
-	: _source(nullptr), _revision(0), _list(0), _selected(0), _scroll(0), _accepting(false),
+	: _source(nullptr), _revision(0), _list(0), _sourceSize(0), _selected(0), _scroll(0), _accepting(false),
 	  _dirty(true), _marqueeStart(0), _marqueeDir(1), _marqueeNextMs(0) {
 }
 
 void WordPicker::setSource(PickerSource *source) {
 	_source = source;
 	_words.clear();
+	_indices.clear();
+	_sourceSize = ~0u; // adopt the new source's list whatever its revision
 	_selected = _scroll = 0;
 	_dirty = true;
 	if (_source)
@@ -72,7 +110,7 @@ bool WordPicker::acceptsInput() {
 void WordPicker::sync(bool keepLabel) {
 	const Common::StringArray &words = _source->pickerWords();
 	const uint revision = _source->pickerRevision();
-	if (revision == _revision && words.size() == _words.size())
+	if (revision == _revision && words.size() == _sourceSize)
 		return;
 
 	const uint list = _source->pickerList();
@@ -82,7 +120,15 @@ void WordPicker::sync(bool keepLabel) {
 
 	_revision = revision;
 	_list = list;
-	_words = words;
+	_sourceSize = words.size();
+	_words.clear();
+	_indices.clear();
+	for (uint i = 0; i < words.size(); i++) {
+		if (isProfanity(words[i]))
+			continue;
+		_words.push_back(words[i]);
+		_indices.push_back(i);
+	}
 	_selected = 0;
 	_scroll = 0;
 	if (!previous.empty()) {
@@ -122,7 +168,7 @@ bool WordPicker::select(Common::String &typed) {
 	if (_words.empty())
 		return false;
 
-	typed = _source->pickerSelect(_selected);
+	typed = _source->pickerSelect(_indices[_selected]);
 	sync(false);
 	return true;
 }
