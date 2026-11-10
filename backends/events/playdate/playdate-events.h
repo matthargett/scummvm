@@ -24,6 +24,7 @@
 
 #include "common/events.h"
 #include "common/queue.h"
+#include "common/str.h"
 
 typedef struct PlaydateAPI PlaydateAPI;
 
@@ -42,9 +43,9 @@ class OSystem_Playdate;
  * in game by holding B): the d-pad moves the mouse cursor with
  * acceleration, A generates left clicks and B generates right clicks.
  *
- * The crank always generates mouse wheel events. In AGI parser games
- * the engine opens a word list dialog on wheel input, so cranking is
- * the way to compose commands without a keyboard.
+ * While the word picker takes input, the crank scrolls it, A types the
+ * highlighted entry as key presses and B steps back. Otherwise the crank
+ * generates mouse wheel events.
  */
 class PlaydateEventSource : public Common::EventSource {
 public:
@@ -58,6 +59,7 @@ private:
 	void queueMouseButton(Common::EventType type);
 	void updatePointer(uint32 buttons, uint32 pushed);
 	void handleCrank();
+	void typePending();
 	bool pointerModeActive() const;
 	Common::Point clampMouse(int x, int y) const;
 
@@ -88,6 +90,12 @@ private:
 	// instantaneous state across every poll rather than from getButtonState's
 	// per-frame pushed/released (which repeat on every call within a frame).
 	uint32 _prevButtons;
+
+	// Word picker choice still to be typed, and whether the picker took the
+	// current A press (so its release is not sent as a stray key-up)
+	Common::String _typeQueue;
+	bool _buttonAConsumed;
+	uint32 _typeLastMs;
 };
 
 #endif

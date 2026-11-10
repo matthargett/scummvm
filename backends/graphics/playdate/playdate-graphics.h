@@ -38,9 +38,9 @@ typedef struct PlaydateAPI PlaydateAPI;
  * art; the overlay uses 8x8 ordered (Bayer) dithering, which is stable across
  * frames so moving GUI elements do not shimmer.
  *
- * A game screen that fits the LCD is shown 1:1 at the top left (AGI draws
- * its own 400x240 layout); one that does not is sampled every other pixel
- * and centered (ADL's 560x384 Apple II surface becomes 280x192).
+ * A game screen that fits the LCD is shown 1:1; one that does not is shown
+ * at half size (ADL's 560x384 Apple II surface becomes 280x192). It is
+ * centered, or left-aligned while the crank word picker is shown beside it.
  */
 class PlaydateGraphicsManager final : public GraphicsManager {
 public:
@@ -106,8 +106,10 @@ private:
 	void renderCursor(uint8 *frame) const;
 	void updatePaletteLuminance(uint start, uint num);
 
-	// Placement of the game screen on the LCD (see renderGameScreen).
+	// Placement of the game screen on the LCD
 	int displayStep() const;
+	int displayWidth() const;
+	int displayHeight() const;
 	int displayBaseX() const;
 	int displayBaseY() const;
 	int frameRowForGameRow(int y) const;
@@ -151,6 +153,7 @@ private:
 	// (first frame, mode change, shake, cursor).
 	int _dirtyTop, _dirtyBottom;
 	bool _forceFullRefresh;
+	bool _pickerShown; // the word picker was drawn beside the game last frame
 	void markDirtyRows(int top, int bottom);
 
 	bool _inTransaction;

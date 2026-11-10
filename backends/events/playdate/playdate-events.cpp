@@ -23,6 +23,7 @@
 
 #include "backends/graphics/playdate/playdate-graphics.h"
 #include "backends/platform/playdate/osystem_playdate.h"
+#include "backends/platform/playdate/playdate-picker.h"
 
 #include "backends/platform/playdate/playdate-sdk.h"
 
@@ -42,6 +43,10 @@ static const float kMouseAccel = 0.25f;
 // queue each frame instead of spinning on a stream of MOUSEMOVE events.
 static const uint32 kPointerMoveIntervalMs = 16;
 
+// Interval between the key presses that type out a word picker choice. Slow
+// enough for an engine that takes one key per game cycle to keep up.
+static const uint32 kTypeIntervalMs = 40;
+
 PlaydateEventSource::PlaydateEventSource(OSystem_Playdate *system)
 	: _system(system),
 	  _pd(system->getPlaydateAPI()),
@@ -55,7 +60,9 @@ PlaydateEventSource::PlaydateEventSource(OSystem_Playdate *system)
 	  _buttonBLongPressFired(false),
 	  _crankAccum(0.0f),
 	  _prevCrankAngle(0.0f),
-	  _prevButtons(0) {
+	  _prevButtons(0),
+	  _buttonAConsumed(false),
+	  _typeLastMs(0) {
 }
 
 bool PlaydateEventSource::pollEvent(Common::Event &event) {
@@ -65,6 +72,8 @@ bool PlaydateEventSource::pollEvent(Common::Event &event) {
 		event = _queue.pop();
 		return true;
 	}
+
+	typePending();
 
 	PDButtons current, pushed, released;
 	_pd->system->getButtonState(&current, &pushed, &released);
@@ -109,10 +118,21 @@ bool PlaydateEventSource::pollEvent(Common::Event &event) {
 				queueKey(dpadMap[i].keycode, 0, false);
 		}
 
-		if (pushed_ & kButtonA)
-			queueKey(Common::KEYCODE_RETURN, Common::ASCII_RETURN, true);
-		if (released_ & kButtonA)
-			queueKey(Common::KEYCODE_RETURN, Common::ASCII_RETURN, false);
+		// A picks the highlighted word picker entry; without a picker it is Return
+		if (pushed_ & kButtonA) {
+			Common::String typed;
+			Playdate::WordPicker &picker = Playdate::WordPicker::instance();
+			_buttonAConsumed = picker.acceptsInput() && picker.select(typed);
+			if (_buttonAConsumed)
+				_typeQueue += typed;
+			else
+				queueKey(Common::KEYCODE_RETURN, Common::ASCII_RETURN, true);
+		}
+		if (released_ & kButtonA) {
+			if (!_buttonAConsumed)
+				queueKey(Common::KEYCODE_RETURN, Common::ASCII_RETURN, false);
+			_buttonAConsumed = false;
+		}
 	}
 
 	// B button: short press acts, long press toggles pointer mode
@@ -133,7 +153,9 @@ bool PlaydateEventSource::pollEvent(Common::Event &event) {
 				queueMouseButton(Common::EVENT_RBUTTONDOWN);
 				queueMouseButton(Common::EVENT_RBUTTONUP);
 			} else {
-				queueKeyPress(Common::KEYCODE_ESCAPE, Common::ASCII_ESCAPE);
+				Playdate::WordPicker &picker = Playdate::WordPicker::instance();
+				if (!(picker.acceptsInput() && picker.back()))
+					queueKeyPress(Common::KEYCODE_ESCAPE, Common::ASCII_ESCAPE);
 			}
 		}
 		_buttonBHeld = false;
@@ -241,6 +263,20 @@ void PlaydateEventSource::handleCrank() {
 		delta += 360.0f;
 	_crankAccum += delta;
 
+	// The crank scrolls the word picker while it takes input
+	Playdate::WordPicker &picker = Playdate::WordPicker::instance();
+	if (picker.acceptsInput() && !pointerModeActive()) {
+		while (_crankAccum >= kCrankDegreesPerNotch) {
+			_crankAccum -= kCrankDegreesPerNotch;
+			picker.move(1);
+		}
+		while (_crankAccum <= -kCrankDegreesPerNotch) {
+			_crankAccum += kCrankDegreesPerNotch;
+			picker.move(-1);
+		}
+		return;
+	}
+
 	while (_crankAccum >= kCrankDegreesPerNotch) {
 		_crankAccum -= kCrankDegreesPerNotch;
 		Common::Event event;
@@ -255,6 +291,26 @@ void PlaydateEventSource::handleCrank() {
 		event.mouse = Common::Point(_mouseX, _mouseY);
 		_queue.push(event);
 	}
+}
+
+// Types the next character of a word picker choice as a key press
+void PlaydateEventSource::typePending() {
+	if (_typeQueue.empty())
+		return;
+
+	const uint32 now = _system->getMillis();
+	if (now - _typeLastMs < kTypeIntervalMs)
+		return;
+	_typeLastMs = now;
+
+	const char c = _typeQueue[0];
+	_typeQueue.deleteChar(0);
+	if (c == '\r')
+		queueKeyPress(Common::KEYCODE_RETURN, Common::ASCII_RETURN);
+	else if (c == '\b')
+		queueKeyPress(Common::KEYCODE_BACKSPACE, Common::ASCII_BACKSPACE);
+	else
+		queueKeyPress((Common::KeyCode)tolower(c), (byte)c);
 }
 
 void PlaydateEventSource::queueKey(Common::KeyCode keycode, uint16 ascii, bool down) {

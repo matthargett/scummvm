@@ -26,6 +26,7 @@
 #include "graphics/surface.h"
 
 #include "backends/platform/playdate/playdate-coroutine.h"
+#include "backends/platform/playdate/playdate-picker.h"
 #include "backends/platform/playdate/playdate-sdk.h"
 
 // 8x8 Bayer matrix, scaled to thresholds in 0..255
@@ -57,6 +58,7 @@ PlaydateGraphicsManager::PlaydateGraphicsManager(PlaydateAPI *pd)
 	  _pointerMode(false),
 	  _shakeOffsetX(0), _shakeOffsetY(0),
 	  _dirtyTop(LCD_ROWS), _dirtyBottom(-1), _forceFullRefresh(true),
+	  _pickerShown(false),
 	  _inTransaction(false) {
 	memset(_palette, 0, sizeof(_palette));
 	memset(_paletteLum, 0, sizeof(_paletteLum));
@@ -166,22 +168,28 @@ void PlaydateGraphicsManager::copyRectToScreen(const void *buf, int pitch, int x
 	markDirtyRows(frameRowForGameRow(y), frameRowForGameRow(y + h - 1));
 }
 
-// How the game screen lands on the LCD: 1:1 at the top left for screens that
-// fit (AGI's 400x240), or sampled every other pixel and centered for screens
-// that don't (ADL's 560x384 Apple II surface becomes 280x192, which is the
-// Apple II's real resolution).
+// A game screen larger than the LCD is shown at half size by taking every
+// second pixel (ADL's 560x384 surface is the Apple II's 280x192 doubled).
 int PlaydateGraphicsManager::displayStep() const {
 	return (_gameScreen.w > LCD_COLUMNS || _gameScreen.h > LCD_ROWS) ? 2 : 1;
 }
 
+int PlaydateGraphicsManager::displayWidth() const {
+	return MIN<int>(_gameScreen.w / displayStep(), LCD_COLUMNS);
+}
+
+int PlaydateGraphicsManager::displayHeight() const {
+	return MIN<int>(_gameScreen.h / displayStep(), LCD_ROWS);
+}
+
+// The game is centered, or pushed to the left edge while the word picker
+// occupies the columns to its right.
 int PlaydateGraphicsManager::displayBaseX() const {
-	const int step = displayStep();
-	return step == 1 ? 0 : (LCD_COLUMNS - MIN<int>(_gameScreen.w / step, LCD_COLUMNS)) / 2;
+	return _pickerShown ? 0 : (LCD_COLUMNS - displayWidth()) / 2;
 }
 
 int PlaydateGraphicsManager::displayBaseY() const {
-	const int step = displayStep();
-	return step == 1 ? 0 : (LCD_ROWS - MIN<int>(_gameScreen.h / step, LCD_ROWS)) / 2;
+	return (LCD_ROWS - displayHeight()) / 2;
 }
 
 int PlaydateGraphicsManager::frameRowForGameRow(int y) const {
@@ -241,18 +249,20 @@ void PlaydateGraphicsManager::renderGameScreen(uint8 *frame, int rowStart, int r
 	if (!_gameScreen.getPixels())
 		return;
 
-	// Game screens are converted with a fixed threshold, never dithered here:
-	// AGI already draws a two-colour surface with its own fill patterns baked
-	// in, and ADL (forced to monochrome on this port, see OSystem_Playdate)
-	// produces genuinely 1-bit Apple II art. Dithering would destroy both.
-	// Paletted screens are judged on palette luminance at 50%; RGB565 ones at
-	// 25%, so the Apple II's dim green phosphor (0,192,0) still counts as lit.
+	// Game screens are thresholded, never dithered: the engines this port
+	// targets already draw two-tone art (AGI bakes in its own fill patterns,
+	// ADL is pinned to monochrome). RGB screens use a low threshold so the
+	// Apple II's dim green phosphor still counts as lit.
 	const int step = displayStep();
 	const int baseX = displayBaseX();
 	const int baseY = displayBaseY();
-	const int outW = MIN<int>(_gameScreen.w / step, LCD_COLUMNS);
-	const int outH = MIN<int>(_gameScreen.h / step, LCD_ROWS);
+	const int outW = displayWidth();
+	const int outH = displayHeight();
 	const bool paletted = _gameScreen.format.isCLUT8();
+	// At half size take the second pixel of each pair. ADL draws every Apple II
+	// dot two pixels wide and shifts the dots of "delayed" bytes right by one,
+	// so the second pixel is the one column that always belongs to its own dot.
+	const int phase = step - 1;
 
 	if (rowStart < 0)
 		rowStart = 0;
@@ -273,8 +283,8 @@ void PlaydateGraphicsManager::renderGameScreen(uint8 *frame, int rowStart, int r
 			if (fbX < 0 || fbX >= LCD_COLUMNS)
 				continue;
 
-			const bool white = paletted ? (_paletteLum[src8[x * step]] >= 128)
-			                            : (luminanceRGB565(src16[x * step]) >= 64);
+			const bool white = paletted ? (_paletteLum[src8[x * step + phase]] >= 128)
+			                            : (luminanceRGB565(src16[x * step + phase]) >= 64);
 			const uint8 bit = 0x80 >> (fbX & 7);
 			if (white)
 				dstRow[fbX >> 3] |= bit;
@@ -312,9 +322,9 @@ void PlaydateGraphicsManager::renderCursor(uint8 *frame) const {
 		baseX = 0;
 		baseY = 0;
 	} else {
-		step = (_gameScreen.w > LCD_COLUMNS || _gameScreen.h > LCD_ROWS) ? 2 : 1;
-		baseX = (LCD_COLUMNS - _gameScreen.w / step) / 2;
-		baseY = (LCD_ROWS - _gameScreen.h / step) / 2;
+		step = displayStep();
+		baseX = displayBaseX();
+		baseY = displayBaseY();
 	}
 
 	const int posX = baseX + _cursorX / step - _cursorHotspotX;
@@ -349,10 +359,20 @@ void PlaydateGraphicsManager::updateScreen() {
 	if (!frame)
 		return;
 
+	const unsigned now = _pd->system->getCurrentTimeMilliseconds();
+
+	// The word picker takes the columns right of the game, if there are any
+	Playdate::WordPicker &picker = Playdate::WordPicker::instance();
+	const int pickerWidth = LCD_COLUMNS - displayWidth();
+	const bool pickerShown = !_overlayVisible && pickerWidth >= 64 && picker.visible();
+	if (pickerShown != _pickerShown) {
+		_pickerShown = pickerShown;
+		_forceFullRefresh = true;
+	}
+
 	// The overlay, the software cursor and a screen shake all need the whole
-	// frame (they either cover it or shift the whole mapping). Everything else -
-	// AGI gameplay - only changes the rows the engine copied this frame, so
-	// convert and refresh just those.
+	// frame. Everything else only changes the rows the engine copied this
+	// frame, so convert and refresh just those.
 	const bool cursorShown = _cursorVisible && (_pointerMode || _overlayVisible);
 	const bool full = _forceFullRefresh || _overlayVisible || cursorShown || _shakeOffsetX || _shakeOffsetY;
 
@@ -378,6 +398,11 @@ void PlaydateGraphicsManager::updateScreen() {
 		bottom = -1; // nothing changed; the previous frame is still on screen
 	}
 
+	if (_pickerShown && picker.draw(frame, LCD_ROWSIZE, displayWidth(), pickerWidth, LCD_ROWS, full, now)) {
+		top = 0;
+		bottom = LCD_ROWS - 1;
+	}
+
 	if (bottom >= top)
 		_pd->graphics->markUpdatedRows(top, bottom);
 
@@ -385,16 +410,9 @@ void PlaydateGraphicsManager::updateScreen() {
 	_dirtyTop = LCD_ROWS;
 	_dirtyBottom = -1;
 
-	// Yield only once this resume slice has used its compute budget. A yield
-	// ends the OS update callback and costs a whole display frame (~33ms), and
-	// the engine calls updateScreen several times per game cycle (sprite blits,
-	// end of cycle, event-wait loops); yielding on each call quantized every
-	// one of those to a full frame and capped AGI at a fraction of its cycle
-	// rate - visibly jerky animation. The rows marked above accumulate in the
-	// frame buffer and are presented at whichever yield actually ends the
-	// slice (here once the budget is spent, or the engine's next real wait in
-	// delayMillis).
-	const unsigned now = _pd->system->getCurrentTimeMilliseconds();
+	// A yield ends the OS update callback and costs a whole display frame, so
+	// only yield once this slice has used its compute budget. The rows marked
+	// above are presented by whichever yield ends the slice.
 	if (Playdate::coroutineSliceBudgetUsed(now))
 		Playdate::coroutineYield();
 }
