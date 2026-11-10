@@ -18,6 +18,11 @@ MODULE_OBJS := \
 	metaengine.o \
 	sound.o
 
+ifeq ($(BACKEND), playdate)
+MODULE_OBJS += \
+	playdate_picker.o
+endif
+
 MODULE_DIRS += \
 	engines/adl
 

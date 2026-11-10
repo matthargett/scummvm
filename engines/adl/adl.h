@@ -249,8 +249,15 @@ struct RoomData {
 		return 4; \
 } while (0)
 
+#ifdef PLAYDATE
+class PlaydatePicker;
+#endif
+
 class AdlEngine : public Engine {
 friend class Console;
+#ifdef PLAYDATE
+friend class PlaydatePicker;
+#endif
 public:
 	~AdlEngine() override;
 
@@ -452,6 +459,35 @@ protected:
 	mutable Common::File *_inputScript;
 	mutable uint _scriptDelay;
 	mutable bool _scriptPaused;
+
+	// The input the engine is waiting for, so that an on-screen input aid
+	// can offer suitable choices
+	enum InputKind {
+		kInputNone,
+		kInputKey,    // a single key; Return unless choices are given
+		kInputLine,   // a line of text
+		kInputCommand // a parser command
+	};
+
+	// Declares the input being waited for while in scope. The outermost
+	// scope wins, as line input is made up of key input.
+	class InputScope {
+	public:
+		InputScope(const AdlEngine *vm, InputKind kind, const Common::String &choices = Common::String());
+		~InputScope();
+
+	private:
+		const AdlEngine *_vm;
+		bool _outermost;
+	};
+
+	mutable InputKind _inputKind;
+	mutable Common::String _inputChoices; // keys the prompt accepts, if known
+	mutable uint _inputSerial;            // changes whenever _inputKind does
+
+#ifdef PLAYDATE
+	PlaydatePicker *_playdatePicker;
+#endif
 
 private:
 	virtual void runIntro() { }

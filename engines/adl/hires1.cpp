@@ -127,6 +127,7 @@ void HiRes1Engine::showInstructions(Common::SeekableReadStream &stream) {
 			ttsMessage.clear();
 
 			// GETLN1
+			InputScope scope(this, kInputKey);
 			inputString();
 
 			if (shouldQuit())
@@ -236,7 +237,11 @@ void HiRes1Engine::runIntro() {
 
 		while (1) {
 			_display->printString(str);
-			Common::String s = inputString();
+			Common::String s;
+			{
+				InputScope scope(this, kInputLine, Common::String(keyGame) + keyInstr);
+				s = inputString();
+			}
 
 			if (shouldQuit())
 				break;
@@ -262,6 +267,7 @@ void HiRes1Engine::runIntro() {
 		// We wait for a key instead (even though there's no prompt for that).
 		stream->seek(3);
 		showInstructions(*stream);
+		InputScope scope(this, kInputKey);
 		inputString();
 	}
 

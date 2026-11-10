@@ -34,6 +34,9 @@
 
 #include "graphics/thumbnail.h"
 
+#ifdef PLAYDATE
+#include "adl/playdate_picker.h"
+#endif
 #include "adl/adl.h"
 #include "adl/display_a2.h"
 #include "adl/graphics.h"
@@ -69,6 +72,9 @@ private:
 };
 
 AdlEngine::~AdlEngine() {
+#ifdef PLAYDATE
+	delete _playdatePicker;
+#endif
 	delete _display;
 	delete _graphics;
 	delete _dumpFile;
@@ -99,9 +105,31 @@ AdlEngine::AdlEngine(OSystem *syst, const AdlGameDescription *gd) :
 		_restoreVerb(0),
 		_restoreNoun(0),
 		_canSaveNow(false),
-		_canRestoreNow(false) {
+		_canRestoreNow(false),
+		_inputKind(kInputNone),
+		_inputSerial(0) {
 
 	_random = new Common::RandomSource("adl");
+#ifdef PLAYDATE
+	_playdatePicker = new PlaydatePicker(this);
+#endif
+}
+
+AdlEngine::InputScope::InputScope(const AdlEngine *vm, InputKind kind, const Common::String &choices) :
+		_vm(vm), _outermost(vm->_inputKind == kInputNone) {
+	if (_outermost) {
+		_vm->_inputKind = kind;
+		_vm->_inputChoices = choices;
+		_vm->_inputSerial++;
+	}
+}
+
+AdlEngine::InputScope::~InputScope() {
+	if (_outermost) {
+		_vm->_inputKind = kInputNone;
+		_vm->_inputChoices.clear();
+		_vm->_inputSerial++;
+	}
 }
 
 bool AdlEngine::pollEvent(Common::Event &event) const {
@@ -193,6 +221,7 @@ void AdlEngine::delay(uint32 ms) const {
 }
 
 Common::String AdlEngine::inputString(byte prompt) const {
+	InputScope scope(this, kInputLine);
 	Common::String s;
 
 	if (prompt > 0)
@@ -264,6 +293,7 @@ Common::String AdlEngine::inputString(byte prompt) const {
 }
 
 byte AdlEngine::inputKey(bool showCursor) const {
+	InputScope scope(this, kInputKey);
 	byte key = 0;
 
 	// If debug script is active, we fake a return press for the text overflow handling
@@ -1147,7 +1177,11 @@ Common::String AdlEngine::formatNounError(const Common::String &verb, const Comm
 void AdlEngine::getInput(uint &verb, uint &noun) {
 	while (1) {
 		_display->printString(_strings.enterCommand);
-		Common::String line = getLine();
+		Common::String line;
+		{
+			InputScope scope(this, kInputCommand);
+			line = getLine();
+		}
 
 		if (shouldQuit() || _isRestoring)
 			return;
@@ -1336,7 +1370,11 @@ int AdlEngine::o_restart(ScriptEnv &e) {
 	OP_DEBUG_0("\tRESTART_GAME()");
 
 	_display->printString(_strings.playAgain);
-	Common::String input = inputString();
+	Common::String input;
+	{
+		InputScope scope(this, kInputLine, "YN");
+		input = inputString();
+	}
 
 	if (input.size() == 0 || input[0] != _display->asciiToNative('N')) {
 		_isRestarting = true;
