@@ -609,6 +609,7 @@ public:
 	Mouse _mouse;
 
 	bool _noSaveLoadAllowed;
+	bool _waitingForKey; // inside waitKey(), waitAnyKey() and the like
 
 #ifdef PLAYDATE
 	// Word picker vocabulary; owned by AgiEngine (created in agiInit)
@@ -985,6 +986,7 @@ private:
 
 public:
 	const AgiOpCodeEntry *getOpCodesTable() { return _opCodes; }
+	const AgiOpCodeEntry *getCondOpCodesTable() { return _opCodesCond; }
 
 private:
 	void goldRushClockTimeWorkaround_OnReadVar();

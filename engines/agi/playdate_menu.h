@@ -31,6 +31,7 @@
 namespace Agi {
 
 class AgiEngine;
+struct AgiLogic;
 
 /**
  * Vocabulary of the Playdate crank word picker for AGI parser games.
@@ -87,9 +88,21 @@ private:
 	void enterNounMode(uint16 verbId, Common::String verbWord);
 	void enterCharMode(CharInput input);
 	Common::String phraseText(const Common::Array<uint16> &ids, uint from) const;
+	Common::String wordForId(uint16 id) const;
 
 	/** The character input the game is waiting for, if any. */
 	CharInput charInput();
+
+	// Characters that logics compare the key variable with
+	struct KeyTests {
+		Common::Array<byte> equal, less, greater;
+
+		bool accept(byte key) const;
+	};
+
+	void collectKeyTests(const AgiLogic &logic, KeyTests &keyTests) const;
+	/** The letters the loaded room logics accept as a pressed key. */
+	const Common::String &answerKeys();
 
 	/** Enters/leaves char mode to match the current inner-loop state. */
 	void syncCharMode();
@@ -118,6 +131,8 @@ private:
 	Common::String _verbWord;  // its canonical word
 	CharInput _charInput;      // char mode: what the keyboard is for
 	uint32 _questionSinceMs;   // since when a message has been left on screen
+	uint _answerKeysLogics;    // the loaded logics _answerKeys was worked out for
+	Common::String _answerKeys;
 
 	// The list currently shown. In verb mode _listIds holds verb ids; in
 	// noun mode _listCommands holds the full command each entry submits.

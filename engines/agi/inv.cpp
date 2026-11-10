@@ -150,16 +150,21 @@ void InventoryMgr::drawItem(int16 itemNr) {
 }
 
 void InventoryMgr::show() {
-	bool selectItems = false;
+	const bool selectItems = _vm->getFlag(VM_FLAG_STATUS_SELECTS_ITEMS);
+
+#ifdef PLAYDATE
+	// There is no "any key" to press: as in GBAGI, the list is always
+	// walked with the d-pad and left with A or B
+	const bool browseItems = true;
+#else
+	const bool browseItems = selectItems;
+#endif
 
 	// figure out current inventory of the player
 	getPlayerInventory();
 
-	if (_vm->getFlag(VM_FLAG_STATUS_SELECTS_ITEMS)) {
-		selectItems = true;
-	} else {
+	if (!browseItems)
 		_activeItemNr = -1; // so that none is shown as active
-	}
 
 #ifdef USE_TTS
 	_vm->_queueNextText = true;
@@ -181,19 +186,21 @@ void InventoryMgr::show() {
 #endif
 	}
 
-	if (selectItems) {
+	if (browseItems) {
 		_vm->cycleInnerLoopActive(CYCLE_INNERLOOP_INVENTORY);
 
 		do {
 			_vm->processAGIEvents();
 		} while (_vm->cycleInnerLoopIsActive() && !(_vm->shouldQuit() || _vm->_restartGame));
 
-		if (_activeItemNr >= 0) {
-			// pass selected object number
-			_vm->setVar(VM_VAR_SELECTED_INVENTORY_ITEM, _array[_activeItemNr].objectNr);
-		} else {
-			// nothing was selected
-			_vm->setVar(VM_VAR_SELECTED_INVENTORY_ITEM, 0xff);
+		if (selectItems) {
+			if (_activeItemNr >= 0) {
+				// pass selected object number
+				_vm->setVar(VM_VAR_SELECTED_INVENTORY_ITEM, _array[_activeItemNr].objectNr);
+			} else {
+				// nothing was selected
+				_vm->setVar(VM_VAR_SELECTED_INVENTORY_ITEM, 0xff);
+			}
 		}
 #ifdef USE_TTS
 		_vm->stopTextToSpeech();

@@ -355,6 +355,7 @@ struct GameSettings {
 
 AgiBase::AgiBase(OSystem *syst, const AGIGameDescription *gameDesc) : Engine(syst), _gameDescription(gameDesc) {
 	_noSaveLoadAllowed = false;
+	_waitingForKey = false;
 
 	_rnd = new Common::RandomSource("agi");
 	_sound = nullptr;

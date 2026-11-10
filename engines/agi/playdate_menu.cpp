@@ -47,9 +47,25 @@ static bool isSystemVerb(const Common::String &word) {
 	return false;
 }
 
+// The interpreter's and the games' debugging commands
+static bool isDebugVerb(const Common::String &word) {
+	static const char *const kDebugVerbs[] = {
+		"debug", "tester", "test", "cheat", "tp", "pos", "position", "mem",
+		"priority", "object"
+	};
+	// "kqdbg", "sq2dbg", ...
+	if (word.hasSuffixIgnoreCase("dbg"))
+		return true;
+	for (uint i = 0; i < ARRAYSIZE(kDebugVerbs); ++i) {
+		if (word.equalsIgnoreCase(kDebugVerbs[i]))
+			return true;
+	}
+	return false;
+}
+
 PlaydateMenu::PlaydateMenu(AgiEngine *vm) :
 	_vm(vm), _parserGame(false), _hasRoomLogicPhrase(false),
-	_mode(kModeVerb), _verbId(0), _charInput(kCharNone), _questionSinceMs(0), _revision(0) {
+	_mode(kModeVerb), _verbId(0), _charInput(kCharNone), _questionSinceMs(0), _answerKeysLogics(0), _revision(0) {
 }
 
 PlaydateMenu::~PlaydateMenu() {
@@ -80,10 +96,11 @@ PlaydateMenu::CharInput PlaydateMenu::charInput() {
 	}
 
 	// A message that stays on screen while the game runs on with the prompt
-	// off is a question whose answer key the script reads (the Leisure Suit
-	// Larry age quiz). A message box that waits for a key is not: that one
-	// only looks the same until its wait begins.
-	if (!mainCycle || !_vm->_text->_messageState.window_Active || _vm->promptIsEnabled()) {
+	// off, in a room whose logic looks at which character was typed, is a
+	// question (the Leisure Suit Larry age quiz). A message box that waits
+	// for a key is not: that one only looks the same until its wait begins.
+	if (!mainCycle || !_vm->_text->_messageState.window_Active || _vm->promptIsEnabled() ||
+	    answerKeys().empty()) {
 		_questionSinceMs = 0;
 		return kCharNone;
 	}
@@ -92,6 +109,87 @@ PlaydateMenu::CharInput PlaydateMenu::charInput() {
 	if (_questionSinceMs == 0)
 		_questionSinceMs = now ? now : 1;
 	return now - _questionSinceMs >= kQuestionDelayMs ? kCharKey : kCharNone;
+}
+
+// Collects the characters a logic compares the key variable with
+void PlaydateMenu::collectKeyTests(const AgiLogic &logic, KeyTests &keyTests) const {
+	const AgiOpCodeEntry *commands = _vm->getOpCodesTable();
+	const AgiOpCodeEntry *tests = _vm->getCondOpCodesTable();
+
+	bool inTest = false;
+	for (int ip = logic.sIP; ip + 2 < logic.size;) {
+		const byte op = logic.data[ip++];
+		if (!inTest) {
+			if (op == 0xFF)
+				inTest = true;
+			else if (op == 0xFE)
+				ip += 2;
+			else
+				ip += commands[op].parameterSize;
+			continue;
+		}
+
+		if (op == 0xFF) {
+			inTest = false;
+			ip += 2;
+		} else if (op == 0x0E && _vm->getVersion() >= 0x2000) { // said
+			ip += logic.data[ip] * 2 + 1;
+		} else if (op < 0xFC) {
+			const byte value = logic.data[ip + 1];
+			if (logic.data[ip] == VM_VAR_KEY && Common::isPrint(value) && value != ' ') {
+				if (op == 0x01)
+					keyTests.equal.push_back(value);
+				else if (op == 0x03)
+					keyTests.less.push_back(value);
+				else if (op == 0x05)
+					keyTests.greater.push_back(value);
+			}
+			ip += tests[op].parameterSize;
+		}
+	}
+}
+
+// A script accepts a range either as "key > x && key < y" or, negated, as
+// "!(key < x) && !(key > y)"; both forms are read as the range they imply.
+bool PlaydateMenu::KeyTests::accept(byte key) const {
+	for (uint i = 0; i < equal.size(); ++i) {
+		if (equal[i] == key)
+			return true;
+	}
+	for (uint g = 0; g < greater.size(); ++g) {
+		for (uint l = 0; l < less.size(); ++l) {
+			if (greater[g] < key && key < less[l] && less[l] - greater[g] <= 27)
+				return true;
+			if (less[l] <= key && key <= greater[g] && greater[g] - less[l] < 26)
+				return true;
+		}
+	}
+	return false;
+}
+
+// Logic 0 is left out: its key tests are the game's hot keys
+const Common::String &PlaydateMenu::answerKeys() {
+	uint loaded = 0;
+	for (uint n = 1; n < MAX_DIRECTORY_ENTRIES; ++n) {
+		if (_vm->_game.dirLogic[n].flags & RES_LOADED)
+			loaded = loaded * 31 + n;
+	}
+	if (loaded == _answerKeysLogics)
+		return _answerKeys;
+	_answerKeysLogics = loaded;
+	_answerKeys.clear();
+
+	KeyTests keyTests;
+	for (uint n = 1; n < MAX_DIRECTORY_ENTRIES; ++n) {
+		if (_vm->_game.dirLogic[n].flags & RES_LOADED)
+			collectKeyTests(_vm->_game.logics[n], keyTests);
+	}
+
+	for (char c = 'a'; c <= 'z'; ++c) {
+		if (keyTests.accept(c) || keyTests.accept(toupper(c)))
+			_answerKeys += c;
+	}
+	return _answerKeys;
 }
 
 uint PlaydateMenu::pickerList() {
@@ -105,7 +203,7 @@ bool PlaydateMenu::pickerAcceptsInput() {
 	// Word picker only takes input for parser games at the command prompt,
 	// never during message boxes, menus or other inner loops.
 	return _parserGame && !_vm->_game.cycleInnerLoopActive &&
-	       _vm->promptIsEnabled();
+	       !_vm->_waitingForKey && _vm->promptIsEnabled();
 }
 
 void PlaydateMenu::resetContextWords() {
@@ -139,7 +237,8 @@ void PlaydateMenu::addSaidPhrase(const uint16 *ids, uint count, bool fromLogic0)
 	// The player reaches those through the Playdate system menu, not the word
 	// picker; in games that keep everything in logic 0 (Space Quest) they run
 	// every cycle and would otherwise swamp the actual room verbs.
-	if (isSystemVerb(_vm->_words->firstWordForId(phrase[0])))
+	const Common::String verb = _vm->_words->firstWordForId(phrase[0]);
+	if (isSystemVerb(verb) || isDebugVerb(verb))
 		return;
 
 	// A said() from a room logic proves this game scopes commands per room, so
@@ -203,7 +302,7 @@ void PlaydateMenu::enterVerbMode() {
 		if (present)
 			continue;
 
-		Common::String word = _vm->_words->firstWordForId(id);
+		Common::String word = wordForId(id);
 		if (word.empty())
 			continue;
 		_listIds.push_back(id);
@@ -213,12 +312,34 @@ void PlaydateMenu::enterVerbMode() {
 	_revision++;
 }
 
+// The word shown for a word group: its canonical form, or a synonym of it
+// if that is one the list does not show
+Common::String PlaydateMenu::wordForId(uint16 id) const {
+	const Common::String first = _vm->_words->firstWordForId(id);
+	if (!Playdate::isProfanity(first))
+		return first;
+
+	Common::Array<uint16> ids;
+	ids.push_back(id);
+	Common::Array<Common::String> synonyms;
+	_vm->_words->collectWordsForIds(ids, synonyms);
+
+	Common::String best;
+	for (uint i = 0; i < synonyms.size(); ++i) {
+		if (Playdate::isProfanity(synonyms[i]))
+			continue;
+		if (best.empty() || synonyms[i].size() < best.size())
+			best = synonyms[i];
+	}
+	return best.empty() ? first : best;
+}
+
 Common::String PlaydateMenu::phraseText(const Common::Array<uint16> &ids, uint from) const {
 	// Joins the words of a phrase (from index `from`) into a command
 	// string. Returns empty if any id has no dictionary word.
 	Common::String out;
 	for (uint k = from; k < ids.size(); ++k) {
-		Common::String word = _vm->_words->firstWordForId(ids[k]);
+		Common::String word = wordForId(ids[k]);
 		if (word.empty())
 			return Common::String();
 		if (!out.empty())
@@ -323,17 +444,13 @@ void PlaydateMenu::enterCharMode(CharInput input) {
 	_listCommands.clear();
 
 	if (input == kCharKey) {
-		// Return comes first, so that A still dismisses a plain message
+		const Common::String &keys = answerKeys();
+		for (uint i = 0; i < keys.size(); ++i) {
+			_listIds.push_back((uint16)keys[i]);
+			_listWords.push_back(Common::String(keys[i]));
+		}
 		_listIds.push_back(AGI_KEY_ENTER);
 		_listWords.push_back("Ent");
-		for (char c = 'a'; c <= 'z'; ++c) {
-			_listIds.push_back((uint16)c);
-			_listWords.push_back(Common::String(c));
-		}
-		for (char c = '0'; c <= '9'; ++c) {
-			_listIds.push_back((uint16)c);
-			_listWords.push_back(Common::String(c));
-		}
 		_revision++;
 		return;
 	}
