@@ -220,7 +220,6 @@ private:
 
 public:
 	void drawDisplayRectPlaydate(int16 x, int16 y, int16 width, int16 height, byte color);
-	void drawPlaydateText(int16 x, int16 y, const Common::String &text, bool inverted = false);
 	void drawCharacter(int16 row, int16 column, byte character, byte foreground, byte background, bool disabledLook);
 	void drawStringOnDisplay(int16 x, int16 y, const char *text, byte foreground, byte background);
 	void drawStringOnDisplay(int16 x, int16 adjX, int16 y, int16 adjY, const char *text, byte foregroundColor, byte backgroundColor);

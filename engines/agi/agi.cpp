@@ -116,8 +116,10 @@ int AgiEngine::agiInit() {
 		_menu = new GfxMenu(this, _gfx, _picture, _text);
 
 #ifdef PLAYDATE
-	if (!_playdateMenu && (_renderMode == Common::kRenderPlaydate || _renderMode == Common::kRenderHercG || _renderMode == Common::kRenderHercA))
+	if (!_playdateMenu && (_renderMode == Common::kRenderPlaydate || _renderMode == Common::kRenderHercG || _renderMode == Common::kRenderHercA)) {
 		_playdateMenu = new PlaydateMenu(this);
+		Playdate::setPickerSource(_playdateMenu);
+	}
 #endif
 
 	_gfx->initPriorityTable();
@@ -627,6 +629,8 @@ AgiEngine::~AgiEngine() {
 	delete _systemUI;
 	delete _menu;
 #ifdef PLAYDATE
+	if (_playdateMenu)
+		Playdate::setPickerSource(nullptr);
 	delete _playdateMenu;
 #endif
 	delete _text;

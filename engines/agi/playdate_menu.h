@@ -23,55 +23,37 @@
 #define AGI_PLAYDATE_MENU_H
 
 #include "common/array.h"
-#include "common/events.h"
 #include "common/scummsys.h"
 #include "common/str.h"
+
+#include "backends/platform/playdate/playdate-picker.h"
 
 namespace Agi {
 
 class AgiEngine;
 
 /**
- * On-screen word picker for the Playdate, shown in the right margin
- * next to the game.
+ * Vocabulary of the Playdate crank word picker for AGI parser games.
  *
- * AGI parser games are played without a keyboard by composing commands
- * from this list. The words offered are scoped to the current room:
- * every time a room's logic runs a said() test, the words it checks for
- * are recorded. A said() phrase is "verb noun...", so the picker first
- * offers the room's verbs; once a verb is chosen it offers the nouns
- * that the room actually pairs with that verb, and B returns to the
- * verb list. Selecting a noun (or a verb with no nouns) types the
- * command at the prompt and submits it.
+ * The words offered are scoped to the current room: every time a logic runs
+ * a said() test, the words it checks for are recorded. A said() phrase is
+ * "verb noun...", so the picker first offers the room's verbs, then the
+ * nouns the room pairs with the chosen verb. During GetString/GetNumber the
+ * list turns into an on-screen keyboard. The list itself is drawn and driven
+ * by the backend (see Playdate::PickerSource).
  */
-class PlaydateMenu {
+class PlaydateMenu : public Playdate::PickerSource {
 public:
 	PlaydateMenu(AgiEngine *vm);
-	~PlaydateMenu();
+	~PlaydateMenu() override;
 
-	void show();
-	void hide();
-	bool isVisible() const;
-
-	/** Display column of the picker overlay's left edge. */
-	int menuLeft() const { return kMenuX; }
-
-	/**
-	 * True when the picker should receive input this cycle: either a
-	 * parser game with the prompt active, or any game currently inside a
-	 * GetString/GetNumber inner loop (where the picker turns into an
-	 * on-screen keyboard). Used by the keyboard handler to decide whether
-	 * to route events to the picker.
-	 */
-	bool claimsInput() const;
-
-	/**
-	 * True once the game has been seen to use the parser (any said()
-	 * test). Menu- and pointer-driven games (Donald Duck's Playground,
-	 * Mixed-Up Mother Goose, ...) never set this, so the picker stays
-	 * hidden and the game keeps the full width of the screen.
-	 */
-	bool isParserGame() const { return _parserGame; }
+	bool pickerVisible() override;
+	bool pickerAcceptsInput() override;
+	const Common::StringArray &pickerWords() override;
+	uint pickerRevision() override { return _revision; }
+	uint pickerList() override;
+	Common::String pickerSelect(uint index) override;
+	bool pickerBack() override;
 
 	/** Clears the recorded room vocabulary. Called on room changes. */
 	void resetContextWords();
@@ -85,47 +67,34 @@ public:
 		return !(_hasRoomLogicPhrase && _phraseFromLogic0[i]);
 	}
 
-	void draw();
-
-	/** Feeds any buffered picker command into the AGI key queue as space
-	 *  allows. Called once per cycle so a long command never overflows
-	 *  the queue. */
-	void feedPendingInput();
-
-	/** Handles an event; returns true if it was consumed by the picker. */
-	bool handleEvent(const Common::Event &event);
-
 private:
 	enum Mode {
 		kModeVerb,
 		kModeNoun,
-		kModeChar // on-screen keyboard during GetString/GetNumber
+		kModeChar // on-screen keyboard
+	};
+
+	enum CharInput {
+		kCharNone,
+		kCharString, // GetString
+		kCharNumber, // GetNumber
+		kCharKey     // a key answer to a message left on screen
 	};
 
 	void enterVerbMode();
 	// verbWord is by value, not by reference: the caller passes an element of
 	// _listWords, which this function clears before using verbWord again.
 	void enterNounMode(uint16 verbId, Common::String verbWord);
-	void enterCharMode(bool isNumber);
-	void select();
-	void back();
-	void moveSelection(int delta);
-	void clampSelection();
-	void resetMarquee();
-	void injectCommand(const Common::String &command);
-	void injectKey(uint16 key);
+	void enterCharMode(CharInput input);
 	Common::String phraseText(const Common::Array<uint16> &ids, uint from) const;
-	Common::String visibleLabel(int index, bool selected);
 
-	/** True while the engine is inside a GetString/GetNumber inner loop.
-	 *  Sets isNumber for GetNumber (digits only). */
-	bool inCharInputLoop(bool &isNumber) const;
+	/** The character input the game is waiting for, if any. */
+	CharInput charInput();
 
 	/** Enters/leaves char mode to match the current inner-loop state. */
 	void syncCharMode();
 
 	AgiEngine *_vm;
-	bool _visible;
 	bool _parserGame; // sticky: set once any said() phrase is recorded
 
 	// Sticky: set once a said() phrase is recorded from a room logic (logic
@@ -147,40 +116,18 @@ private:
 	Mode _mode;
 	uint16 _verbId;            // selected verb (in noun mode)
 	Common::String _verbWord;  // its canonical word
-	bool _charIsNumber;        // char mode: digits-only (GetNumber)
+	CharInput _charInput;      // char mode: what the keyboard is for
+	uint32 _questionSinceMs;   // since when a message has been left on screen
 
 	// The list currently shown. In verb mode _listIds holds verb ids; in
 	// noun mode _listCommands holds the full command each entry submits.
 	Common::Array<uint16> _listIds;
 	Common::Array<Common::String> _listWords;    // display labels
 	Common::Array<Common::String> _listCommands; // full commands (noun mode)
-	int _selectedIndex;
-	int _scrollOffset;
+	uint _revision; // bumped whenever the list is rebuilt
 
-	// Command waiting to be fed into the AGI key queue, terminated by a
-	// carriage return that stands in for ENTER.
-	Common::String _pendingInput;
-
-	// Marquee state for the selected long word.
-	int _marqueeStart;
-	int _marqueeDir;
-	uint32 _marqueeNextMs;
-
-	// Last time (ms) the crank moved. The word list stays visible for
-	// kCrankIdleHideMs after that, then auto-hides so exploration owns the
-	// screen; the next crank movement reveals it again.
-	uint32 _lastCrankMs;
-	static const uint32 kCrankIdleHideMs = 3000;
-
-	static const int kLineHeight = 10;
-	static const int kVisibleLines = 24; // 240 / 10
-	static const int kMenuX = 320;
-	static const int kMenuWidth = 80;
-	static const int kTextX = kMenuX + 2;
-	static const int kMaxChars = 9;      // characters that fit in the column
 	static const int kMaxSynonyms = 2;   // extra synonym entries per verb+noun command
 	static const int kNounSynonymCap = 10; // stop adding synonyms once the noun list is this long
-	static const uint32 kMarqueeStepMs = 350;
 };
 
 } // End of namespace Agi

@@ -23,9 +23,12 @@
 #include "agi/agi.h"
 #include "agi/graphics.h"
 #include "agi/keyboard.h"
+#include "agi/text.h"
 #include "agi/words.h"
 
 namespace Agi {
+
+static const uint32 kQuestionDelayMs = 250;
 
 // Sierra's global system/menu verbs. These are offered through the Playdate
 // system menu (or simply not needed on a save-anywhere handheld), so they are
@@ -45,55 +48,59 @@ static bool isSystemVerb(const Common::String &word) {
 }
 
 PlaydateMenu::PlaydateMenu(AgiEngine *vm) :
-	_vm(vm), _visible(true), _parserGame(false), _hasRoomLogicPhrase(false),
-	_mode(kModeVerb), _verbId(0),
-	_charIsNumber(false), _selectedIndex(0), _scrollOffset(0),
-	_marqueeStart(0), _marqueeDir(1), _marqueeNextMs(0), _lastCrankMs(0) {
+	_vm(vm), _parserGame(false), _hasRoomLogicPhrase(false),
+	_mode(kModeVerb), _verbId(0), _charInput(kCharNone), _questionSinceMs(0), _revision(0) {
 }
 
 PlaydateMenu::~PlaydateMenu() {
 }
 
-void PlaydateMenu::show() {
-	_visible = true;
-}
-
-void PlaydateMenu::hide() {
-	_visible = false;
-}
-
-bool PlaydateMenu::isVisible() const {
-	if (!_visible)
-		return false;
-	// The on-screen keyboard for a GetString/GetNumber prompt is always shown.
-	bool isNumber;
-	if (inCharInputLoop(isNumber))
+bool PlaydateMenu::pickerVisible() {
+	// The on-screen keyboard is always shown when text is asked for; the
+	// word list only for games that use the parser.
+	if (charInput() != kCharNone)
 		return true;
-	// The picker has its own column beside the game, so it is simply always
-	// shown for parser games.
 	return _parserGame;
 }
 
-bool PlaydateMenu::inCharInputLoop(bool &isNumber) const {
-	if (!_vm->_game.cycleInnerLoopActive)
-		return false;
-	switch (_vm->_game.cycleInnerLoopType) {
-	case CYCLE_INNERLOOP_GETSTRING:
-		isNumber = false;
-		return true;
-	case CYCLE_INNERLOOP_GETNUMBER:
-		isNumber = true;
-		return true;
-	default:
-		return false;
+PlaydateMenu::CharInput PlaydateMenu::charInput() {
+	bool mainCycle = !_vm->_game.cycleInnerLoopActive;
+	if (!mainCycle) {
+		switch (_vm->_game.cycleInnerLoopType) {
+		case CYCLE_INNERLOOP_GETSTRING:
+			return kCharString;
+		case CYCLE_INNERLOOP_GETNUMBER:
+			return kCharNumber;
+		case CYCLE_INNERLOOP_HAVEKEY:
+			mainCycle = true;
+			break;
+		default:
+			break;
+		}
 	}
+
+	// A message that stays on screen while the game runs on with the prompt
+	// off is a question whose answer key the script reads (the Leisure Suit
+	// Larry age quiz). A message box that waits for a key is not: that one
+	// only looks the same until its wait begins.
+	if (!mainCycle || !_vm->_text->_messageState.window_Active || _vm->promptIsEnabled()) {
+		_questionSinceMs = 0;
+		return kCharNone;
+	}
+
+	const uint32 now = g_system->getMillis();
+	if (_questionSinceMs == 0)
+		_questionSinceMs = now ? now : 1;
+	return now - _questionSinceMs >= kQuestionDelayMs ? kCharKey : kCharNone;
 }
 
-bool PlaydateMenu::claimsInput() const {
-	if (!_visible)
-		return false;
-	bool isNumber;
-	if (inCharInputLoop(isNumber))
+uint PlaydateMenu::pickerList() {
+	syncCharMode();
+	return _mode == kModeChar ? (uint)kModeChar + _charInput : (uint)_mode;
+}
+
+bool PlaydateMenu::pickerAcceptsInput() {
+	if (charInput() != kCharNone)
 		return true; // on-screen keyboard owns input during text entry
 	// Word picker only takes input for parser games at the command prompt,
 	// never during message boxes, menus or other inner loops.
@@ -167,26 +174,9 @@ void PlaydateMenu::addSaidPhrase(const uint16 *ids, uint count, bool fromLogic0)
 	// picker becomes active for the rest of the session.
 	_parserGame = true;
 
-	// A newly seen verb should appear in the verb list right away. But rebuild
-	// without snapping the player's selection back to the top: rooms can keep
-	// recording said() phrases for many cycles (idle animations, etc.), and
-	// resetting the highlight each time would fight the crank as the player
-	// navigates the verb list. Preserve the currently selected verb across the
-	// rebuild.
-	if (_mode == kModeVerb) {
-		const uint16 keepId = (_selectedIndex >= 0 && _selectedIndex < (int)_listIds.size())
-		                      ? _listIds[_selectedIndex] : 0xFFFF;
+	// A newly seen verb should appear in the verb list right away
+	if (_mode == kModeVerb)
 		enterVerbMode();
-		if (keepId != 0xFFFF) {
-			for (uint i = 0; i < _listIds.size(); ++i) {
-				if (_listIds[i] == keepId) {
-					_selectedIndex = (int)i;
-					break;
-				}
-			}
-			clampSelection();
-		}
-	}
 }
 
 void PlaydateMenu::enterVerbMode() {
@@ -220,9 +210,7 @@ void PlaydateMenu::enterVerbMode() {
 		_listWords.push_back(word);
 	}
 
-	_selectedIndex = 0;
-	_scrollOffset = 0;
-	resetMarquee();
+	_revision++;
 }
 
 Common::String PlaydateMenu::phraseText(const Common::Array<uint16> &ids, uint from) const {
@@ -323,20 +311,34 @@ void PlaydateMenu::enterNounMode(uint16 verbId, Common::String verbWord) {
 		}
 	}
 
-	_selectedIndex = 0;
-	_scrollOffset = 0;
-	resetMarquee();
+	_revision++;
 }
 
-void PlaydateMenu::enterCharMode(bool isNumber) {
+void PlaydateMenu::enterCharMode(CharInput input) {
 	_mode = kModeChar;
-	_charIsNumber = isNumber;
+	_charInput = input;
 
 	_listIds.clear();
 	_listWords.clear();
 	_listCommands.clear();
 
-	if (isNumber) {
+	if (input == kCharKey) {
+		// Return comes first, so that A still dismisses a plain message
+		_listIds.push_back(AGI_KEY_ENTER);
+		_listWords.push_back("Ent");
+		for (char c = 'a'; c <= 'z'; ++c) {
+			_listIds.push_back((uint16)c);
+			_listWords.push_back(Common::String(c));
+		}
+		for (char c = '0'; c <= '9'; ++c) {
+			_listIds.push_back((uint16)c);
+			_listWords.push_back(Common::String(c));
+		}
+		_revision++;
+		return;
+	}
+
+	if (input == kCharNumber) {
 		// GetNumber accepts digits only.
 		for (char c = '0'; c <= '9'; ++c) {
 			_listIds.push_back((uint16)c);
@@ -371,214 +373,69 @@ void PlaydateMenu::enterCharMode(bool isNumber) {
 	_listIds.push_back(AGI_KEY_ENTER);
 	_listWords.push_back("Ent");
 
-	_selectedIndex = 0;
-	_scrollOffset = 0;
-	resetMarquee();
+	_revision++;
 }
 
 void PlaydateMenu::syncCharMode() {
-	bool isNumber;
-	if (inCharInputLoop(isNumber)) {
-		// Enter (or re-enter if GetString→GetNumber changed) char mode.
-		if (_mode != kModeChar || _charIsNumber != isNumber)
-			enterCharMode(isNumber);
+	const CharInput input = charInput();
+	if (input != kCharNone) {
+		// Enter (or re-enter if the kind of input changed) char mode.
+		if (_mode != kModeChar || _charInput != input)
+			enterCharMode(input);
 	} else if (_mode == kModeChar) {
 		// The text prompt ended; return to the word list.
 		enterVerbMode();
 	}
 }
 
-void PlaydateMenu::resetMarquee() {
-	_marqueeStart = 0;
-	_marqueeDir = 1;
-	_marqueeNextMs = _vm->_system->getMillis() + kMarqueeStepMs;
+const Common::StringArray &PlaydateMenu::pickerWords() {
+	syncCharMode();
+	return _listWords;
 }
 
-void PlaydateMenu::moveSelection(int delta) {
-	if (_listWords.empty())
-		return;
+Common::String PlaydateMenu::pickerSelect(uint index) {
+	syncCharMode();
 
-	_selectedIndex = CLIP<int>(_selectedIndex + delta, 0, (int)_listWords.size() - 1);
-	if (_selectedIndex < _scrollOffset)
-		_scrollOffset = _selectedIndex;
-	if (_selectedIndex >= _scrollOffset + kVisibleLines)
-		_scrollOffset = _selectedIndex - (kVisibleLines - 1);
-
-	resetMarquee();
-}
-
-void PlaydateMenu::clampSelection() {
-	if (_selectedIndex >= (int)_listWords.size())
-		_selectedIndex = MAX<int>(0, (int)_listWords.size() - 1);
-	if (_scrollOffset > _selectedIndex)
-		_scrollOffset = _selectedIndex;
-	if (_scrollOffset < 0)
-		_scrollOffset = 0;
-}
-
-void PlaydateMenu::injectCommand(const Common::String &command) {
-	// The AGI key queue holds only KEY_QUEUE_SIZE-1 keys, far fewer than a
-	// multi-word command plus ENTER. Buffer the command and let
-	// feedPendingInput() drain it into the queue over as many cycles as it
-	// takes, so it can never wrap and corrupt the queue. '\r' marks ENTER.
-	_pendingInput += command;
-	_pendingInput += '\r';
-}
-
-void PlaydateMenu::injectKey(uint16 key) {
-	// A single keystroke for the on-screen keyboard. '\r' is the queue's
-	// stand-in for ENTER, so map AGI_KEY_ENTER onto it and pass all other
-	// keys (letters, digits, space, backspace) through verbatim.
-	_pendingInput += (key == AGI_KEY_ENTER) ? '\r' : (char)key;
-}
-
-void PlaydateMenu::feedPendingInput() {
-	while (!_pendingInput.empty()) {
-		const int used = (_vm->_keyQueueEnd - _vm->_keyQueueStart + KEY_QUEUE_SIZE) % KEY_QUEUE_SIZE;
-		if (used >= KEY_QUEUE_SIZE - 1)
-			break; // queue full; resume next cycle
-
-		const char c = _pendingInput[0];
-		_pendingInput.deleteChar(0);
-		_vm->_keyQueue[_vm->_keyQueueEnd++] = (c == '\r') ? AGI_KEY_ENTER : (uint16)(byte)c;
-		_vm->_keyQueueEnd %= KEY_QUEUE_SIZE;
-	}
-}
-
-void PlaydateMenu::select() {
 	if (_mode == kModeChar) {
-		if (_selectedIndex < 0 || _selectedIndex >= (int)_listIds.size())
-			return;
-		injectKey(_listIds[_selectedIndex]);
-		return;
+		if (index >= _listIds.size())
+			return Common::String();
+		const uint16 key = _listIds[index];
+		if (key == AGI_KEY_ENTER)
+			return "\r";
+		if (key == AGI_KEY_BACKSPACE)
+			return "\b";
+		return Common::String((char)key);
 	}
+
 	if (_mode == kModeVerb) {
-		if (_selectedIndex < 0 || _selectedIndex >= (int)_listIds.size())
-			return;
-		enterNounMode(_listIds[_selectedIndex], _listWords[_selectedIndex]);
+		if (index >= _listIds.size())
+			return Common::String();
+		enterNounMode(_listIds[index], _listWords[index]);
 
-		// If the verb resolves to a single complete command (its only
-		// phrase is the verb alone), submit it directly rather than
-		// showing a one-item noun list.
+		// A verb whose only phrase is the verb alone is submitted directly
+		// rather than showing a one-item noun list.
 		if (_listCommands.size() == 1 && _listCommands[0] == _verbWord) {
-			injectCommand(_listCommands[0]);
+			const Common::String command = _listCommands[0];
 			enterVerbMode();
-		} else if (_listCommands.empty()) {
+			return command + '\r';
+		}
+		if (_listCommands.empty())
 			enterVerbMode(); // nothing composable; stay on verbs
-		}
-	} else {
-		if (_selectedIndex < 0 || _selectedIndex >= (int)_listCommands.size())
-			return;
-		injectCommand(_listCommands[_selectedIndex]);
-		enterVerbMode();
+		return Common::String();
 	}
+
+	if (index >= _listCommands.size())
+		return Common::String();
+	const Common::String command = _listCommands[index];
+	enterVerbMode();
+	return command + '\r';
 }
 
-void PlaydateMenu::back() {
-	if (_mode == kModeNoun)
-		enterVerbMode();
-}
-
-bool PlaydateMenu::handleEvent(const Common::Event &event) {
-	if (!_visible)
+bool PlaydateMenu::pickerBack() {
+	if (_mode != kModeNoun)
 		return false;
-
-	// Keep the mode in step with the engine: entering a GetString/GetNumber
-	// loop turns the picker into an on-screen keyboard, leaving it restores
-	// the word list.
-	syncCharMode();
-
-	switch (event.type) {
-	case Common::EVENT_WHEELDOWN:
-	case Common::EVENT_WHEELUP: {
-		if (_listWords.empty())
-			return false;
-		_lastCrankMs = _vm->_system->getMillis();
-		moveSelection(event.type == Common::EVENT_WHEELDOWN ? 1 : -1);
-		return true;
-	}
-	case Common::EVENT_KEYDOWN:
-		// A/B act only while the list is actually shown. While it is auto-hidden
-		// they fall through to the game (e.g. A = Enter dismisses a message box).
-		if (!isVisible())
-			return false;
-		if (event.kbd.keycode == Common::KEYCODE_RETURN && !_listWords.empty()) {
-			select();
-			return true;
-		}
-		if (event.kbd.keycode == Common::KEYCODE_ESCAPE) {
-			// Escape only acts when it has somewhere to go back to, so
-			// that in the verb list it can still reach the game.
-			if (_mode == kModeNoun) {
-				back();
-				return true;
-			}
-		}
-		return false;
-	default:
-		return false;
-	}
-}
-
-Common::String PlaydateMenu::visibleLabel(int index, bool selected) {
-	const Common::String &word = _listWords[index];
-	if ((int)word.size() <= kMaxChars)
-		return word;
-
-	if (!selected) {
-		// Ellipsize the tail of unselected long words.
-		return Common::String(word.c_str(), kMaxChars - 1) + "\x85"; // ellipsis glyph
-	}
-
-	// The selected long word marquees so it can be read in full: a
-	// kMaxChars window slides across it and back.
-	const uint32 now = _vm->_system->getMillis();
-	const int maxStart = (int)word.size() - kMaxChars;
-	if (now >= _marqueeNextMs) {
-		_marqueeNextMs = now + kMarqueeStepMs;
-		_marqueeStart += _marqueeDir;
-		if (_marqueeStart >= maxStart) {
-			_marqueeStart = maxStart;
-			_marqueeDir = -1;
-		} else if (_marqueeStart <= 0) {
-			_marqueeStart = 0;
-			_marqueeDir = 1;
-		}
-	}
-	const int start = CLIP<int>(_marqueeStart, 0, maxStart);
-	return Common::String(word.c_str() + start, kMaxChars);
-}
-
-void PlaydateMenu::draw() {
-	if (!_visible)
-		return;
-
-	// Match the picker's contents to the current input mode before drawing.
-	syncCharMode();
-
-	GfxMgr *gfx = _vm->_gfx;
-
-	// Clear the menu column.
-	gfx->drawDisplayRectPlaydate(kMenuX, 0, kMenuWidth, 240, 0);
-
-	int y = 0;
-	for (int i = 0; i < kVisibleLines; ++i) {
-		const int index = _scrollOffset + i;
-		if (index >= (int)_listWords.size())
-			break;
-
-		const bool selected = (index == _selectedIndex);
-		const Common::String label = visibleLabel(index, selected);
-
-		if (selected) {
-			gfx->drawDisplayRectPlaydate(kMenuX, y, kMenuWidth, kLineHeight, 1);
-			gfx->drawPlaydateText(kTextX, y + 1, label, true);
-		} else {
-			gfx->drawPlaydateText(kTextX, y + 1, label, false);
-		}
-
-		y += kLineHeight;
-	}
+	enterVerbMode();
+	return true;
 }
 
 } // End of namespace Agi

@@ -30,7 +30,6 @@ MODULE_OBJS := \
 	op_test.o \
 	picture.o \
 	picture_gal.o \
-	playdate_menu.o \
 	saveload.o \
 	sound.o \
 	sound_2gs.o \
@@ -50,6 +49,11 @@ MODULE_OBJS := \
 	preagi/picture_troll.o \
 	preagi/troll.o \
 	preagi/winnie.o
+
+ifeq ($(BACKEND), playdate)
+MODULE_OBJS += \
+	playdate_menu.o
+endif
 
 # This module can be built as a plugin
 ifeq ($(ENABLE_AGI), DYNAMIC_PLUGIN)

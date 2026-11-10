@@ -33,24 +33,16 @@
 #include "agi/mouse_cursor.h"
 #include "agi/palette.h"
 #include "agi/picture.h"
-#include "agi/playdate_menu.h"
 #include "agi/text.h"
 
 namespace Agi {
 
 #include "agi/font.h"
 
-// kRenderPlaydate geometry: the game is drawn at exactly 320x200 - the same
-// 2x1 pixels Sierra's own Macintosh AGI interpreter used on the 512x342 1-bit
-// Mac screen. Every game pixel is two display pixels wide and one tall, so the
-// 8x8 dither cells lock to the game grid and every coordinate path in this
-// file is the stock 320x200 one. The area sits at the top left of the 400x240
-// display; the right 80 columns belong to the word picker and the bottom 40
-// rows are unused. The picture is deliberately NOT scaled to CRT aspect:
-// neither 1-bit original did that (Hercules showed game pixels at ~1.3:1, the
-// Mac at 2:1), and only an integer scale keeps lines and dithers crisp - every
-// non-integer vertical scale tried here (1.2x) broke line weights, dither
-// phase, sprite alignment and text/box registration in turn.
+// kRenderPlaydate is the stock 320x200 layout in two colours: every game pixel
+// is 2x1 display pixels, as on Sierra's Macintosh AGI, so the 8x8 dither cells
+// stay locked to the game grid. Do not scale it to CRT aspect: only an integer
+// scale keeps lines and dithers crisp on a 1-bit display.
 
 GfxMgr::GfxMgr(AgiBase *vm, GfxFont *font) : _vm(vm), _font(font) {
 	memset(&_paletteGfxMode, 0, sizeof(_paletteGfxMode));
@@ -166,27 +158,13 @@ void GfxMgr::initVideo() {
 		}
 		break;
 	case Common::kRenderPlaydate:
-		// 400x240 1-bit display; the game is the stock 320x200 layout at the top
-		// left (see the geometry note at the top of this file).
 		initPalette(_paletteGfxMode, PALETTE_HERCULES_GREEN, 2, 8);
-		_upscaledHires = DISPLAY_UPSCALED_DISABLED;
-		_displayScreenWidth = 400;
-		_displayScreenHeight = 240;
-		_displayFontWidth = 8;
-		_displayFontHeight = 8;
-		_displayWidthMulAdjust = 0;
-		_displayHeightMulAdjust = 0;
 		for (int i = 0; i < 2; i++) {
 			free(_playdateSprite[i]);
 			_playdateSprite[i] = (byte *)calloc(SCRIPT_WIDTH * 2 * SCRIPT_HEIGHT, 1);
 		}
-		// The Playdate is 1-bit: the game screen (dither patterns) and the word
-		// picker both write colour index 1 for "lit", which the graphics palette
-		// (Hercules 2-colour) maps to white. The text-mode palette is EGA, where
-		// index 1 is a dark blue, so anything 1-bit drawn on a full-screen text
-		// display (the picker beside SQ1's "First Name:" prompt) would render
-		// black and vanish. Force index 1 white in the text palette too; the AGI
-		// text itself uses index 15 (white in both), so it is unaffected.
+		// Colour 1 is the "lit" colour of this mode, but dark blue in the EGA
+		// text palette; keep it bright on text screens too.
 		_paletteTextMode[1 * 3 + 0] = 0xFF;
 		_paletteTextMode[1 * 3 + 1] = 0xFF;
 		_paletteTextMode[1 * 3 + 2] = 0xFF;
@@ -1402,23 +1380,6 @@ void GfxMgr::shakeScreen(int16 repeatCount) {
 }
 
 void GfxMgr::updateScreen() {
-#ifdef PLAYDATE
-	if (_vm->_renderMode == Common::kRenderPlaydate && _vm->_playdateMenu) {
-		// Drain any command the picker composed into the key queue a
-		// little at a time, so a long command cannot overflow it.
-		_vm->_playdateMenu->feedPendingInput();
-
-		// The picker owns the right 80 columns of the display permanently (the
-		// game area is 320 wide), so it never needs to be wiped or repainted over.
-		if (_vm->_playdateMenu->isVisible()) {
-			_vm->_playdateMenu->draw();
-			const int16 menuX = _vm->_playdateMenu->menuLeft();
-			const int16 menuWidth = _displayScreenWidth - menuX;
-			_vm->_system->copyRectToScreen(_displayScreen + menuX, _displayScreenWidth,
-			                               menuX, 0, menuWidth, _displayScreenHeight);
-		}
-	}
-#endif
 	_vm->_system->updateScreen();
 }
 
@@ -1838,10 +1799,6 @@ void GfxMgr::render_BlockPlaydate(int16 x, int16 y, int16 width, int16 height) {
 }
 
 void GfxMgr::drawDisplayRectPlaydate(int16 x, int16 y, int16 width, int16 height, byte color) {
-	// Draw a filled rectangle using native Playdate dither patterns.
-	// Display coordinates are in Playdate space (400x240).
-	// Patterns tile at native dot pitch - no scaling.
-
 	const byte colorIdx = color & 0x0F;
 
 	for (int16 row = 0; row < height; ++row) {
@@ -1865,32 +1822,6 @@ void GfxMgr::drawDisplayRectPlaydate(int16 x, int16 y, int16 width, int16 height
 			const byte pixel = (patternByte >> bitPos) & 1;
 
 			displayRow[displayX] = pixel;
-		}
-	}
-}
-
-void GfxMgr::drawPlaydateText(int16 x, int16 y, const Common::String &text, bool inverted) {
-	const byte *fontData = _vm->getFontData();
-	if (!fontData)
-		return;
-
-	const byte on = inverted ? 0 : 1;
-	const byte off = inverted ? 1 : 0;
-
-	for (uint i = 0; i < text.size(); ++i) {
-		const byte c = (byte)text[i];
-
-		for (int row = 0; row < 8; ++row) {
-			const byte charRow = fontData[c * 8 + row];
-			uint32 displayPos = (y + row) * _displayScreenWidth + x + (i * 8);
-
-			for (int col = 0; col < 8; ++col) {
-				if ((x + i * 8 + col) >= _displayScreenWidth || (y + row) >= _displayScreenHeight)
-					continue;
-
-				const bool bit = (charRow >> (7 - col)) & 1;
-				_displayScreen[displayPos + col] = bit ? on : off;
-			}
 		}
 	}
 }

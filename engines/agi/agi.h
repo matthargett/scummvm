@@ -611,8 +611,7 @@ public:
 	bool _noSaveLoadAllowed;
 
 #ifdef PLAYDATE
-	// Owned by AgiEngine (created in agiInit), but declared here so the
-	// graphics manager, which only knows AgiBase, can draw the picker.
+	// Word picker vocabulary; owned by AgiEngine (created in agiInit)
 	PlaydateMenu *_playdateMenu;
 #endif
 

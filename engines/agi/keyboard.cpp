@@ -68,23 +68,6 @@ void AgiEngine::processScummVMEvents() {
 	int key = 0;
 
 	while (_eventMan->pollEvent(event)) {
-#ifdef PLAYDATE
-		// The word picker owns the crank (wheel) and the A/B buttons
-		// (Return/Escape). Consumed events do not reach the game, so the
-		// d-pad still moves the ego while the picker is up.
-		//
-		// claimsInput() decides when: for a parser game only while the
-		// command prompt is accepting input (no inner loop, prompt
-		// enabled), leaving message boxes and "press a key" cutscenes to
-		// the game; and for any game while a GetString/GetNumber inner
-		// loop is running, where the picker becomes an on-screen keyboard
-		// for player-name entry (Space Quest, Mixed-Up Mother Goose) and
-		// the Leisure Suit Larry age quiz.
-		if (_playdateMenu && _playdateMenu->claimsInput() &&
-		    _playdateMenu->handleEvent(event))
-			continue;
-#endif
-
 		switch (event.type) {
 		case Common::EVENT_PREDICTIVE_DIALOG:
 			showPredictiveDialog();
