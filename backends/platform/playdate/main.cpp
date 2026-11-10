@@ -19,9 +19,17 @@
  *
  */
 
+#define FORBIDDEN_SYMBOL_EXCEPTION_mkdir
+
 #include "backends/platform/playdate/osystem_playdate.h"
 #include "backends/platform/playdate/playdate-coroutine.h"
+#include "backends/fs/playdate/playdate-stream.h"
 #include "base/main.h"
+#include "common/algorithm.h"
+#include "common/archive.h"
+#include "common/compression/unzip.h"
+#include "common/ptr.h"
+#include "common/str-array.h"
 
 #include "backends/platform/playdate/playdate-sdk.h"
 
@@ -36,6 +44,8 @@ extern "C" void __libc_init_array(void);
 // Stack for the coroutine that runs scummvm_main(). ScummVM is a heavy
 // blocking program, so it gets a generous stack.
 static const uint kEmuStackSize = 512 * 1024;
+
+static const uint kPathArgSize = 300;
 
 static PlaydateAPI *s_pd;
 
@@ -93,35 +103,180 @@ static bool readAutorunTarget() {
 	return s_autorunTarget[0] != '\0';
 }
 
-// Without an autorun file, the first (alphabetically) subdirectory of
-// "games/" - inside the pdx bundle or the data directory - is detected
-// and started directly, so a pdx with game data boots straight into a
-// game instead of the ScummVM launcher, which is neither legible nor
-// operable on a 1-bit, keyboard-less handheld.
-static char s_firstGameDir[64];
-
-static void firstGameDirCallback(const char *filename, void *userdata) {
-	(void)userdata;
-
-	// Directories are reported with a trailing slash.
-	size_t len = strlen(filename);
-	if (len < 2 || len >= sizeof(s_firstGameDir) || filename[len - 1] != '/')
-		return;
-	if (filename[0] == '.')
-		return;
-
-	// Keep the alphabetically first directory so the pick is stable.
-	if (s_firstGameDir[0] != '\0' && strcmp(filename, s_firstGameDir) >= 0)
-		return;
-
-	memcpy(s_firstGameDir, filename, len - 1);
-	s_firstGameDir[len - 1] = '\0';
+// Shows a line of text and lets the OS present it
+static void showStatus(const Common::String &text) {
+	s_pd->graphics->clear(kColorBlack);
+	s_pd->graphics->setDrawMode(kDrawModeFillWhite);
+	s_pd->graphics->drawText(text.c_str(), text.size(), kASCIIEncoding, 8, 110);
+	s_pd->graphics->setDrawMode(kDrawModeCopy);
+	Playdate::coroutineYield();
 }
 
-static bool findFirstGameDir() {
-	s_firstGameDir[0] = '\0';
-	s_pd->file->listfiles("games", firstGameDirCallback, nullptr, 0);
-	return s_firstGameDir[0] != '\0';
+static void makeDirs(const Common::String &path) {
+	for (uint i = 0; i < path.size(); i++) {
+		if (path[i] == '/')
+			s_pd->file->mkdir(Common::String(path.c_str(), i).c_str());
+	}
+	s_pd->file->mkdir(path.c_str());
+}
+
+// The part of a path up to and including its last slash
+static Common::String parentDir(const Common::String &path) {
+	const size_t slash = path.findLastOf('/');
+	return (slash == Common::String::npos) ? Common::String() : Common::String(path.c_str(), slash + 1);
+}
+
+static void zipCallback(const char *filename, void *userdata) {
+	const Common::String name(filename);
+	if (name.hasSuffixIgnoreCase(".zip"))
+		((Common::StringArray *)userdata)->push_back(name);
+}
+
+// A zip archive copied into games/ is unpacked into a directory of the same
+// name the first time it is seen. The folders all of its files share are
+// dropped, so the game files end up directly inside that directory.
+static void unpackGameArchives() {
+	Common::StringArray zips;
+	s_pd->file->listfiles("games", zipCallback, &zips, 0);
+
+	for (uint z = 0; z < zips.size(); z++) {
+		const Common::String name(zips[z].c_str(), zips[z].size() - 4);
+		const Common::String target = "games/" + name;
+
+		FileStat st;
+		if (s_pd->file->stat(target.c_str(), &st) == 0)
+			continue;
+
+		PlaydateIoStream *zip = PlaydateIoStream::makeFromPath(s_pd, "games/" + zips[z], false);
+		if (!zip)
+			continue;
+		Common::ScopedPtr<Common::Archive> archive(Common::makeZipArchive(zip));
+		if (!archive)
+			continue;
+
+		showStatus("Unpacking " + name);
+
+		Common::ArchiveMemberList members;
+		archive->listMembers(members);
+
+		// The members that are files, not the folders holding other members
+		Common::StringArray all, paths;
+		for (const auto &member : members)
+			all.push_back(member->getPathInArchive().toString('/'));
+		for (uint i = 0; i < all.size(); i++) {
+			bool folder = all[i].empty() || all[i].lastChar() == '/';
+			for (uint j = 0; j < all.size() && !folder; j++)
+				folder = all[j].hasPrefix(all[i] + "/");
+			if (!folder)
+				paths.push_back(all[i]);
+		}
+		if (paths.empty())
+			continue;
+
+		Common::String prefix = parentDir(paths[0]);
+		for (uint i = 1; i < paths.size(); i++) {
+			while (!prefix.empty() && !paths[i].hasPrefix(prefix)) {
+				prefix.deleteLastChar();
+				prefix = parentDir(prefix);
+			}
+		}
+
+		for (const auto &member : members) {
+			const Common::String path = member->getPathInArchive().toString('/');
+			if (Common::find(paths.begin(), paths.end(), path) == paths.end())
+				continue;
+
+			const Common::String out = target + "/" + (path.c_str() + prefix.size());
+			Common::String outDir = parentDir(out);
+			outDir.deleteLastChar();
+			makeDirs(outDir);
+
+			Common::ScopedPtr<Common::SeekableReadStream> in(member->createReadStream());
+			SDFile *file = in ? s_pd->file->open(out.c_str(), kFileWrite) : nullptr;
+			if (!file) {
+				s_pd->system->logToConsole("unpack: cannot write %s", out.c_str());
+				continue;
+			}
+
+			byte buffer[4096];
+			for (;;) {
+				const uint32 len = in->read(buffer, sizeof(buffer));
+				if (len == 0)
+					break;
+				s_pd->file->write(file, buffer, len);
+			}
+			s_pd->file->close(file);
+		}
+	}
+}
+
+static void gameDirCallback(const char *filename, void *userdata) {
+	// Directories are reported with a trailing slash
+	const size_t len = strlen(filename);
+	if (len < 2 || filename[len - 1] != '/' || filename[0] == '.')
+		return;
+	((Common::StringArray *)userdata)->push_back(Common::String(filename, len - 1));
+}
+
+// Returns the directory in games/ to start: the only one there, or the one
+// the player picks from a list. Empty if there is none.
+static Common::String chooseGameDir() {
+	Common::StringArray dirs;
+	s_pd->file->listfiles("games", gameDirCallback, &dirs, 0);
+	Common::sort(dirs.begin(), dirs.end());
+
+	if (dirs.size() <= 1)
+		return dirs.empty() ? Common::String() : dirs[0];
+
+	const int kRowHeight = 20;
+	const int kRows = LCD_ROWS / kRowHeight;
+	const float kCrankDegreesPerRow = 30.0f;
+
+	int selected = 0;
+	float crank = 0.0f;
+
+	// Drop the press that launched the app
+	PDButtons current, pushed, released;
+	s_pd->system->getButtonState(&current, &pushed, &released);
+
+	for (;;) {
+		const int first = CLIP<int>(selected - kRows / 2, 0, MAX<int>(0, (int)dirs.size() - kRows));
+
+		s_pd->graphics->clear(kColorBlack);
+		for (int row = 0; row < kRows && first + row < (int)dirs.size(); row++) {
+			Common::String title = dirs[first + row];
+			for (uint i = 0; i < title.size(); i++) {
+				if (title[i] == '_')
+					title.setChar(' ', i);
+			}
+
+			const bool highlight = first + row == selected;
+			if (highlight)
+				s_pd->graphics->fillRect(0, row * kRowHeight, LCD_COLUMNS, kRowHeight, kColorWhite);
+			s_pd->graphics->setDrawMode(highlight ? kDrawModeFillBlack : kDrawModeFillWhite);
+			s_pd->graphics->drawText(title.c_str(), title.size(), kASCIIEncoding, 6, row * kRowHeight + 1);
+		}
+		s_pd->graphics->setDrawMode(kDrawModeCopy);
+
+		Playdate::coroutineYield();
+
+		s_pd->system->getButtonState(&current, &pushed, &released);
+
+		crank += s_pd->system->getCrankChange();
+		int delta = (int)(crank / kCrankDegreesPerRow);
+		crank -= delta * kCrankDegreesPerRow;
+		if (pushed & kButtonUp)
+			delta--;
+		if (pushed & kButtonDown)
+			delta++;
+		selected = CLIP<int>(selected + delta, 0, (int)dirs.size() - 1);
+
+		if (pushed & kButtonA)
+			break;
+	}
+
+	s_pd->graphics->clear(kColorBlack);
+	return dirs[selected];
 }
 
 // The OSystem, for the update callback to service timers/audio each frame.
@@ -134,20 +289,23 @@ static void emuMain() {
 	g_system = system;
 	s_system = system;
 
-	static char s_gamePathArg[80];
-
 	const char *argv[] = { "scummvm", nullptr, nullptr, nullptr };
 	int argc = 1;
 	if (readAutorunTarget()) {
 		// Explicit target (needs a matching scummvm.ini section).
 		s_pd->system->logToConsole("autorun target: %s", s_autorunTarget);
 		argv[argc++] = s_autorunTarget;
-	} else if (findFirstGameDir()) {
-		// Detect and start the game in games/<dir>.
-		snprintf(s_gamePathArg, sizeof(s_gamePathArg), "--path=/games/%s", s_firstGameDir);
-		s_pd->system->logToConsole("booting first game: %s", s_gamePathArg);
-		argv[argc++] = "--auto-detect";
-		argv[argc++] = s_gamePathArg;
+	} else {
+		unpackGameArchives();
+		const Common::String dir = chooseGameDir();
+		if (!dir.empty()) {
+			// Detect and start the game in games/<dir>
+			static char gamePathArg[kPathArgSize];
+			snprintf(gamePathArg, sizeof(gamePathArg), "--path=/games/%s", dir.c_str());
+			s_pd->system->logToConsole("booting game: %s", gamePathArg);
+			argv[argc++] = "--auto-detect";
+			argv[argc++] = gamePathArg;
+		}
 	}
 
 	int res = scummvm_main(argc, const_cast<char **>(argv));
