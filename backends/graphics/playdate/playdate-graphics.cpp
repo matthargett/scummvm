@@ -62,6 +62,7 @@ PlaydateGraphicsManager::PlaydateGraphicsManager(PlaydateAPI *pd)
 	  _inTransaction(false) {
 	memset(_palette, 0, sizeof(_palette));
 	memset(_paletteLum, 0, sizeof(_paletteLum));
+	_paletteTwoTone = true;
 	memset(_cursorPalette, 0, sizeof(_cursorPalette));
 
 	_overlay.create(LCD_COLUMNS, LCD_ROWS, rgb565Format());
@@ -146,12 +147,26 @@ uint8 PlaydateGraphicsManager::luminanceRGB565(uint16 color) {
 void PlaydateGraphicsManager::updatePaletteLuminance(uint start, uint num) {
 	for (uint i = start; i < start + num; i++)
 		_paletteLum[i] = luminanceRGB(_palette[i * 3], _palette[i * 3 + 1], _palette[i * 3 + 2]);
+
+	// A palette of black and one other tone belongs to art that is already
+	// 1-bit; anything richer has to be dithered
+	int tone = -1;
+	_paletteTwoTone = true;
+	for (uint i = 0; i < 256 && _paletteTwoTone; i++) {
+		if (_paletteLum[i] == 0 || _paletteLum[i] == tone)
+			continue;
+		_paletteTwoTone = tone < 0;
+		tone = _paletteLum[i];
+	}
 }
 
 void PlaydateGraphicsManager::setPalette(const byte *colors, uint start, uint num) {
 	assert(start + num <= 256);
+	if (!memcmp(_palette + start * 3, colors, num * 3))
+		return;
 	memcpy(_palette + start * 3, colors, num * 3);
 	updatePaletteLuminance(start, num);
+	_forceFullRefresh = true;
 }
 
 void PlaydateGraphicsManager::grabPalette(byte *colors, uint start, uint num) const {
@@ -249,10 +264,10 @@ void PlaydateGraphicsManager::renderGameScreen(uint8 *frame, int rowStart, int r
 	if (!_gameScreen.getPixels())
 		return;
 
-	// Game screens are thresholded, never dithered: the engines this port
-	// targets already draw two-tone art (AGI bakes in its own fill patterns,
-	// ADL is pinned to monochrome). RGB screens use a low threshold so the
-	// Apple II's dim green phosphor still counts as lit.
+	// Two-tone art is thresholded: AGI bakes in its own fill patterns and ADL
+	// is pinned to monochrome. RGB screens use a low threshold so the Apple
+	// II's dim green phosphor still counts as lit. Paletted screens with more
+	// tones (SCI) are dithered, with the pattern fixed to the game's pixels.
 	const int step = displayStep();
 	const int baseX = displayBaseX();
 	const int baseY = displayBaseY();
@@ -277,14 +292,20 @@ void PlaydateGraphicsManager::renderGameScreen(uint8 *frame, int rowStart, int r
 		const byte *src8 = paletted ? (const byte *)_gameScreen.getBasePtr(0, y * step) : nullptr;
 		const uint16 *src16 = paletted ? nullptr : (const uint16 *)_gameScreen.getBasePtr(0, y * step);
 		uint8 *dstRow = frame + fbY * LCD_ROWSIZE;
+		const uint8 *bayerRow = kBayer8[y & 7];
 
 		for (int x = 0; x < outW; x++) {
 			const int fbX = baseX + x + _shakeOffsetX;
 			if (fbX < 0 || fbX >= LCD_COLUMNS)
 				continue;
 
-			const bool white = paletted ? (_paletteLum[src8[x * step + phase]] >= 128)
-			                            : (luminanceRGB565(src16[x * step + phase]) >= 64);
+			bool white;
+			if (!paletted)
+				white = luminanceRGB565(src16[x * step + phase]) >= 64;
+			else if (_paletteTwoTone)
+				white = _paletteLum[src8[x * step + phase]] >= 128;
+			else
+				white = _paletteLum[src8[x * step + phase]] > bayerRow[x & 7];
 			const uint8 bit = 0x80 >> (fbX & 7);
 			if (white)
 				dstRow[fbX >> 3] |= bit;

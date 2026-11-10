@@ -126,6 +126,7 @@ private:
 	Graphics::Surface _gameScreen;
 	byte _palette[256 * 3];
 	uint8 _paletteLum[256];
+	bool _paletteTwoTone; // black and one other tone only
 
 	// GUI overlay (RGB565, display sized)
 	Graphics::Surface _overlay;
